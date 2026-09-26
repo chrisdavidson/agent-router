@@ -457,3 +457,27 @@ def test_current_step_drops_recent_lines_only():
     assert state.count(RECENT_PREFIX) == 2
     assert current_step(state) == 'run it\npending Bash: {"command":"pytest -q"}'
     assert current_step("hello") == "hello"
+
+
+def test_multiline_recent_prompt_stays_out_of_the_current_step():
+    from agent_router.core.types import current_step
+
+    e = ev(text="run the tests", recent=("parse data.json\nlist every admin\n\n  and their email",))
+    state = build_state(e)
+    assert "previous: parse data.json list every admin and their email" in state
+    assert current_step(state) == "run the tests"
+
+
+def test_local_decider_ignores_multiline_recent_through_the_router():
+    catalog = load_catalog()
+    decider = LocalJevDecider(embedder=HashingEmbedder(), native_examples=catalog.native_examples)
+    router = Router(catalog, decider, RouterConfig(threshold=0.0), AuditLog(None))
+    alone = router.route(ev(text="kick off the test suite", turn_id=1))
+    ctx = router.route(
+        ev(
+            text="kick off the test suite",
+            turn_id=2,
+            recent=("from users.json\nlist every admin's email address",),
+        )
+    )
+    assert ctx.result.probabilities == alone.result.probabilities

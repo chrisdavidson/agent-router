@@ -57,7 +57,9 @@ def build_state(event: RouterEvent) -> str:
             payload = repr(event.tool_input)
         parts.append(f"pending {event.tool_name}: {payload[:MAX_TOOL_INPUT]}")
     recent = event.recent[-MAX_RECENT:] if event.recent else ()
-    parts.extend(f"{RECENT_PREFIX}{line}" for line in recent)
+    # one "previous:" line per prompt: a multi-line prompt is flattened so that
+    # ``current_step`` can drop all of it
+    parts.extend(f"{RECENT_PREFIX}{' '.join(str(p).split())}" for p in recent)
     return "\n".join(parts)
 
 
