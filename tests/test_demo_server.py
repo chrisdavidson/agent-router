@@ -327,3 +327,12 @@ def test_index_served(client: TestClient) -> None:
     res = client.get("/")
     assert res.status_code == 200
     assert "agent-router" in res.text
+
+
+def test_run_refuses_cross_site(audit_dir: Path) -> None:
+    async def never(prompt, router, workspace, on_event):  # pragma: no cover
+        raise AssertionError("must not run")
+
+    c = TestClient(server.create_app(audit_dir=audit_dir, runner=never))
+    res = c.get("/api/run", params={"prompt": "hi"}, headers={"Sec-Fetch-Site": "cross-site"})
+    assert res.status_code == 403

@@ -34,7 +34,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+import anyio
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -305,8 +306,11 @@ def create_app(
 
     @app.get("/api/run")
     async def get_run(
-        prompt: str, mode: str = "advisory", backend: str = DEFAULT_BACKEND
+        request: Request, prompt: str, mode: str = "advisory", backend: str = DEFAULT_BACKEND
     ) -> StreamingResponse:
+        # A GET that starts an agent with Bash: refuse requests other sites trigger.
+        if request.headers.get("sec-fetch-site") == "cross-site":
+            raise HTTPException(403, "cross-site requests may not start the agent")
         if not prompt.strip():
             raise HTTPException(400, "prompt is empty")
         config = config_for(mode, None)
@@ -423,10 +427,13 @@ async def _stream(
             yield _sse(kind, event)
         yield _sse("done", {"session": session, "ts": time.time()})
     finally:
-        if not task.done():
-            task.cancel()
-            await asyncio.wait([task], timeout=5)
-        shutil.rmtree(workspace.parent, ignore_errors=True)
+        try:
+            if not task.done():
+                task.cancel()
+                with anyio.CancelScope(shield=True):  # we may be cancelled (disconnect)
+                    await asyncio.wait([task], timeout=5)
+        finally:
+            shutil.rmtree(workspace.parent, ignore_errors=True)
 
 
 def main(port: int = 8765) -> None:
