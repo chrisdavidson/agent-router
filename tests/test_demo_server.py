@@ -604,3 +604,24 @@ def test_route_returns_cascade_stages(client: TestClient, monkeypatch) -> None:
     stages = body["result"]["stages"]
     assert [s["role"] for s in stages] == ["primary", "confirm"]
     assert set(stages[0]["probabilities"]) == {o["id"] for o in body["options"]}
+
+
+def test_route_stages_carry_no_error_text(client: TestClient, monkeypatch) -> None:
+    from agent_router.deciders.base import DeciderError
+    from agent_router.deciders.cascade import CascadeDecider
+
+    class Down:
+        name = "jev"
+
+        def decide(self, state, options):
+            raise DeciderError("Jev returned HTTP 500: <remote body SECRET>")
+
+    monkeypatch.setattr(
+        server.registry,
+        "make_decider",
+        lambda name, catalog: CascadeDecider(_StubDecider(), Down()),
+    )
+    res = _route(client, text="compute 2**200 exactly", point="prompt", threshold=0.5)
+    assert "SECRET" not in res.text
+    stage = res.json()["result"]["stages"][-1]
+    assert stage["failed"] is True and stage["error_type"] == "DeciderError"

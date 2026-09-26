@@ -213,8 +213,10 @@ function renderStages(cp, t) {
     const head = el("div", { class: "stage-head" },
       el("span", { class: "stage-name", text: STAGE_NAMES[st.role] || st.role }),
       el("span", { class: "stage-meta", text: [st.backend, st.latency_ms != null ? ms(st.latency_ms) : null].filter(Boolean).join(", ") }));
-    const body = st.error
-      ? el("p", { class: "cmp-off", text: `Failed: ${st.error}` })
+    const body = st.skipped
+      ? el("p", { class: "cmp-off", text: "Skipped: Jev failed repeatedly, so it is paused for a minute (circuit open)." })
+      : st.failed || st.error_type
+      ? el("p", { class: "cmp-off", text: `Failed (${st.error_type || "error"}). Details are in the audit log.` })
       : renderBars({ ...cp, probabilities: st.probabilities || {}, choice: st.choice }, deciding ? t : "stage", deciding);
     box.append(el("section", { class: `stage${deciding ? " deciding" : ""}` }, head, body));
   });

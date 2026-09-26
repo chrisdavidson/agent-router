@@ -26,9 +26,19 @@ Listeners registered with ``on_decision`` (and the ``on_event`` callback of
                       "suggest"|"enforce"|"native"|"skipped", "entry_id": str|None,
                       "hint": str|None, "choice": str|None,
                       "probabilities": {option_id: float}, "confidence": float|None,
-                      "backend": str|None, "latency_ms": float|None}
+                      "backend": str|None, "latency_ms": float|None,
+                      "stages": [stage, ...]}
 
-                 (``reason`` is deliberately absent.)
+                 (``reason`` is deliberately absent.) ``stages`` is ``[]`` except for the
+                 cascade decider: one dict per stage asked, in order::
+
+                     {"role": "primary"|"confirm", "backend": str, "choice": str|None,
+                      "probabilities": {option_id: float}, "confidence": float|None,
+                      "latency_ms": float, "failed": bool, "error_type": str|None,
+                      "skipped": "circuit-open"|None}
+
+                 A failed stage carries only its exception class name; the exception text
+                 is kept (truncated) in the audit record only.
 ``hook``         what the hook returned to the SDK, right after its ``decision``::
 
                      {"point", "tool_name", "session_id", "turn_id",
@@ -55,7 +65,7 @@ import anyio
 from claude_agent_sdk import HookMatcher
 
 from agent_router.core.router import MAX_RECENT, Router
-from agent_router.core.types import Action, Decision, HookPoint, RouterEvent
+from agent_router.core.types import Action, Decision, HookPoint, RouterEvent, public_stages
 
 log = logging.getLogger(__name__)
 
@@ -93,7 +103,7 @@ def decision_payload(event: RouterEvent, decision: Decision) -> dict[str, Any]:
         "confidence": float(res.confidence) if res else None,
         "backend": res.backend if res else None,
         "latency_ms": float(res.latency_ms) if res else None,
-        "stages": [dict(st) for st in res.stages] if res else [],
+        "stages": public_stages(res.stages) if res else [],
     }
 
 

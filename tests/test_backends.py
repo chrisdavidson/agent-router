@@ -287,3 +287,25 @@ def test_make_decider_jev_and_semantic_router(no_keys):
 def test_make_decider_unknown():
     with pytest.raises(ValueError, match="unknown"):
         make_decider("nope", load_catalog())
+
+
+def test_jev_overall_deadline_bounds_a_slow_response(no_keys):
+    import time
+
+    def slow(request):
+        time.sleep(0.6)
+        return httpx.Response(200, json=LIVE_SAMPLE)
+
+    d = TypeSafeJevDecider(api_key="sk-or-test", client=_client(slow), timeout=0.15)
+    t0 = time.perf_counter()
+    with pytest.raises(DeciderError, match="deadline"):
+        d.decide("x", OPTIONS)
+    assert time.perf_counter() - t0 < 0.45
+
+
+def test_jev_uses_a_short_connect_timeout(no_keys):
+    seen = []
+    d = TypeSafeJevDecider(api_key="sk-or-test", client=_client(_ok(), seen), timeout=2.0)
+    d.decide("x", OPTIONS)
+    t = seen[0].extensions["timeout"]
+    assert t["connect"] == 1.0 and t["read"] == 2.0

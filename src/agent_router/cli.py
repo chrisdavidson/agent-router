@@ -114,7 +114,10 @@ def cmd_route(args: argparse.Namespace) -> int:
         if res.stages:
             print(f"cascade    {_cascade_note(res.backend)}")
             for st in res.stages:
-                if st.get("error"):
+                if st.get("skipped"):
+                    print(f"  [{st['role']} {st['backend']}] skipped: {st['skipped']}")
+                    continue
+                if st.get("error"):  # the operator's own terminal, like the audit log
                     print(f"  [{st['role']} {st['backend']}] failed: {st['error']}")
                     continue
                 print(f"  [{st['role']} {st['backend']}] choice {st['choice']}")

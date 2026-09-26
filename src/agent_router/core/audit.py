@@ -24,6 +24,13 @@ def _trunc(text: str | None) -> str | None:
     return None if text is None else text[:MAX_TEXT]
 
 
+def _stage(stage: dict[str, Any]) -> dict[str, Any]:
+    out = dict(stage)
+    if out.get("error") is not None:
+        out["error"] = _trunc(str(out["error"]))
+    return out
+
+
 class AuditLog:
     """Writes records to ``path`` (JSONL) or, when ``path`` is None, keeps them in memory.
 
@@ -80,7 +87,7 @@ class AuditLog:
             "hint": _trunc(decision.hint),
             "backend": res.backend if res else None,
             "latency_ms": float(res.latency_ms) if res else None,
-            "stages": [dict(st) for st in res.stages] if res else [],
+            "stages": [_stage(st) for st in res.stages] if res else [],
             "catalog_version": catalog_version,
             "thresholds": {"threshold": config.threshold, "mode": config.mode},
         }

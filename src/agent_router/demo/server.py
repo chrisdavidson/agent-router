@@ -60,7 +60,14 @@ from agent_router.core.catalog import Catalog, CatalogEntry, load_catalog
 from agent_router.core.config import MODES, RouterConfig
 from agent_router.core.hints import render_deny, render_hint
 from agent_router.core.router import NONE_OPTION, Router, build_state
-from agent_router.core.types import NONE_ID, ChoiceResult, HookPoint, OptionSpec, RouterEvent
+from agent_router.core.types import (
+    NONE_ID,
+    ChoiceResult,
+    HookPoint,
+    OptionSpec,
+    RouterEvent,
+    public_stages,
+)
 from agent_router.deciders import registry
 from agent_router.deciders.base import recommended_threshold
 
@@ -353,7 +360,7 @@ def create_app(
                 "confidence": float(res.confidence),
                 "backend": res.backend,
                 "latency_ms": float(res.latency_ms),
-                "stages": [dict(st) for st in res.stages],
+                "stages": public_stages(res.stages),  # no exception text
             },
             "options": [_option_json(e) for e in eligible] + [NONE_JSON],
             "hint": decision.hint,

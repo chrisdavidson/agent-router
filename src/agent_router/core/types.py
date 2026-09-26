@@ -68,3 +68,14 @@ class Decision:
     hint: str | None = None
     result: ChoiceResult | None = None
     options: tuple[str, ...] = field(default_factory=tuple)
+
+
+PRIVATE_STAGE_KEYS = frozenset({"error"})
+"""Stage keys that may carry exception / remote text: audit log only, never timeline or UI."""
+
+
+def public_stages(
+    stages: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Stage records safe to show outside the audit log (no exception or remote text)."""
+    return [{k: v for k, v in st.items() if k not in PRIVATE_STAGE_KEYS} for st in stages]

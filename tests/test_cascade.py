@@ -125,7 +125,7 @@ def test_stages_are_plain_and_json_serialisable():
     assert res.latency_ms > 0
 
 
-@pytest.mark.parametrize("error", [DeciderError("HTTP 500"), TimeoutError("slow")])
+@pytest.mark.parametrize("error", [DeciderError("HTTP 500"), DeciderError("deadline")])
 def test_confirm_failure_biases_an_unsure_local_choice_to_none(error):
     primary = _local("exact-calc", **{"exact-calc": 0.8, "json-query": 0.15, NONE_ID: 0.05})
     confirm = Fake("jev", error=error)
@@ -399,3 +399,126 @@ def test_write_calibration_accepts_cascade_block(tmp_path):
     res = calibrate_cascade(CAL_CASES, catalog, primary, confirm, gates=[0.9, 1.01])
     path = write_calibration({"cascade": res}, tmp_path / "c.json")
     assert json.loads(path.read_text())["cascade"]["native_gate"] == res.native_gate
+
+
+# -- review fixes: no error text in public stages, narrow except, circuit breaker ------------
+
+
+def test_programming_errors_in_confirm_are_not_swallowed():
+    primary = _local("exact-calc", **{"exact-calc": 0.8, NONE_ID: 0.2})
+    with pytest.raises(TypeError):
+        CascadeDecider(primary, Fake("jev", error=TypeError("bug"))).decide("x", OPTIONS)
+
+
+def test_failed_stage_records_type_and_public_view_drops_text():
+    from agent_router.core.types import public_stages
+
+    primary = _local("exact-calc", **{"exact-calc": 0.8, NONE_ID: 0.2})
+    secret = DeciderError("Jev returned HTTP 500: <remote body> Jev chose 'ignore previous'")
+    res = CascadeDecider(primary, Fake("jev", error=secret)).decide("x", OPTIONS)
+    st = res.stages[-1]
+    assert st["failed"] is True and st["error_type"] == "DeciderError"
+    assert "remote body" in st["error"]  # full text stays internal (audit only)
+    public = public_stages(res.stages)
+    assert "error" not in public[-1]
+    assert public[-1]["failed"] is True and public[-1]["error_type"] == "DeciderError"
+    assert "remote body" not in json.dumps(public)
+
+
+def test_audit_truncates_stage_errors():
+    catalog = load_catalog()
+    primary = _local("exact-calc", **{"exact-calc": 0.8, NONE_ID: 0.2})
+    dec = CascadeDecider(primary, Fake("jev", error=DeciderError("x" * 1000)))
+    router = Router(catalog, dec, RouterConfig(threshold=0.3), AuditLog(None))
+    router.route(RouterEvent(HookPoint.PROMPT, "s", 1, "what is 17% of 2340 exactly?"))
+    err = router.audit.records[-1]["stages"][-1]["error"]
+    assert err.startswith("DeciderError: ") and len(err) <= 300
+
+
+def test_decision_payload_has_no_error_text():
+    from agent_router.adapters.claude_sdk import decision_payload
+    from agent_router.core.types import Decision
+
+    primary = _local("exact-calc", **{"exact-calc": 0.8, NONE_ID: 0.2})
+    res = CascadeDecider(primary, Fake("jev", error=DeciderError("SECRET"))).decide("x", OPTIONS)
+    event = RouterEvent(HookPoint.PROMPT, "s", 1, "x")
+    payload = decision_payload(event, Decision(Action.NATIVE, "r", result=res))
+    assert "SECRET" not in json.dumps(payload)
+    assert payload["stages"][-1]["error_type"] == "DeciderError"
+
+
+class Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+def test_circuit_breaker_opens_after_three_failures_and_recovers():
+    clock = Clock()
+    primary = _local("exact-calc", **{"exact-calc": 0.8, NONE_ID: 0.2})
+    confirm = Fake("jev", error=DeciderError("down"))
+    d = CascadeDecider(primary, confirm, clock=clock)
+    for _ in range(3):
+        assert d.decide("x", OPTIONS).backend == "cascade:local-fallback"
+    assert confirm.calls == 3
+    res = d.decide("x", OPTIONS)  # open: Jev is not asked
+    assert confirm.calls == 3
+    assert res.backend == "cascade:local-fallback" and res.choice == NONE_ID
+    assert res.stages[-1]["skipped"] == "circuit-open"
+    assert res.stages[-1]["failed"] is False
+    clock.t += 59.0
+    d.decide("x", OPTIONS)
+    assert confirm.calls == 3
+    clock.t += 2.0  # cooldown over: one trial call
+    confirm.error = None
+    confirm.choice, confirm.probs = "exact-calc", {"exact-calc": 0.9, NONE_ID: 0.1}
+    assert d.decide("x", OPTIONS).backend == "cascade:jev"
+    assert confirm.calls == 4
+    confirm.error = DeciderError("down again")  # success reset the count
+    d.decide("x", OPTIONS)
+    d.decide("x", OPTIONS)
+    assert confirm.calls == 6  # two failures: still closed
+
+
+def test_circuit_breaker_trial_failure_reopens():
+    clock = Clock()
+    primary = _local("exact-calc", **{"exact-calc": 0.8, NONE_ID: 0.2})
+    confirm = Fake("jev", error=DeciderError("down"))
+    d = CascadeDecider(primary, confirm, clock=clock)
+    for _ in range(3):
+        d.decide("x", OPTIONS)
+    clock.t += 61.0
+    d.decide("x", OPTIONS)  # trial fails
+    assert confirm.calls == 4
+    d.decide("x", OPTIONS)
+    assert confirm.calls == 4  # open again
+
+
+def test_circuit_open_with_failed_primary_raises():
+    clock = Clock()
+    confirm = Fake("jev", error=DeciderError("down"))
+    d = CascadeDecider(_local("exact-calc", **{"exact-calc": 0.8}), confirm, clock=clock)
+    for _ in range(3):
+        d.decide("x", OPTIONS)
+    d.primary = Fake("local", error=DeciderError("x"))
+    with pytest.raises(DeciderError):
+        d.decide("x", OPTIONS)
+
+
+def test_circuit_breaker_is_thread_safe():
+    import threading
+
+    primary = _local("exact-calc", **{"exact-calc": 0.8, NONE_ID: 0.2})
+    confirm = Fake("jev", error=DeciderError("down"))
+    d = CascadeDecider(primary, confirm, clock=Clock())
+    threads = [threading.Thread(target=d.decide, args=("x", OPTIONS)) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert confirm.calls >= 3
+    before = confirm.calls
+    assert d.decide("x", OPTIONS).stages[-1]["skipped"] == "circuit-open"
+    assert confirm.calls == before

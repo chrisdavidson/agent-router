@@ -7,6 +7,9 @@ Two transports carry the same request body:
 - ``typesafe``: ``POST https://api.typesafe.ai/v1/systemone`` with model ``jev-latest`` and
   ``TYPESAFE_API_KEY``.
 
+``timeout`` (default 2 s) is an overall deadline for the request (the connect phase is also
+capped at 1 s); exceeding it raises ``DeciderError``.
+
 ``transport="auto"`` picks openrouter when ``OPENROUTER_API_KEY`` is set, else typesafe when
 ``TYPESAFE_API_KEY`` is set. An explicit ``api_key`` with ``auto`` picks openrouter for
 ``sk-or-`` keys and typesafe otherwise. ``model`` / ``base_url`` default per transport.
@@ -17,6 +20,7 @@ unknown keys dropped, negatives clamped, sum 1. A choice outside the options is 
 
 from __future__ import annotations
 
+import concurrent.futures
 import math
 import os
 import time
@@ -49,6 +53,10 @@ _TRANSPORTS: dict[str, dict[str, str]] = {
         "model": "jev-latest",
     },
 }
+
+
+CONNECT_TIMEOUT = 1.0
+_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="jev")
 
 
 def criteria(options: dict[str, OptionSpec]) -> dict[str, dict[str, Any]]:
@@ -131,12 +139,22 @@ class TypeSafeJevDecider:
             },
         }
         headers = {"Authorization": f"Bearer {key}"}
-        try:
+        # httpx timeouts are per phase (connect, each read, ...): bound connect separately and
+        # enforce ``timeout`` as an overall deadline on the whole request as well.
+        timeout = httpx.Timeout(self.timeout, connect=min(CONNECT_TIMEOUT, self.timeout))
+
+        def post() -> httpx.Response:
             if self._client is not None:
-                resp = self._client.post(url, json=body, headers=headers, timeout=self.timeout)
-            else:
-                with httpx.Client(timeout=self.timeout) as client:
-                    resp = client.post(url, json=body, headers=headers)
+                return self._client.post(url, json=body, headers=headers, timeout=timeout)
+            with httpx.Client(timeout=timeout) as client:
+                return client.post(url, json=body, headers=headers)
+
+        future = _POOL.submit(post)
+        try:
+            resp = future.result(timeout=max(0.0, self.timeout - (time.perf_counter() - start)))
+        except concurrent.futures.TimeoutError as exc:
+            future.cancel()  # a request already running finishes in the background
+            raise DeciderError(f"Jev request exceeded the {self.timeout:.2f}s deadline") from exc
         except httpx.HTTPError as exc:
             raise DeciderError(f"Jev request failed: {type(exc).__name__}: {exc}") from exc
         if not resp.is_success:
