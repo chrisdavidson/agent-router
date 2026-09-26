@@ -362,6 +362,7 @@ def test_routing_stats_counts_escalations_and_fallbacks():
     assert stats["escalated"] == 2 and stats["escalation_rate"] == 0.5
     assert stats["fallbacks"] == 0
     assert stats["mean_latency_ms"] > 0 and stats["p95_latency_ms"] > 0
+    assert stats["max_latency_ms"] >= stats["p95_latency_ms"]
 
 
 def test_calibrate_cascade_minimises_escalation_without_losing_to_jev():
@@ -522,3 +523,33 @@ def test_circuit_breaker_is_thread_safe():
     before = confirm.calls
     assert d.decide("x", OPTIONS).stages[-1]["skipped"] == "circuit-open"
     assert confirm.calls == before
+
+
+class _Recording(Fake):
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.states = []
+
+    def decide(self, state, options):
+        self.states.append(state)
+        return super().decide(state, options)
+
+
+def test_confirm_stage_gets_the_full_state_with_recent_context():
+    """The local stage scores the current step itself; Jev sees the recent context."""
+    primary = _Recording("local", "exact-calc", {"exact-calc": 0.6, NONE_ID: 0.4})
+    confirm = _Recording("jev:jev-1", "exact-calc", {"exact-calc": 0.9, NONE_ID: 0.1})
+    router = Router(
+        load_catalog(), CascadeDecider(primary, confirm, 0.9), RouterConfig(), AuditLog(None)
+    )
+    router.route(
+        RouterEvent(
+            point=HookPoint.PROMPT,
+            session_id="s",
+            turn_id=1,
+            text="what is 2**200 exactly",
+            recent=("convert page.html to markdown",),
+        )
+    )
+    assert confirm.states and "previous: convert page.html to markdown" in confirm.states[0]
+    assert primary.states[0] == confirm.states[0]  # the same state; local trims it itself

@@ -9,6 +9,8 @@
 #   expected   catalog entry id, or `none` when the agent's own tools are enough
 #   decoy      true for near-misses that must stay `none`
 #   split      cal (used by `agent-router calibrate`) | test (holdout; metrics are reported here)
+#   recent     earlier prompts of the same session (optional; the router appends up to 3 of
+#              them to the state as "previous: ..." lines)
 # Splits alternate inside each group (entry x point, negatives, decoys) so the holdout covers
 # every entry at every point it is eligible for.
 version: "2026-09-26.1"
@@ -300,3 +302,39 @@ cases:
   - {id: decoy-17, split: test, point: tool, expected: none, decoy: true,
      text: "fetch the vendor's changelog page", tool_name: WebFetch,
      tool_input: {url: "https://example.com/changelog.html", prompt: "list the latest changes"}}
+
+  # ---------------------------------------------------------------- context (multi-turn)
+  # The current step decides; the recent prompts are misleading or distracting.
+  - {id: ctx-1, split: cal, point: prompt, expected: none,
+     text: "kick off the whole test suite and tell me what fails",
+     recent: ["pull the name field out of every entry in customers.json"]}
+  - {id: ctx-2, split: test, point: prompt, expected: none,
+     text: "explain what the retry helper in src/ does",
+     recent: ["in inventory.json, which products have fewer than 5 units in stock"]}
+  - {id: ctx-3, split: cal, point: tool, expected: none,
+     text: "make sure nothing broke", tool_name: Bash, tool_input: {command: "pytest -q"},
+     recent: ["turn the saved docs/index.html page into a markdown file"]}
+  - {id: ctx-4, split: test, point: tool, expected: none,
+     text: "run the tests again", tool_name: Bash, tool_input: {command: "pytest -q"},
+     recent: ["strip the tags out of landing.html and hand me clean markdown"]}
+  - {id: ctx-5, split: cal, point: prompt, expected: exact-calc,
+     text: "give me 7 to the 31st power with every digit",
+     recent: ["convert the faq.html export to markdown",
+              "what's the total size of this repository broken down by file type"]}
+  - {id: ctx-6, split: test, point: prompt, expected: exact-calc,
+     text: "I need 3**150 written out in full, no scientific notation",
+     recent: ["change about.html into a markdown document",
+              "how many lines of code per language are in this repo"]}
+  - {id: ctx-7, split: cal, point: prompt, expected: json-query,
+     text: "list the top-level keys of tsconfig.json",
+     recent: ["multiply 9,871 by 4,409 and give me the exact result"]}
+  - {id: ctx-8, split: test, point: prompt, expected: json-query,
+     text: "from settings.json, what timeout values are configured under services",
+     recent: ["what is 12.5% of 18,400 exactly"]}
+  - {id: ctx-9, split: cal, point: prompt, expected: none,
+     text: "rename the helper function to fetch_with_retry everywhere",
+     recent: ["divide 7,340,221 by 17 and keep it exact"]}
+  - {id: ctx-10, split: test, point: prompt, expected: none,
+     text: "split the payment service class into smaller modules",
+     recent: ["which users in accounts.json have an expired plan",
+              "turn changelog.html into markdown"]}

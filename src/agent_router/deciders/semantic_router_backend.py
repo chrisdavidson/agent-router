@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from agent_router.core.types import NONE_ID, ChoiceResult, OptionSpec
+from agent_router.core.types import NONE_ID, ChoiceResult, OptionSpec, current_step
 from agent_router.deciders.base import MAX_OPTIONS, DeciderError
 
 INSTALL_HINT = "pip install agent-router[semantic-router]"
@@ -113,6 +113,7 @@ class SemanticRouterDecider:
         if len(options) > MAX_OPTIONS:
             raise DeciderError(f"{len(options)} options exceeds the maximum of {MAX_OPTIONS}")
 
+        state = current_step(state)  # context-free: the recent prompts are not scored
         routes = self._routes(options)
         try:
             if routes:

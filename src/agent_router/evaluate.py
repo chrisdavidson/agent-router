@@ -76,6 +76,7 @@ class EvalCase:
     tool_input: dict[str, Any] | None = None
     split: str = "test"
     decoy: bool = False
+    recent: tuple[str, ...] = ()  # earlier prompts of the session (multi-turn context)
 
     def event(self, turn_id: int, session_id: str = "eval") -> RouterEvent:
         return RouterEvent(
@@ -85,6 +86,7 @@ class EvalCase:
             text=self.text,
             tool_name=self.tool_name,
             tool_input=self.tool_input,
+            recent=self.recent,
         )
 
 
@@ -104,6 +106,7 @@ def load_cases(path: str | Path = DEFAULT_EVAL_SET, split: str | None = None) ->
             tool_input=raw.get("tool_input"),
             split=str(raw.get("split", "test")),
             decoy=bool(raw.get("decoy", False)),
+            recent=tuple(str(r) for r in raw.get("recent") or ()),
         )
         if case.split not in SPLITS:
             raise ValueError(f"case {case.id}: split must be cal or test")
@@ -244,6 +247,7 @@ def routing_stats(report: EvalReport) -> dict[str, Any]:
         "fallbacks": fallbacks,
         "mean_latency_ms": float(np.mean(lat)) if lat else 0.0,
         "p95_latency_ms": float(np.percentile(lat, 95)) if lat else 0.0,
+        "max_latency_ms": float(max(lat)) if lat else 0.0,
     }
 
 

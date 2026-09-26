@@ -280,3 +280,14 @@ def test_model2vec_rows_normalised():
     v = emb.encode(["compute 2**200 exactly", "git status", "convert page.html to markdown"])
     assert v.ndim == 2 and v.shape[0] == 3 and v.shape[1] > 0
     np.testing.assert_allclose(np.linalg.norm(v, axis=1), 1.0, rtol=1e-5)
+
+
+def test_scores_the_current_step_only(decider, options):
+    """Recent prompts ("previous: ..." lines) must not move the local classifier."""
+    text = "run the test suite"
+    alone = decider.decide(text, options)
+    with_recent = decider.decide(
+        text + "\nprevious: from users.json list every admin's email address", options
+    )
+    assert with_recent.choice == alone.choice
+    assert with_recent.probabilities == alone.probabilities

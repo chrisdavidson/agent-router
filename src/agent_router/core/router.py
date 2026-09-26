@@ -25,6 +25,7 @@ from agent_router.core.config import RouterConfig
 from agent_router.core.hints import render_deny, render_hint
 from agent_router.core.types import (
     NONE_ID,
+    RECENT_PREFIX,
     Action,
     Decision,
     HookPoint,
@@ -53,7 +54,7 @@ def build_state(event: RouterEvent) -> str:
             payload = repr(event.tool_input)
         parts.append(f"pending {event.tool_name}: {payload[:MAX_TOOL_INPUT]}")
     recent = event.recent[-MAX_RECENT:] if event.recent else ()
-    parts.extend(f"previous: {line}" for line in recent)
+    parts.extend(f"{RECENT_PREFIX}{line}" for line in recent)
     return "\n".join(parts)
 
 

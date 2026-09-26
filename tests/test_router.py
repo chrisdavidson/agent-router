@@ -420,3 +420,23 @@ def test_non_dict_tool_input_does_not_crash(tool_input):
     router, _, _ = make(result("commit-writer"))
     d = router.route(ev(HookPoint.SKILL, tool_name="Skill", tool_input=tool_input))
     assert d.action == Action.SUGGEST
+
+
+# -- current step (context-free deciders) --------------------------------------
+
+
+def test_current_step_drops_recent_lines_only():
+    from agent_router.core.types import RECENT_PREFIX, current_step
+
+    assert RECENT_PREFIX == "previous: "
+    e = ev(
+        HookPoint.TOOL,
+        text="run it",
+        tool_name="Bash",
+        tool_input={"command": "pytest -q"},
+        recent=("parse data.json", "convert page.html"),
+    )
+    state = build_state(e)
+    assert state.count(RECENT_PREFIX) == 2
+    assert current_step(state) == 'run it\npending Bash: {"command":"pytest -q"}'
+    assert current_step("hello") == "hello"

@@ -227,6 +227,17 @@ def test_semantic_router_contract():
     assert unseen.choice == NONE_ID
 
 
+def test_semantic_router_scores_the_current_step_only():
+    pytest.importorskip("semantic_router")
+    from agent_router.deciders.semantic_router_backend import SemanticRouterDecider
+
+    d = SemanticRouterDecider(native_examples=("list the files in this folder", "run the tests"))
+    alone = d.decide("please run the tests", OPTIONS)
+    ctx = d.decide("please run the tests\nprevious: compute 2**200 exactly please", OPTIONS)
+    assert ctx.choice == alone.choice
+    assert ctx.probabilities == alone.probabilities
+
+
 def test_semantic_router_requires_none_option():
     pytest.importorskip("semantic_router")
     from agent_router.deciders.semantic_router_backend import SemanticRouterDecider

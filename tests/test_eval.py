@@ -86,13 +86,41 @@ def test_eval_texts_are_not_copies_of_catalog_criteria(cases, catalog):
     )
     ex_tokens = [(ex, content_tokens(ex)) for ex in exemplars]
     for c in cases:
-        for field in (c.text, *(str(v) for v in (c.tool_input or {}).values())):
+        fields_ = (c.text, *(str(v) for v in (c.tool_input or {}).values()), *c.recent)
+        for field in fields_:
             if not field.strip():
                 continue
             toks = content_tokens(field)
             for ex, et in ex_tokens:
                 assert field.strip().lower() != ex.strip().lower(), (c.id, ex)
                 assert jaccard(toks, et) < 0.5, (c.id, field, ex)
+
+
+def test_eval_set_has_context_cases(cases):
+    """Multi-turn cases: misleading recent prompts must not move the decision."""
+    ctx = [c for c in cases if c.recent]
+    assert len(ctx) >= 8
+    assert all(isinstance(c.recent, tuple) for c in ctx)
+    assert all(isinstance(r, str) for c in ctx for r in c.recent)
+    for split in ("cal", "test"):
+        part = [c for c in ctx if c.split == split]
+        assert any(c.expected == NONE_ID for c in part), split
+        assert any(c.expected != NONE_ID for c in part), split
+    assert any(c.point == HookPoint.TOOL for c in ctx)
+
+
+def test_eval_case_event_carries_recent(tmp_path):
+    path = tmp_path / "cases.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - {id: c1, split: test, point: prompt, expected: none, text: run the tests,\n"
+        "     recent: [parse orders.json, convert page.html]}\n"
+        "  - {id: c2, split: cal, point: prompt, expected: none, text: hi}\n"
+    )
+    c1, c2 = load_cases(path)
+    assert c1.recent == ("parse orders.json", "convert page.html")
+    assert c2.recent == ()
+    assert c1.event(turn_id=3).recent == c1.recent
 
 
 def test_load_cases_split_filter():

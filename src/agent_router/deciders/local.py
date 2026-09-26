@@ -12,6 +12,9 @@ exemplars are the catalog-wide ``native_examples`` plus the none option's own
 ``what``/``examples``. ``probabilities = softmax(scores / temperature)``, ``choice`` is the
 argmax and ``confidence = 1 - H(p) / log(n)``.
 
+Only the current step is scored: the router's recent-context lines (``previous: ...``) are
+dropped first (``core.types.current_step``); in the cascade, Jev sees them.
+
 Calibration: when ``params`` is not given, ``src/agent_router/calibration.json`` (written by
 ``agent-router calibrate``) supplies the ``LocalParams`` and a recommended router threshold
 for the active embedder (``{"model2vec": {...}, "hashing": {...}}``). A block applies only
@@ -32,7 +35,7 @@ from pathlib import Path
 
 import numpy as np
 
-from agent_router.core.types import NONE_ID, ChoiceResult, OptionSpec
+from agent_router.core.types import NONE_ID, ChoiceResult, OptionSpec, current_step
 from agent_router.deciders.base import MAX_OPTIONS, DeciderError
 from agent_router.deciders.embedders import (
     Embedder,
@@ -207,6 +210,7 @@ class LocalJevDecider:
             exemplars[oid] = texts
             not_fors[oid] = [t for t in spec.not_for if t and t.strip()]
 
+        state = current_step(state)  # context-free: score the step itself, not recent prompts
         try:
             self._embed_exemplars(
                 [(oid, t) for oid in ids for t in (*exemplars[oid], *not_fors[oid])]

@@ -13,6 +13,19 @@ from typing import Any
 NONE_ID = "none"
 """Reserved option id: no catalog entry fits, the agent's native path is enough."""
 
+RECENT_PREFIX = "previous: "
+"""Prefix of the recent-context lines ``router.build_state`` appends to the decider state."""
+
+
+def current_step(state: str) -> str:
+    """The decider state without its recent-context lines: the step being routed.
+
+    Context-free deciders (the local classifiers) score this, so an earlier prompt in the
+    session cannot pull the current step toward its entry. Context-capable deciders (Jev)
+    get the full state.
+    """
+    return "\n".join(line for line in state.split("\n") if not line.startswith(RECENT_PREFIX))
+
 
 class HookPoint(StrEnum):
     PROMPT = "prompt"  # the user submitted a prompt

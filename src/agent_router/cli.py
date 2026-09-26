@@ -176,7 +176,10 @@ def cmd_eval(args: argparse.Namespace) -> int:
             f"escalation {stats['escalation_rate']:.3f} ({stats['escalated']}/{stats['n']})  "
             f"fallbacks {stats['fallbacks']}"
         )
-    print(f"latency mean {stats['mean_latency_ms']:.1f} ms  p95 {stats['p95_latency_ms']:.1f} ms")
+    print(
+        f"latency mean {stats['mean_latency_ms']:.1f} ms  p95 {stats['p95_latency_ms']:.1f} ms  "
+        f"max {stats['max_latency_ms']:.1f} ms"
+    )
     print("per entry (precision / recall / support):")
     for label, m in report.per_entry.items():
         print(f"  {label:<18} {m['precision']:.2f} / {m['recall']:.2f} / {int(m['support'])}")
