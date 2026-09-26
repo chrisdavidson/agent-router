@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -308,3 +309,72 @@ def test_commit_writer_skill():
     assert "name: commit-writer" in front
     assert "description:" in front and "Conventional Commits" in front
     assert "MIT" in text.split("---", 2)[2]
+
+
+# ---------------------------------------------------------------- fix round 1: bounded work
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "(2**600)**(9999/2)",
+        "(1/2**600)**(9999/2)",
+        "(2**9999)**(9999/2)",
+        "-" * 999 + "1",
+        "(" * 300 + "1" + ")" * 300,
+        "3**10000",
+        "factorial(2000)",
+        "round(1/3, 10000)",
+    ],
+)
+def test_calc_bounded_rejects_with_value_error(expr):
+    with pytest.raises(ValueError) as exc:
+        calc.evaluate(expr)
+    assert "sys.set_int_max_str_digits" not in str(exc.value)
+
+
+def test_calc_digit_limit_message():
+    with pytest.raises(ValueError, match="digits"):
+        calc.evaluate("3**10000")
+
+
+def test_calc_repeated_fractional_powers_are_fast():
+    import time
+
+    expr = "gcd(" + ",".join(["(2**600)**(9999/2)"] * 50) + ")"
+    assert len(expr) <= calc.MAX_EXPRESSION_CHARS
+    start = time.process_time()
+    with pytest.raises(ValueError):
+        calc.evaluate(expr)
+    assert time.process_time() - start < 0.5
+
+
+def test_calc_worst_case_allowed_work_is_fast():
+    import time
+
+    exprs = [
+        "gcd(" + ",".join(["(2**3)**3000"] * 40) + ")",
+        "*".join(["(7**3000)"] * 40),
+        "+".join([f"1/{p}**300" for p in (3, 7, 11, 13, 17, 19, 23, 29, 31, 37)]),
+    ]
+    start = time.process_time()
+    for expr in exprs:
+        with contextlib.suppress(ValueError):
+            calc.evaluate(expr)
+    assert time.process_time() - start < 1.0
+
+
+def test_calc_limits_still_allow_big_exact_results():
+    assert calc.evaluate("2**10000").startswith("1995063116880758384883742162683585")
+    assert calc.evaluate("factorial(1000)").startswith("402387260077")
+    assert calc.evaluate("sqrt(2**600)") == str(2**300)
+    assert calc.evaluate("(2**600)**(1/2)").startswith("≈ 20370359763344860862684456884")
+
+
+async def test_calc_handler_missing_argument():
+    tools = {t.name: t for t in build_tools(DEMO)}
+    res = await tools["calc"].handler({})
+    assert res["is_error"] is True
+    assert res["content"][0]["text"] == "Error: missing required argument 'expression'"
+    res = await tools["json_query"].handler({"path": "data/orders.json"})
+    assert res["content"][0]["text"] == "Error: missing required argument 'expression'"

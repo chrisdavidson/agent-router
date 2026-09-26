@@ -31,6 +31,12 @@ def _text(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
 
 
+def _req(args: dict[str, Any], name: str) -> Any:
+    if args.get(name) is None:
+        raise ValueError(f"missing required argument '{name}'")
+    return args[name]
+
+
 def _safe(fn: Callable[[dict[str, Any]], str]) -> Callable[[dict[str, Any]], Awaitable[dict]]:
     async def handler(args: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -51,7 +57,7 @@ def build_tools(root: Path) -> list[SdkMcpTool[Any]]:
         "big integers: + - * / // % **, '17% of 2340', sqrt, factorial, gcd, lcm, abs, round, "
         "comb, perm. Returns an integer, 'a/b (≈ decimal)', or '≈ decimal' if irrational.",
         _schema(["expression"], expression="Math expression, e.g. '3/7 + 5/11' or '2**200'."),
-    )(_safe(lambda a: calc.evaluate(a["expression"])))
+    )(_safe(lambda a: calc.evaluate(_req(a, "expression"))))
 
     json_tool = tool(
         "json_query",
@@ -66,7 +72,7 @@ def build_tools(root: Path) -> list[SdkMcpTool[Any]]:
     )(
         _safe(
             lambda a: json_query.query(
-                a["expression"], path=a.get("path"), text=a.get("text"), root=root
+                _req(a, "expression"), path=a.get("path"), text=a.get("text"), root=root
             )
         )
     )

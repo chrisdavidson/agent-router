@@ -15,9 +15,14 @@ from decimal import Decimal, localcontext
 from fractions import Fraction
 
 MAX_EXPONENT = 10_000
-MAX_RESULT_BITS = 1_000_000
-MAX_INT_ARG = 10_000
+# Output cap: stays under CPython's 4300-digit int->str limit.
+MAX_DIGITS = 4_000
+# Intermediate cap on numerator + denominator size (~2x the output cap).
+MAX_RESULT_BITS = 32_000
+# factorial/comb/perm/round arguments; factorial(1000) has 2568 digits.
+MAX_INT_ARG = 1_000
 MAX_EXPRESSION_CHARS = 1_000
+MAX_DEPTH = 100
 DECIMAL_PLACES = 10
 _APPROX_DIGITS = 50
 
@@ -69,11 +74,15 @@ def _sqrt(x: Fraction, state: _Inexact) -> Fraction:
 def _pow(base: Fraction, exp: Fraction, state: _Inexact) -> Fraction:
     if abs(exp) > MAX_EXPONENT:
         raise ValueError(f"exponent too large (limit {MAX_EXPONENT})")
+    if base != 0:
+        # |log2(result)| ~ |exp| * |log2(base)|; reject before doing the work.
+        log2_base = abs(base.numerator.bit_length() - base.denominator.bit_length()) + 1
+        if exp.denominator == 1:
+            log2_base = max(base.numerator.bit_length(), base.denominator.bit_length())
+        if log2_base * abs(exp) > MAX_RESULT_BITS:
+            raise ValueError("result too large")
     if exp.denominator == 1:
         e = exp.numerator
-        bits = max(base.numerator.bit_length(), base.denominator.bit_length())
-        if bits * abs(e) > MAX_RESULT_BITS:
-            raise ValueError("result too large")
         if base == 0 and e < 0:
             raise ValueError("division by zero")
         return base**e
@@ -153,20 +162,28 @@ def _bits(x: Fraction) -> int:
     return x.numerator.bit_length() + x.denominator.bit_length()
 
 
-def _eval(node: ast.AST, state: _Inexact) -> Fraction:
+def _checked(x: Fraction) -> Fraction:
+    if _bits(x) > MAX_RESULT_BITS:
+        raise ValueError("result too large")
+    return x
+
+
+def _eval(node: ast.AST, state: _Inexact, depth: int = 0) -> Fraction:
+    if depth > MAX_DEPTH:
+        raise ValueError(f"expression nested too deeply (limit {MAX_DEPTH})")
     if isinstance(node, ast.Expression):
-        return _eval(node.body, state)
+        return _eval(node.body, state, depth + 1)
     if isinstance(node, ast.Constant):
         if isinstance(node.value, bool) or not isinstance(node.value, int | float):
             raise ValueError(f"unsupported literal {node.value!r}")
         return Fraction(repr(node.value)) if isinstance(node.value, float) else Fraction(node.value)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd | ast.USub):
-        v = _eval(node.operand, state)
+        v = _eval(node.operand, state, depth + 1)
         return -v if isinstance(node.op, ast.USub) else v
     if isinstance(node, ast.BinOp):
-        left, right = _eval(node.left, state), _eval(node.right, state)
+        left, right = _eval(node.left, state, depth + 1), _eval(node.right, state, depth + 1)
         if isinstance(node.op, ast.Pow):
-            return _pow(left, right, state)
+            return _checked(_pow(left, right, state))
         op = _BINOPS.get(type(node.op))
         if op is None:
             raise ValueError(f"unsupported operator {type(node.op).__name__}")
@@ -180,16 +197,16 @@ def _eval(node: ast.AST, state: _Inexact) -> Fraction:
         if not isinstance(node.func, ast.Name) or node.keywords:
             raise ValueError("only plain calls to supported functions are allowed")
         name = node.func.id
-        args = [_eval(a, state) for a in node.args]
+        args = [_eval(a, state, depth + 1) for a in node.args]
         try:
             if name in _STATEFUL:
                 if len(args) != 1:
                     raise ValueError(f"{name}() takes one argument")
-                return _STATEFUL[name](args[0], state)
+                return _checked(_STATEFUL[name](args[0], state))
             fn = FUNCTIONS.get(name)
             if fn is None:
                 raise ValueError(f"unknown function {name!r}")
-            return Fraction(fn(*args))
+            return _checked(Fraction(fn(*args)))
         except TypeError as e:
             raise ValueError(f"bad arguments to {name}(): {e}") from e
     raise ValueError(f"unsupported syntax: {type(node).__name__}")
@@ -220,7 +237,15 @@ def _decimal(x: Fraction) -> str:
     return "0" if s in ("-0", "") else s
 
 
+def _check_digits(x: Fraction) -> None:
+    # bit_length * log10(2) over-estimates digits by < 1; avoids str() on huge ints.
+    for part in (x.numerator, x.denominator):
+        if part.bit_length() * 0.30103 > MAX_DIGITS:
+            raise ValueError(f"result has more than {MAX_DIGITS} digits")
+
+
 def format_result(x: Fraction, inexact: bool = False) -> str:
+    _check_digits(x)
     if inexact:
         return f"≈ {_decimal(x)}"
     if x.denominator == 1:
@@ -239,6 +264,10 @@ def evaluate(expression: str) -> str:
         tree = ast.parse(source, mode="eval")
     except SyntaxError as e:
         raise ValueError(f"invalid expression: {e.msg}") from e
+    except (RecursionError, MemoryError) as e:
+        raise ValueError("expression nested too deeply") from e
     state = _Inexact()
-    result = _eval(tree, state)
-    return format_result(result, state.flag)
+    try:
+        return format_result(_eval(tree, state), state.flag)
+    except (ArithmeticError, RecursionError, MemoryError) as e:  # decimal/overflow edge cases
+        raise ValueError(f"cannot evaluate: {type(e).__name__}") from e
