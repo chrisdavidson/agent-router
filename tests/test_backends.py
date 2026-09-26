@@ -167,6 +167,46 @@ def test_jev_choice_not_in_options_raises(no_keys):
         d.decide("x", OPTIONS)
 
 
+@pytest.mark.parametrize("choice", [["none"], {"a": 1}, 3, None])
+def test_jev_non_string_choice_raises_decider_error(no_keys, choice):
+    bad = json.loads(json.dumps(LIVE_SAMPLE))
+    bad["answers"]["route"]["choice"] = choice
+    d = TypeSafeJevDecider(api_key="k", transport="typesafe", client=_client(_ok(bad)))
+    with pytest.raises(DeciderError):
+        d.decide("x", OPTIONS)
+
+
+@pytest.mark.parametrize("error", [RuntimeError("proxy exploded"), ValueError("bad url")])
+def test_jev_any_request_error_raises_decider_error(no_keys, error):
+    def boom(request):
+        raise error
+
+    d = TypeSafeJevDecider(api_key="k", transport="typesafe", client=_client(boom))
+    with pytest.raises(DeciderError, match="Jev request failed"):
+        d.decide("x", OPTIONS)
+
+
+def test_cascade_falls_back_when_the_jev_client_raises_anything(no_keys):
+    """A non-httpx failure in the request path is a confirm-stage failure, not a crash."""
+    from agent_router.core.types import ChoiceResult
+    from agent_router.deciders.cascade import FALLBACK_BACKEND, CascadeDecider
+
+    class Unsure:
+        name = "local"
+
+        def decide(self, state, options):
+            probs = {k: (0.6 if k == "exact-calc" else 0.4 / (len(options) - 1)) for k in options}
+            return ChoiceResult("exact-calc", probs, 0.3, backend="local")
+
+    def boom(request):
+        raise RuntimeError("proxy exploded")
+
+    jev = TypeSafeJevDecider(api_key="k", transport="typesafe", client=_client(boom))
+    res = CascadeDecider(Unsure(), jev, 0.9).decide("x", OPTIONS)
+    assert res.backend == FALLBACK_BACKEND
+    assert res.choice == NONE_ID
+
+
 def test_jev_normalises_probabilities(no_keys):
     odd = json.loads(json.dumps(LIVE_SAMPLE))
     odd["answers"]["route"]["choice"] = "exact-calc"

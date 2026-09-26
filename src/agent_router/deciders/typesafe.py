@@ -8,7 +8,8 @@ Two transports carry the same request body:
   ``TYPESAFE_API_KEY``.
 
 ``timeout`` (default 2 s) is an overall deadline for the request (the connect phase is also
-capped at 1 s); exceeding it raises ``DeciderError``.
+capped at 1 s); exceeding it raises ``DeciderError``, as does any other failure of the
+request (so the cascade falls back instead of crashing).
 
 ``transport="auto"`` picks openrouter when ``OPENROUTER_API_KEY`` is set, else typesafe when
 ``TYPESAFE_API_KEY`` is set. An explicit ``api_key`` with ``auto`` picks openrouter for
@@ -155,7 +156,7 @@ class TypeSafeJevDecider:
         except concurrent.futures.TimeoutError as exc:
             future.cancel()  # a request already running finishes in the background
             raise DeciderError(f"Jev request exceeded the {self.timeout:.2f}s deadline") from exc
-        except httpx.HTTPError as exc:
+        except Exception as exc:  # httpx, TLS, proxy, bad URL, client bugs: all fail the stage
             raise DeciderError(f"Jev request failed: {type(exc).__name__}: {exc}") from exc
         if not resp.is_success:
             raise DeciderError(f"Jev returned HTTP {resp.status_code}: {resp.text[:300]}")
@@ -165,9 +166,9 @@ class TypeSafeJevDecider:
             choice = answer["choice"]
             raw_probs = answer.get("probabilities") or {}
             raw_conf = answer.get("confidence")
-        except (ValueError, KeyError, TypeError) as exc:
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
             raise DeciderError(f"malformed Jev response: {exc!r}") from exc
-        if choice not in options:
+        if not isinstance(choice, str) or choice not in options:
             raise DeciderError(f"Jev chose {choice!r}, which is not one of the options")
 
         probs = _normalise(raw_probs, list(options), choice)
