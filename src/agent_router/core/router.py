@@ -16,6 +16,7 @@ Every call writes exactly one audit record.
 from __future__ import annotations
 
 import json
+import logging
 import threading
 
 from agent_router.core.audit import AuditLog
@@ -32,6 +33,8 @@ from agent_router.core.types import (
 )
 from agent_router.deciders.base import Decider
 
+log = logging.getLogger(__name__)
+
 OWN_TOOL_PREFIX = "mcp__agent_router__"
 NONE_OPTION = OptionSpec("the agent's own tools are enough")
 MAX_TOOL_INPUT = 500
@@ -42,9 +45,12 @@ def build_state(event: RouterEvent) -> str:
     """Decider input: prompt text, pending call (compact JSON) and recent context."""
     parts = [event.text]
     if event.point in (HookPoint.TOOL, HookPoint.SKILL):
-        payload = json.dumps(
-            event.tool_input or {}, separators=(",", ":"), ensure_ascii=False, default=str
-        )
+        try:
+            payload = json.dumps(
+                event.tool_input or {}, separators=(",", ":"), ensure_ascii=False, default=str
+            )
+        except (TypeError, ValueError):  # non-str keys, cycles: fall back, never fail
+            payload = repr(event.tool_input)
         parts.append(f"pending {event.tool_name}: {payload[:MAX_TOOL_INPUT]}")
     recent = event.recent[-MAX_RECENT:] if event.recent else ()
     parts.extend(f"previous: {line}" for line in recent)
@@ -67,19 +73,26 @@ class Router:
         self._lock = threading.Lock()
 
     def route(self, event: RouterEvent) -> Decision:
-        state = build_state(event)
-        decision = self._decide(event, state)
-        self.audit.record(event, decision, self.catalog.version, self.config, state=state)
+        cfg = self.config
+        state: str | None = None
+        # 1. enabled gates (before any state building)
+        if not cfg.enabled or event.point not in cfg.points:
+            decision = Decision(Action.SKIPPED, "disabled")
+        else:
+            state = build_state(event)
+            decision = self._decide(event, state)
+        try:
+            self.audit.record(event, decision, self.catalog.version, cfg, state=state)
+        except Exception:  # auditing must never block the host's hook
+            log.exception("audit record failed")
         return decision
 
     def _decide(self, event: RouterEvent, state: str) -> Decision:
         cfg = self.config
-        # 1. enabled gates
-        if not cfg.enabled or event.point not in cfg.points:
-            return Decision(Action.SKIPPED, "disabled")
         # 2. loop guard
         tool_name = event.tool_name
-        skill = (event.tool_input or {}).get("skill")
+        tool_input = event.tool_input if isinstance(event.tool_input, dict) else {}
+        skill = tool_input.get("skill")
         if self.catalog.owns_target(tool_name, skill=skill if isinstance(skill, str) else None) or (
             tool_name is not None and tool_name.startswith(OWN_TOOL_PREFIX)
         ):

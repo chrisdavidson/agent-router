@@ -373,3 +373,50 @@ def test_real_catalog_routes_through_local_decider():
     assert d.hint == render_hint(entry, HookPoint.PROMPT, d.result.probabilities["exact-calc"])
     rec = router.audit.records[0]
     assert abs(sum(rec["probabilities"].values()) - 1) < 1e-6
+
+
+# -- fail-open hardening ----------------------------------------------------------
+
+
+def test_audit_write_failure_fails_open(tmp_path):
+    decider = FakeDecider(result("exact-calc"))
+    router = Router(CATALOG, decider, RouterConfig(audit_path=tmp_path))  # a directory
+    seen = []
+    router.audit.subscribe(seen.append)
+    d = router.route(ev())
+    assert d.action == Action.SUGGEST
+    assert len(seen) == 1
+
+
+def test_build_state_survives_unserialisable_tool_input():
+    cyclic: dict = {"command": "bc"}
+    cyclic["self"] = cyclic
+    for bad in ({(1, 2): "a"}, cyclic):
+        state = build_state(ev(HookPoint.TOOL, tool_name="Bash", tool_input=bad))
+        assert state.startswith("compute 2**200\npending Bash: ")
+        assert len(state.split("\n", 1)[1]) <= len("pending Bash: ") + 500
+
+
+def test_route_survives_unserialisable_tool_input():
+    router, _, _ = make(result("exact-calc"))
+    d = router.route(ev(HookPoint.TOOL, tool_name="Bash", tool_input={(1, 2): "a"}))
+    assert d.action == Action.SUGGEST
+
+
+def test_disabled_gate_runs_before_state_building(monkeypatch):
+    import agent_router.core.router as router_mod
+
+    def boom(event):
+        raise AssertionError("build_state called while disabled")
+
+    monkeypatch.setattr(router_mod, "build_state", boom)
+    router, _, audit = make(enabled=False)
+    assert router.route(ev()).action == Action.SKIPPED
+    assert len(audit.records) == 1
+
+
+@pytest.mark.parametrize("tool_input", [["skill", "commit-writer"], "commit-writer", 42])
+def test_non_dict_tool_input_does_not_crash(tool_input):
+    router, _, _ = make(result("commit-writer"))
+    d = router.route(ev(HookPoint.SKILL, tool_name="Skill", tool_input=tool_input))
+    assert d.action == Action.SUGGEST

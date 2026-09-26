@@ -143,3 +143,12 @@ def test_config_from_env_rejects_bad_values(monkeypatch, var, value):
 def test_config_rejects_bad_threshold():
     with pytest.raises(ValueError):
         RouterConfig(threshold=1.5)
+
+
+def test_record_write_error_is_logged_not_raised(tmp_path, caplog):
+    log = AuditLog(tmp_path)  # path is a directory: open() raises IsADirectoryError
+    seen = []
+    log.subscribe(seen.append)
+    rec = log.record(EVENT, DECISION, "7", RouterConfig())
+    assert rec["action"] == "suggest" and seen == [rec]
+    assert "audit write failed" in caplog.text

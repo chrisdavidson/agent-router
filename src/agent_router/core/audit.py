@@ -88,8 +88,11 @@ class AuditLog:
             if self.path is None:
                 self.records.append(rec)
             else:
-                with self.path.open("a", encoding="utf-8") as fh:
-                    fh.write(line + "\n")
+                try:
+                    with self.path.open("a", encoding="utf-8") as fh:
+                        fh.write(line + "\n")
+                except OSError:  # disk full, permissions, path is a directory: fail open
+                    log.exception("audit write failed: %s", self.path)
             subscribers = list(self._subscribers)
         for cb in subscribers:
             try:
