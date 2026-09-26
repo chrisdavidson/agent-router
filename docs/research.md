@@ -100,7 +100,7 @@ agent-router keeps that shape and changes three things:
 ## Router literature
 
 | Work | arXiv / source | License | Idea | Used here |
-|---|---|---|---|
+|---|---|---|---|---|
 | RouteLLM | 2406.18665 | Apache-2.0 | Learns routers from preference data to send each query to a strong or a weak LLM | Framing: a cheap classifier decides and a threshold trades quality for cost. No code used |
 | semantic-router (aurelio-labs) | GitHub | MIT | Embeds example utterances per route and picks the route by nearest-neighbour similarity | The `semantic-router` backend. The local decider uses the same exemplar approach |
 | Gorilla | 2305.15334 | Apache-2.0 | An LLM fine-tuned with retrieval to write API calls | Background: retrieval over a tool catalog |
