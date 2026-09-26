@@ -439,8 +439,8 @@ def test_shipped_calibration_matches_catalog_and_embedders(shipped_calibration, 
 # measured after the conservative calibration (see task-7-report.md, fix round 1):
 # floor = measured accuracy - 0.05, ceiling = measured FPR + 0.05. The product targets
 # TARGET_ACCURACY / TARGET_FPR are asserted on the local -> Jev cascade path, not here.
-MODEL2VEC_HOLDOUT_MIN_ACCURACY = 0.74  # measured 0.797 (n=59)
-MODEL2VEC_HOLDOUT_MAX_FPR = 0.22  # measured 0.167 (4/24 negatives)
+MODEL2VEC_HOLDOUT_MIN_ACCURACY = 0.74  # measured 0.797 (n=59); 0.797 (n=64, context cases)
+MODEL2VEC_HOLDOUT_MAX_FPR = 0.22  # measured 0.167 (4/24); 0.148 (4/27 negatives)
 
 
 @pytest.mark.model
