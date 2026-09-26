@@ -1,0 +1,321 @@
+{
+  "store": "demo-shop",
+  "currency": "USD",
+  "orders": [
+    {
+      "id": "ORD-1001",
+      "customer": "Acme Corp",
+      "status": "paid",
+      "created": "2026-09-01",
+      "total": 12.5,
+      "items": [
+        {
+          "sku": "SKU-100",
+          "name": "USB-C cable",
+          "qty": 1,
+          "price": 12.5
+        }
+      ]
+    },
+    {
+      "id": "ORD-1002",
+      "customer": "Globex",
+      "status": "paid",
+      "created": "2026-09-02",
+      "total": 179.5,
+      "items": [
+        {
+          "sku": "SKU-200",
+          "name": "Keyboard",
+          "qty": 1,
+          "price": 89.0
+        },
+        {
+          "sku": "SKU-300",
+          "name": "Monitor stand",
+          "qty": 2,
+          "price": 45.25
+        }
+      ]
+    },
+    {
+      "id": "ORD-1003",
+      "customer": "Initech",
+      "status": "failed",
+      "created": "2026-09-03",
+      "total": 265.22,
+      "items": [
+        {
+          "sku": "SKU-300",
+          "name": "Monitor stand",
+          "qty": 1,
+          "price": 45.25
+        },
+        {
+          "sku": "SKU-400",
+          "name": "Webcam",
+          "qty": 3,
+          "price": 64.99
+        },
+        {
+          "sku": "SKU-100",
+          "name": "USB-C cable",
+          "qty": 2,
+          "price": 12.5
+        }
+      ]
+    },
+    {
+      "id": "ORD-1004",
+      "customer": "Umbrella",
+      "status": "paid",
+      "created": "2026-09-04",
+      "total": 64.99,
+      "items": [
+        {
+          "sku": "SKU-400",
+          "name": "Webcam",
+          "qty": 1,
+          "price": 64.99
+        }
+      ]
+    },
+    {
+      "id": "ORD-1005",
+      "customer": "Hooli",
+      "status": "refunded",
+      "created": "2026-09-05",
+      "total": 190.5,
+      "items": [
+        {
+          "sku": "SKU-100",
+          "name": "USB-C cable",
+          "qty": 1,
+          "price": 12.5
+        },
+        {
+          "sku": "SKU-200",
+          "name": "Keyboard",
+          "qty": 2,
+          "price": 89.0
+        }
+      ]
+    },
+    {
+      "id": "ORD-1006",
+      "customer": "Stark Industries",
+      "status": "paid",
+      "created": "2026-09-06",
+      "total": 354.73,
+      "items": [
+        {
+          "sku": "SKU-200",
+          "name": "Keyboard",
+          "qty": 1,
+          "price": 89.0
+        },
+        {
+          "sku": "SKU-300",
+          "name": "Monitor stand",
+          "qty": 3,
+          "price": 45.25
+        },
+        {
+          "sku": "SKU-400",
+          "name": "Webcam",
+          "qty": 2,
+          "price": 64.99
+        }
+      ]
+    },
+    {
+      "id": "ORD-1007",
+      "customer": "Wayne Enterprises",
+      "status": "failed",
+      "created": "2026-09-07",
+      "total": 45.25,
+      "items": [
+        {
+          "sku": "SKU-300",
+          "name": "Monitor stand",
+          "qty": 1,
+          "price": 45.25
+        }
+      ]
+    },
+    {
+      "id": "ORD-1008",
+      "customer": "Soylent",
+      "status": "paid",
+      "created": "2026-09-08",
+      "total": 89.99,
+      "items": [
+        {
+          "sku": "SKU-400",
+          "name": "Webcam",
+          "qty": 1,
+          "price": 64.99
+        },
+        {
+          "sku": "SKU-100",
+          "name": "USB-C cable",
+          "qty": 2,
+          "price": 12.5
+        }
+      ]
+    },
+    {
+      "id": "ORD-1009",
+      "customer": "Acme Corp",
+      "status": "paid",
+      "created": "2026-09-09",
+      "total": 370.0,
+      "items": [
+        {
+          "sku": "SKU-100",
+          "name": "USB-C cable",
+          "qty": 1,
+          "price": 12.5
+        },
+        {
+          "sku": "SKU-200",
+          "name": "Keyboard",
+          "qty": 3,
+          "price": 89.0
+        },
+        {
+          "sku": "SKU-300",
+          "name": "Monitor stand",
+          "qty": 2,
+          "price": 45.25
+        }
+      ]
+    },
+    {
+      "id": "ORD-1010",
+      "customer": "Globex",
+      "status": "refunded",
+      "created": "2026-09-10",
+      "total": 89.0,
+      "items": [
+        {
+          "sku": "SKU-200",
+          "name": "Keyboard",
+          "qty": 1,
+          "price": 89.0
+        }
+      ]
+    },
+    {
+      "id": "ORD-1011",
+      "customer": "Initech",
+      "status": "paid",
+      "created": "2026-09-11",
+      "total": 175.23,
+      "items": [
+        {
+          "sku": "SKU-300",
+          "name": "Monitor stand",
+          "qty": 1,
+          "price": 45.25
+        },
+        {
+          "sku": "SKU-400",
+          "name": "Webcam",
+          "qty": 2,
+          "price": 64.99
+        }
+      ]
+    },
+    {
+      "id": "ORD-1012",
+      "customer": "Umbrella",
+      "status": "failed",
+      "created": "2026-09-12",
+      "total": 280.49,
+      "items": [
+        {
+          "sku": "SKU-400",
+          "name": "Webcam",
+          "qty": 1,
+          "price": 64.99
+        },
+        {
+          "sku": "SKU-100",
+          "name": "USB-C cable",
+          "qty": 3,
+          "price": 12.5
+        },
+        {
+          "sku": "SKU-200",
+          "name": "Keyboard",
+          "qty": 2,
+          "price": 89.0
+        }
+      ]
+    },
+    {
+      "id": "ORD-1013",
+      "customer": "Hooli",
+      "status": "paid",
+      "created": "2026-09-13",
+      "total": 12.5,
+      "items": [
+        {
+          "sku": "SKU-100",
+          "name": "USB-C cable",
+          "qty": 1,
+          "price": 12.5
+        }
+      ]
+    },
+    {
+      "id": "ORD-1014",
+      "customer": "Stark Industries",
+      "status": "paid",
+      "created": "2026-09-14",
+      "total": 179.5,
+      "items": [
+        {
+          "sku": "SKU-200",
+          "name": "Keyboard",
+          "qty": 1,
+          "price": 89.0
+        },
+        {
+          "sku": "SKU-300",
+          "name": "Monitor stand",
+          "qty": 2,
+          "price": 45.25
+        }
+      ]
+    },
+    {
+      "id": "ORD-1015",
+      "customer": "Wayne Enterprises",
+      "status": "failed",
+      "created": "2026-09-15",
+      "total": 265.22,
+      "items": [
+        {
+          "sku": "SKU-300",
+          "name": "Monitor stand",
+          "qty": 1,
+          "price": 45.25
+        },
+        {
+          "sku": "SKU-400",
+          "name": "Webcam",
+          "qty": 3,
+          "price": 64.99
+        },
+        {
+          "sku": "SKU-100",
+          "name": "USB-C cable",
+          "qty": 2,
+          "price": 12.5
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>demo-shop 2.4.0 release notes</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 48rem; margin: auto; }
+    .badge { background: #e0f2fe; padding: 0 .4rem; border-radius: 4px; }
+  </style>
+  <script>
+    window.analytics = { track: function (e) { console.log("track", e); } };
+    window.analytics.track("release-notes-view");
+  </script>
+</head>
+<body>
+  <h1>demo-shop 2.4.0</h1>
+  <p>Released <time datetime="2026-09-20">September 20, 2026</time>. <span class="badge">stable</span></p>
+
+  <h2>Highlights</h2>
+  <ul>
+    <li>Order export to CSV from the admin dashboard.</li>
+    <li>Automatic retry for failed card payments (up to 3 attempts).</li>
+    <li>Faster checkout: median page load down from 1.8&nbsp;s to 1.1&nbsp;s.</li>
+  </ul>
+
+  <h2>Fixes</h2>
+  <ol>
+    <li>Refunded orders no longer count toward monthly revenue.</li>
+    <li>Session timeout on the login page now honours the "remember me" option.</li>
+  </ol>
+
+  <h2>Compatibility</h2>
+  <table>
+    <thead>
+      <tr><th>Component</th><th>Minimum version</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Python</td><td>3.11</td><td>supported</td></tr>
+      <tr><td>Node.js</td><td>20</td><td>supported</td></tr>
+      <tr><td>PostgreSQL</td><td>14</td><td>deprecated in 2.5</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Upgrade</h2>
+  <p>Read the <a href="https://example.com/demo-shop/upgrade-2.4">upgrade guide</a> before migrating.</p>
+  <script>document.querySelector("h1").dataset.loaded = "1";</script>
+</body>
+</html>
