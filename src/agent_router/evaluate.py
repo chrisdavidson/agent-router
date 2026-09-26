@@ -35,7 +35,7 @@ from agent_router.core.config import RouterConfig
 from agent_router.core.router import Router
 from agent_router.core.types import NONE_ID, Action, Decision, HookPoint, RouterEvent
 from agent_router.deciders import local
-from agent_router.deciders.base import Decider
+from agent_router.deciders.base import Decider, recommended_threshold
 from agent_router.deciders.embedders import Embedder
 from agent_router.deciders.local import LocalJevDecider, LocalParams, embedder_id
 
@@ -133,6 +133,7 @@ class CaseResult:
     decoy: bool = False
     error: bool = False
     latency_ms: float | None = None
+    backend: str | None = None
 
 
 @dataclass
@@ -217,7 +218,33 @@ def _case_result(case: EvalCase, decision: Decision, predicted: str | None = Non
         decoy=case.decoy,
         error=decision.reason.startswith(DECIDER_ERROR),
         latency_ms=res.latency_ms if res is not None else None,
+        backend=res.backend if res is not None else None,
     )
+
+
+def routing_stats(report: EvalReport) -> dict[str, Any]:
+    """Cascade escalation and latency over a report's cases.
+
+    ``escalated``: cases the cascade sent to its confirm stage (any ``cascade:*`` backend but
+    ``cascade:local``); ``fallbacks``: of those, the ones where the confirm stage failed and the
+    local answer was used (``cascade:local-fallback``). Latency is the decider's, per case
+    that reached it.
+    """
+    backends = [r.backend for r in report.results]
+    escalated = sum(
+        b is not None and b.startswith("cascade:") and b != "cascade:local" for b in backends
+    )
+    fallbacks = sum(b == "cascade:local-fallback" for b in backends)
+    lat = [r.latency_ms for r in report.results if r.latency_ms is not None]
+    n = len(report.results)
+    return {
+        "n": n,
+        "escalated": escalated,
+        "escalation_rate": escalated / n if n else 0.0,
+        "fallbacks": fallbacks,
+        "mean_latency_ms": float(np.mean(lat)) if lat else 0.0,
+        "p95_latency_ms": float(np.percentile(lat, 95)) if lat else 0.0,
+    }
 
 
 def run_eval(router_factory: Callable[[], Router], cases: Iterable[EvalCase]) -> EvalReport:
@@ -263,7 +290,7 @@ def make_router(
     if timeout is not None and hasattr(decider, "timeout"):
         decider.timeout = timeout  # type: ignore[attr-defined]
     if threshold is None:
-        threshold = getattr(decider, "recommended_threshold", None)
+        threshold = recommended_threshold(decider)
     if threshold is None:
         threshold = RouterConfig().threshold
     return Router(
@@ -509,9 +536,10 @@ def calibrate(
 
 
 def write_calibration(
-    results: Mapping[str, CalibrationResult], path: str | Path | None = None
+    results: Mapping[str, CalibrationResult | CascadeCalibration], path: str | Path | None = None
 ) -> Path:
-    """Merge ``{embedder_key: result}`` into the calibration JSON (default: the active one)."""
+    """Merge ``{key: result}`` (``model2vec`` / ``hashing`` / ``cascade``) into the calibration
+    JSON (default: the active one)."""
     path = Path(path) if path is not None else local.CALIBRATION_PATH
     data: dict[str, Any] = {}
     if path.is_file():
@@ -523,3 +551,165 @@ def write_calibration(
         data[key] = res.to_dict()
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
     return path
+
+
+# --- cascade native_gate calibration ------------------------------------------------------
+
+GATE_GRID: tuple[float, ...] = (
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.85,
+    0.9,
+    0.93,
+    0.95,
+    0.97,
+    0.98,
+    0.99,
+    0.995,
+    0.999,
+    0.9999,
+    1.0,
+    1.01,
+)
+"""Candidate ``native_gate`` values. p(none) can saturate to exactly 1.0, so 1.0 still keeps
+those cases local; 1.01 is the "always escalate" sentinel (= Jev on every step)."""
+
+
+class _Memo:
+    """Caches a stage decider's answer per (state, options): one real call per case.
+
+    Exceptions are recorded and re-raised; ``calibrate_cascade`` refuses to calibrate on them
+    (a failed Jev call would otherwise be scored as the cascade's local fallback)."""
+
+    def __init__(self, decider: Decider) -> None:
+        self.decider = decider
+        self.name = getattr(decider, "name", "")
+        self.cache: dict[tuple[str, tuple[str, ...]], Any] = {}
+        self.errors: list[str] = []
+
+    def decide(self, state: str, options: dict[str, Any]) -> Any:
+        key = (state, tuple(options))
+        if key not in self.cache:
+            try:
+                self.cache[key] = self.decider.decide(state, options)
+            except Exception as exc:
+                self.errors.append(f"{type(exc).__name__}: {exc}")
+                raise
+        return self.cache[key]
+
+
+@dataclass(frozen=True)
+class CascadeCalibration:
+    native_gate: float
+    threshold: float
+    accuracy: float  # cascade on the cal cases at the chosen gate
+    fpr: float
+    escalation_rate: float
+    jev_accuracy: float  # confirm stage alone on the same cases, same answers
+    jev_fpr: float
+    n_cases: int
+    local_errors: int  # cases the cascade answered locally and got wrong
+    sweep: tuple[dict[str, float], ...]
+    catalog_version: str = ""
+    embedder: str = ""
+    local_params: dict[str, float] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "native_gate": self.native_gate,
+            "threshold": self.threshold,
+            "cal_accuracy": round(self.accuracy, 4),
+            "cal_fpr": round(self.fpr, 4),
+            "cal_escalation_rate": round(self.escalation_rate, 4),
+            "cal_jev_accuracy": round(self.jev_accuracy, 4),
+            "cal_jev_fpr": round(self.jev_fpr, 4),
+            "cal_local_errors": self.local_errors,
+            "n_cases": self.n_cases,
+            "feasible": True,  # the always-escalate sentinel guarantees a feasible gate
+            "sweep": list(self.sweep),
+            "catalog_version": self.catalog_version,
+            "embedder": self.embedder,
+            "local_params": dict(self.local_params),
+        }
+
+
+def calibrate_cascade(
+    cases: Sequence[EvalCase],
+    catalog: Catalog,
+    primary: Decider,
+    confirm: Decider,
+    *,
+    gates: Sequence[float] = GATE_GRID,
+    threshold: float | None = None,
+) -> CascadeCalibration:
+    """Pick the cascade's ``native_gate`` on ``cases`` (the cal split).
+
+    Objective: the lowest escalation rate among gates whose cal accuracy is not below and
+    whose cal FPR is not above the confirm stage alone (Jev-only); ties go to the higher,
+    more cautious gate. Both stages are memoised, so Jev is asked at most once per case and
+    every gate (and the Jev-only baseline) is scored on the same answers. ``threshold`` is
+    the router threshold for both (default: the confirm stage's recommended one, else the
+    ``RouterConfig`` default) and is stored with the gate. Raises ``RuntimeError`` if any
+    confirm call failed.
+    """
+    from agent_router.deciders.cascade import CascadeDecider
+
+    if not cases or not gates:
+        raise ValueError("cascade calibration needs cases and gates")
+    thr = threshold if threshold is not None else recommended_threshold(confirm)
+    thr = float(thr if thr is not None else RouterConfig().threshold)
+    first, second = _Memo(primary), _Memo(confirm)
+
+    def check() -> None:
+        if second.errors:
+            raise RuntimeError(
+                f"confirm stage failed on {len(second.errors)} case(s) during cascade "
+                f"calibration (first: {second.errors[0]}); not calibrating on fallbacks"
+            )
+
+    jev = run_eval(lambda: make_router(second, catalog, threshold=thr), cases)
+    check()
+    rows = []
+    for gate in sorted({float(g) for g in gates}):
+        dec = CascadeDecider(first, second, gate)
+        rep = run_eval(lambda d=dec: make_router(d, catalog, threshold=thr), cases)
+        check()
+        stats = routing_stats(rep)
+        local_errors = sum(
+            r.backend == "cascade:local" and r.predicted != r.expected for r in rep.results
+        )
+        rows.append((gate, rep, stats["escalation_rate"], local_errors))
+    eps = 1e-9
+    feasible = [
+        row for row in rows if row[1].accuracy >= jev.accuracy - eps and row[1].fpr <= jev.fpr + eps
+    ]
+    if not feasible:  # only possible without an always-escalate gate in ``gates``
+        raise RuntimeError("no native_gate matches Jev-only on the cal cases; add a gate > 1")
+    gate, rep, esc, local_errors = min(feasible, key=lambda row: (row[2], -row[0]))
+    emb = getattr(primary, "embedder", None)
+    params = getattr(primary, "params", None)
+    return CascadeCalibration(
+        native_gate=gate,
+        threshold=thr,
+        accuracy=rep.accuracy,
+        fpr=rep.fpr,
+        escalation_rate=esc,
+        jev_accuracy=jev.accuracy,
+        jev_fpr=jev.fpr,
+        n_cases=len(cases),
+        local_errors=local_errors,
+        sweep=tuple(
+            {
+                "gate": g,
+                "accuracy": round(r.accuracy, 4),
+                "fpr": round(r.fpr, 4),
+                "escalation_rate": round(e, 4),
+            }
+            for g, r, e, _ in rows
+        ),
+        catalog_version=catalog.version,
+        embedder=(embedder_id(emb) or "") if emb is not None else "",
+        local_params=asdict(params) if isinstance(params, LocalParams) else {},
+    )

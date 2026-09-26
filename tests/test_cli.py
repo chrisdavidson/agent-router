@@ -133,3 +133,100 @@ def test_help_lists_subcommands(capsys):
     out = capsys.readouterr().out
     for sub in ("route", "eval", "calibrate", "demo", "run"):
         assert sub in out
+
+
+# -- default backend, cascade, shell flags --------------------------------------------------
+
+
+class _Always:
+    def __init__(self, name, choice="none"):
+        self.name = name
+        self.choice = choice
+
+    def decide(self, state, options):
+        from agent_router.core.types import ChoiceResult
+
+        probs = {o: (1.0 if o == self.choice else 0.0) for o in options}
+        return ChoiceResult(self.choice, probs, 1.0, backend=self.name, latency_ms=1.0)
+
+
+def _fake_cascade(monkeypatch):
+    from agent_router.deciders import registry
+    from agent_router.deciders.cascade import CascadeDecider
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-test")
+
+    def make(name, catalog):
+        if name == "cascade":  # local unsure -> escalates to a fake jev
+            return CascadeDecider(_Always("local", "exact-calc"), _Always("jev", "exact-calc"))
+        return _Always(name)
+
+    monkeypatch.setattr(registry, "make_decider", make)
+
+
+def test_backend_defaults_to_local_without_jev_key(capsys):
+    assert cli.main(["route", "compute 3**80 exactly", "--embedder", "hashing", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["backend"] == "local"
+
+
+def test_backend_defaults_to_cascade_with_jev_key(capsys, monkeypatch):
+    _fake_cascade(monkeypatch)
+    assert cli.main(["route", "compute 3**80 exactly", "--json"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["backend"] == "cascade:jev"
+    assert [s["role"] for s in out["stages"]] == ["primary", "confirm"]
+    assert cli.main(["route", "compute 3**80 exactly"]) == 0
+    assert "escalated to jev" in capsys.readouterr().out
+
+
+def test_eval_reports_escalation_for_cascade(capsys, monkeypatch):
+    _fake_cascade(monkeypatch)
+    assert cli.main(["eval", "--json"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["backend"] == "cascade"
+    assert out["routing"]["escalation_rate"] == 1.0
+    assert cli.main(["eval"]) == 0
+    assert "escalation" in capsys.readouterr().out
+
+
+def test_calibrate_cascade_writes_block(tmp_path, capsys, monkeypatch):
+    _fake_cascade(monkeypatch)
+    out = tmp_path / "cal.json"
+    assert cli.main(["calibrate-cascade", "--out", str(out)]) == 0
+    block = json.loads(out.read_text())["cascade"]
+    assert block["native_gate"] == 1.0  # local always sure of none: never needs jev
+    assert "native_gate" in capsys.readouterr().out
+
+
+def test_calibrate_cascade_needs_jev(capsys):
+    assert cli.main(["calibrate-cascade"]) == 2
+    assert "not available" in capsys.readouterr().err
+
+
+def test_demo_has_allow_shell_and_no_host(monkeypatch):
+    import agent_router.demo.server as server
+
+    seen = {}
+    monkeypatch.setattr(server, "main", lambda **kw: seen.update(kw))
+    assert cli.main(["demo", "--port", "8799"]) == 0
+    assert seen == {"port": 8799, "allow_shell": False}
+    assert cli.main(["demo", "--allow-shell"]) == 0
+    assert seen["allow_shell"] is True
+    with pytest.raises(SystemExit):
+        cli.main(["demo", "--host", "0.0.0.0"])
+
+
+def test_run_passes_allow_shell(monkeypatch, capsys):
+    import agent_router.agent as agent
+
+    seen = {}
+
+    async def fake_run(prompt, router, workspace, on_event, **kw):
+        seen.update(kw, backend=router.decider.name)
+        return "ok"
+
+    monkeypatch.setattr(agent, "run_agent", fake_run)
+    assert cli.main(["run", "hi", "--embedder", "hashing"]) == 0
+    assert seen == {"allow_shell": False, "backend": "local"}
+    assert cli.main(["run", "hi", "--embedder", "hashing", "--allow-shell"]) == 0
+    assert seen["allow_shell"] is True

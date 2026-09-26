@@ -428,3 +428,47 @@ def test_calibrated_model2vec_holdout(catalog, shipped_calibration):
     assert rep.errors == 0
     assert rep.accuracy >= MODEL2VEC_HOLDOUT_MIN_ACCURACY, rep.summary()
     assert rep.fpr <= MODEL2VEC_HOLDOUT_MAX_FPR, rep.summary()
+
+
+# --- the default decision path: local -> Jev cascade ----------------------------------------
+
+
+def test_shipped_cascade_calibration_matches_local_block(shipped_calibration, catalog):
+    data = json.loads(shipped_calibration.read_text())
+    assert "cascade" in data, "run `agent-router calibrate-cascade`"
+    block, m2v = data["cascade"], data["model2vec"]
+    assert block["feasible"] is True
+    assert block["catalog_version"] == catalog.version
+    assert block["embedder"] == m2v["embedder"]
+    # the gate is only meaningful for the local params it was fit with
+    assert block["local_params"] == {k: m2v[k] for k in block["local_params"]}
+    assert 0.0 < block["native_gate"] <= 1.01
+    assert block["cal_accuracy"] >= block["cal_jev_accuracy"]
+    assert block["cal_fpr"] <= block["cal_jev_fpr"]
+
+
+@pytest.mark.live
+def test_cascade_holdout_meets_targets(catalog, shipped_calibration, monkeypatch):
+    """The default path on the holdout: TARGET_ACCURACY / TARGET_FPR. Calls Jev (needs
+    OPENROUTER_API_KEY or TYPESAFE_API_KEY) and the model2vec weights. Run once, with -s."""
+    from agent_router.deciders.cascade import CascadeDecider
+    from agent_router.evaluate import routing_stats
+
+    monkeypatch.setenv("AGENT_ROUTER_EMBEDDER", "model2vec")
+    data = json.loads(shipped_calibration.read_text())
+    router = make_router("cascade", catalog, timeout=15.0)
+    dec = router.decider
+    assert isinstance(dec, CascadeDecider)
+    assert dec.native_gate == data["cascade"]["native_gate"], "cascade calibration not applied"
+    assert dec.primary.recommended_threshold is not None, "local calibration not applied"
+    assert router.config.threshold == data["cascade"]["threshold"]
+    rep = run_eval(lambda: router, load_cases(split="test"))
+    stats = routing_stats(rep)
+    print(f"\ncascade holdout: {rep.summary()} {json.dumps(stats)}")
+    for r in rep.results:
+        if r.predicted != r.expected:
+            print(f"  miss {r.id}: expected {r.expected}, got {r.predicted} via {r.backend}")
+    assert rep.errors == 0
+    assert stats["fallbacks"] == 0, "Jev failed during the holdout; the score is not Jev's"
+    assert rep.accuracy >= TARGET_ACCURACY, rep.summary()
+    assert rep.fpr <= TARGET_FPR, rep.summary()

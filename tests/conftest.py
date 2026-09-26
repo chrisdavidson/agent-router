@@ -3,6 +3,7 @@
 Unit tests must not depend on the shipped ``calibration.json``: for the whole session the
 local decider looks for calibration at a path that does not exist, so it uses the
 ``LocalParams`` defaults. Tests that want the shipped file opt in with ``shipped_calibration``.
+Jev API keys are removed for every test not marked ``live``.
 """
 
 import pytest
@@ -16,6 +17,15 @@ def _no_shipped_calibration(tmp_path_factory):
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(local, "CALIBRATION_PATH", missing)
         yield
+
+
+@pytest.fixture(autouse=True)
+def _no_jev_keys(request, monkeypatch):
+    """Offline by default: without a Jev key the default backend is ``local`` and nothing
+    reaches the network. ``live`` tests keep the real keys."""
+    if request.node.get_closest_marker("live") is None:
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
 
 
 @pytest.fixture

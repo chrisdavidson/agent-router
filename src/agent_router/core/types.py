@@ -45,6 +45,8 @@ class ChoiceResult:
     confidence: float
     backend: str = ""
     latency_ms: float = 0.0
+    stages: tuple[dict[str, Any], ...] = ()
+    """Per-stage answers of a multi-stage decider (the cascade), plain JSON-able dicts."""
 
 
 @dataclass(frozen=True)

@@ -523,3 +523,84 @@ def test_run_while_busy_is_409(audit_dir: Path) -> None:
     finally:
         app.state.run_slot.release()
     assert _start(c).status_code == 200
+
+
+# -- default backend, calibrated threshold, cascade stages --------------------------------
+
+
+class _CalibratedStub(_StubDecider):
+    name = "calibrated"
+    recommended_threshold = 0.65
+
+
+def test_backends_default_is_cascade_when_available(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        server.registry, "available_backends", lambda: {"cascade": True, "local": True}
+    )
+    assert client.get("/api/backends").json()["default"] == "cascade"
+
+
+def test_route_without_backend_uses_default(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built = []
+    monkeypatch.setattr(server.registry, "default_backend", lambda: "local")
+    monkeypatch.setattr(
+        server.registry, "make_decider", lambda name, catalog: built.append(name) or _StubDecider()
+    )
+    body = client.post("/api/route", json={"text": "compute 2**200", "point": "prompt"}).json()
+    assert body["backend"] == "local" and built == ["local"]
+
+
+def test_route_without_threshold_uses_decider_calibration(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server.registry, "make_decider", lambda name, catalog: _CalibratedStub())
+    body = _route(client, text="compute 2**200 exactly", point="prompt", threshold=None).json()
+    assert body["threshold"] == 0.65
+    assert body["decision"]["action"] == "native"  # p=0.6 < 0.65
+    explicit = _route(client, text="compute 2**200 exactly", point="prompt", threshold=0.5).json()
+    assert explicit["threshold"] == 0.5
+
+
+def test_env_threshold_beats_decider_calibration(
+    audit_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGENT_ROUTER_THRESHOLD", "0.3")
+    monkeypatch.setattr(server.registry, "make_decider", lambda name, catalog: _CalibratedStub())
+    c = _client(server.create_app(audit_dir=audit_dir))
+    body = _route(c, text="compute 2**200 exactly", point="prompt").json()
+    assert body["threshold"] == 0.3
+
+
+def test_live_run_uses_decider_calibration(audit_dir: Path, monkeypatch) -> None:
+    monkeypatch.setattr(server.registry, "make_decider", lambda name, catalog: _CalibratedStub())
+    seen = {}
+
+    async def runner(prompt, router, workspace, on_event):
+        seen["threshold"] = router.config.threshold
+
+    with _client(server.create_app(audit_dir=audit_dir, runner=runner)) as c:
+        res = _run(c, prompt="hi", backend="local")
+    events = _sse_events(res.text)
+    assert events[0][1]["threshold"] == 0.65 and seen["threshold"] == 0.65
+
+
+def test_route_returns_cascade_stages(client: TestClient, monkeypatch) -> None:
+    from agent_router.deciders.cascade import CascadeDecider
+
+    class Unsure(_StubDecider):
+        name = "local"
+
+    monkeypatch.setattr(
+        server.registry,
+        "make_decider",
+        lambda name, catalog: CascadeDecider(Unsure(), _StubDecider()),
+    )
+    body = _route(client, text="compute 2**200 exactly", point="prompt", threshold=0.5).json()
+    assert body["result"]["backend"] == "cascade:stub"
+    stages = body["result"]["stages"]
+    assert [s["role"] for s in stages] == ["primary", "confirm"]
+    assert set(stages[0]["probabilities"]) == {o["id"] for o in body["options"]}

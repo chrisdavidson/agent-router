@@ -80,6 +80,7 @@ class AuditLog:
             "hint": _trunc(decision.hint),
             "backend": res.backend if res else None,
             "latency_ms": float(res.latency_ms) if res else None,
+            "stages": [dict(st) for st in res.stages] if res else [],
             "catalog_version": catalog_version,
             "thresholds": {"threshold": config.threshold, "mode": config.mode},
         }

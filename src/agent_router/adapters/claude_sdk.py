@@ -93,6 +93,7 @@ def decision_payload(event: RouterEvent, decision: Decision) -> dict[str, Any]:
         "confidence": float(res.confidence) if res else None,
         "backend": res.backend if res else None,
         "latency_ms": float(res.latency_ms) if res else None,
+        "stages": [dict(st) for st in res.stages] if res else [],
     }
 
 

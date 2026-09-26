@@ -29,13 +29,24 @@ class RouterConfig:
             raise ValueError(f"threshold must be in [0, 1], got {self.threshold}")
 
     @classmethod
-    def from_env(cls) -> RouterConfig:
-        """Read ``AGENT_ROUTER_MODE``, ``_THRESHOLD``, ``_DISABLED`` and ``_AUDIT``."""
+    def from_env(cls, recommended_threshold: float | None = None) -> RouterConfig:
+        """Read ``AGENT_ROUTER_MODE``, ``_THRESHOLD``, ``_DISABLED`` and ``_AUDIT``.
+
+        The threshold is ``AGENT_ROUTER_THRESHOLD`` when set, else ``recommended_threshold``
+        (the decider's calibrated one) when given, else the default.
+        """
         env = os.environ
         audit = env.get("AGENT_ROUTER_AUDIT", "").strip()
+        raw_thr = env.get("AGENT_ROUTER_THRESHOLD", "").strip()
+        if raw_thr:
+            threshold = float(raw_thr)
+        elif recommended_threshold is not None:
+            threshold = float(recommended_threshold)
+        else:
+            threshold = cls.threshold
         return cls(
             mode=env.get("AGENT_ROUTER_MODE", "advisory").strip().lower(),  # type: ignore[arg-type]
-            threshold=float(env.get("AGENT_ROUTER_THRESHOLD", "0.5")),
+            threshold=threshold,
             enabled=env.get("AGENT_ROUTER_DISABLED", "").strip().lower() not in _TRUTHY,
             audit_path=Path(audit) if audit else None,
         )

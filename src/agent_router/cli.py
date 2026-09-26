@@ -1,4 +1,7 @@
-"""``agent-router`` command line: route, eval, calibrate, demo, run.
+"""``agent-router`` command line: route, eval, calibrate, calibrate-cascade, demo, run.
+
+``--backend`` defaults to ``default_backend()``: the local -> Jev cascade when a Jev API key
+is set, else the offline local classifier.
 
 Heavy or optional modules (the demo server, the live agent, model weights) are imported
 inside the command that needs them, so ``route`` / ``eval`` work without them.
@@ -39,11 +42,20 @@ def _check_backend(name: str) -> None:
         raise CliError(f"backend {name!r} is not available here (missing package or API key)")
 
 
+def _resolve_backend(args: argparse.Namespace) -> str:
+    """``--backend``, else the default path (``cascade`` with a Jev key, else ``local``)."""
+    from agent_router.deciders.registry import default_backend
+
+    if not getattr(args, "backend", None):
+        args.backend = default_backend()
+    return args.backend
+
+
 def _router(args: argparse.Namespace):
     from agent_router.core.catalog import load_catalog
     from agent_router.evaluate import make_router
 
-    _check_backend(args.backend)
+    _check_backend(_resolve_backend(args))
     _set_embedder(getattr(args, "embedder", None))
     catalog = load_catalog()
     return make_router(
@@ -89,6 +101,7 @@ def cmd_route(args: argparse.Namespace) -> int:
         "options": list(d.options),
         "backend": res.backend if res else args.backend,
         "latency_ms": res.latency_ms if res else None,
+        "stages": list(res.stages) if res else [],
         "threshold": router.config.threshold,
     }
     if args.json:
@@ -98,11 +111,32 @@ def cmd_route(args: argparse.Namespace) -> int:
     print(f"choice     {out['choice']}")
     if res:
         print(f"confidence {res.confidence:.3f}   backend {res.backend}   {res.latency_ms:.1f} ms")
-        for oid, p in sorted(res.probabilities.items(), key=lambda kv: -kv[1]):
-            print(f"  {oid:<18} {p:6.3f} {'#' * round(p * 40)}")
+        if res.stages:
+            print(f"cascade    {_cascade_note(res.backend)}")
+            for st in res.stages:
+                if st.get("error"):
+                    print(f"  [{st['role']} {st['backend']}] failed: {st['error']}")
+                    continue
+                print(f"  [{st['role']} {st['backend']}] choice {st['choice']}")
+                _print_bars(st["probabilities"], indent="    ")
+        else:
+            _print_bars(res.probabilities)
     if d.hint:
         print(f"hint       {d.hint}")
     return 0
+
+
+def _cascade_note(backend: str) -> str:
+    if backend == "cascade:local":
+        return "answered locally (confident none)"
+    if backend == "cascade:local-fallback":
+        return "escalated, but the confirm stage failed: local answer, biased to none"
+    return f"escalated to {backend.removeprefix('cascade:')}"
+
+
+def _print_bars(probs: dict[str, float], indent: str = "  ") -> None:
+    for oid, p in sorted(probs.items(), key=lambda kv: -kv[1]):
+        print(f"{indent}{oid:<18} {p:6.3f} {'#' * round(p * 40)}")
 
 
 # --- eval --------------------------------------------------------------------------------
@@ -110,18 +144,21 @@ def cmd_route(args: argparse.Namespace) -> int:
 
 def cmd_eval(args: argparse.Namespace) -> int:
     from agent_router.deciders.local import embedder_key
-    from agent_router.evaluate import DEFAULT_EVAL_SET, load_cases, run_eval
+    from agent_router.evaluate import DEFAULT_EVAL_SET, load_cases, routing_stats, run_eval
 
     cases = load_cases(args.cases or DEFAULT_EVAL_SET, split=args.split)
     router = _router(args)
     report = run_eval(lambda: router, cases)
+    stats = routing_stats(report)
+    stage = getattr(router.decider, "primary", router.decider)
     if args.json:
         _print_json(
             {
                 "backend": args.backend,
-                "embedder": embedder_key(getattr(router.decider, "embedder", None)),
+                "embedder": embedder_key(getattr(stage, "embedder", None)),
                 "split": args.split,
                 "threshold": router.config.threshold,
+                "routing": stats,
                 **report.to_dict(),
             }
         )
@@ -131,6 +168,12 @@ def cmd_eval(args: argparse.Namespace) -> int:
         f"n {report.n}  accuracy {report.accuracy:.3f}  FPR {report.fpr:.3f}  "
         f"misroute {report.misroute_rate:.3f}  errors {report.errors}"
     )
+    if args.backend == "cascade":
+        print(
+            f"escalation {stats['escalation_rate']:.3f} ({stats['escalated']}/{stats['n']})  "
+            f"fallbacks {stats['fallbacks']}"
+        )
+    print(f"latency mean {stats['mean_latency_ms']:.1f} ms  p95 {stats['p95_latency_ms']:.1f} ms")
     print("per entry (precision / recall / support):")
     for label, m in report.per_entry.items():
         print(f"  {label:<18} {m['precision']:.2f} / {m['recall']:.2f} / {int(m['support'])}")
@@ -194,6 +237,40 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_calibrate_cascade(args: argparse.Namespace) -> int:
+    from agent_router.core.catalog import load_catalog
+    from agent_router.deciders import registry
+    from agent_router.evaluate import (
+        DEFAULT_EVAL_SET,
+        calibrate_cascade,
+        load_cases,
+        write_calibration,
+    )
+
+    _check_backend("cascade")
+    _set_embedder(args.embedder)
+    catalog = load_catalog()
+    cases = load_cases(args.cases or DEFAULT_EVAL_SET, split="cal")
+    primary = registry.make_decider("local", catalog)
+    confirm = registry.make_decider("jev", catalog)
+    if args.timeout is not None and hasattr(confirm, "timeout"):
+        confirm.timeout = args.timeout  # type: ignore[attr-defined]
+    try:
+        res = calibrate_cascade(cases, catalog, primary, confirm)
+    except RuntimeError as exc:
+        raise CliError(str(exc)) from exc
+    print(
+        f"cascade: native_gate={res.native_gate} threshold={res.threshold} "
+        f"on {res.n_cases} cal cases ({res.embedder or 'unknown embedder'})\n"
+        f"  cascade accuracy={res.accuracy:.3f} FPR={res.fpr:.3f} "
+        f"escalation={res.escalation_rate:.3f} | jev-only accuracy={res.jev_accuracy:.3f} "
+        f"FPR={res.jev_fpr:.3f}"
+    )
+    path = write_calibration({"cascade": res}, args.out)
+    print(f"wrote {path}")
+    return 0
+
+
 # --- demo / run (optional modules) -------------------------------------------------------------
 
 
@@ -206,11 +283,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    import uvicorn
-
-    print(f"agent-router demo on http://{args.host}:{args.port}")
-    app = server.create_app() if hasattr(server, "create_app") else server.app
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    server.main(port=args.port, allow_shell=args.allow_shell)  # loopback only
     return 0
 
 
@@ -238,7 +311,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"{stamp} {event}")
 
     workspace = Path(args.workspace).resolve()
-    result = asyncio.run(run_agent(args.prompt, router, workspace, on_event))
+    result = asyncio.run(
+        run_agent(args.prompt, router, workspace, on_event, allow_shell=args.allow_shell)
+    )
     print(result)
     return 0
 
@@ -257,7 +332,10 @@ def _json_obj(text: str) -> dict[str, Any]:
 
 
 def _add_backend(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--backend", default="local", help="decider backend (default: local)")
+    p.add_argument(
+        "--backend",
+        help="decider backend (default: cascade when a Jev API key is set, else local)",
+    )
     p.add_argument("--embedder", choices=EMBEDDERS, help="local backend embedder")
     p.add_argument("--threshold", type=float, help="override the router threshold")
     p.add_argument("--timeout", type=float, help="hosted backend request timeout (s)")
@@ -294,15 +372,36 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quick", action="store_true", help="small grid (smoke test)")
     p.set_defaults(func=cmd_calibrate)
 
-    p = sub.add_parser("demo", help="start the visual demo server")
+    p = sub.add_parser(
+        "calibrate-cascade",
+        help="fit the cascade's native_gate on the cal split (asks Jev once per cal case)",
+    )
+    p.add_argument("--embedder", choices=EMBEDDERS, help="local stage embedder")
+    p.add_argument("--cases", help="eval set YAML (default: evals/eval_set.yaml)")
+    p.add_argument("--out", help="calibration JSON (default: the packaged calibration.json)")
+    p.add_argument("--timeout", type=float, default=15.0, help="Jev request timeout (s)")
+    p.set_defaults(func=cmd_calibrate_cascade)
+
+    p = sub.add_parser(
+        "demo", help="start the visual demo server on http://127.0.0.1 (loopback only)"
+    )
     p.add_argument("--port", type=int, default=8765)
-    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument(
+        "--allow-shell",
+        action="store_true",
+        help="auto-approve Bash/WebFetch in live agent runs (default: off)",
+    )
     p.set_defaults(func=cmd_demo)
 
     p = sub.add_parser("run", help="run the live agent and print its timeline")
     p.add_argument("prompt")
     p.add_argument("--mode", choices=["advisory", "enforce"], default="advisory")
     p.add_argument("--workspace", default=".")
+    p.add_argument(
+        "--allow-shell",
+        action="store_true",
+        help="auto-approve Bash/WebFetch for the agent (default: off)",
+    )
     _add_backend(p)
     p.set_defaults(func=cmd_run)
     return parser

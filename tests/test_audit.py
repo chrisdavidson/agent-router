@@ -54,6 +54,7 @@ KEYS = {
     "hint",
     "backend",
     "latency_ms",
+    "stages",
     "catalog_version",
     "thresholds",
 }
@@ -80,6 +81,7 @@ def test_skipped_record_has_same_schema():
     rec = log.record(EVENT, Decision(Action.SKIPPED, "disabled"), "7", RouterConfig())
     assert set(rec) == KEYS
     assert rec["probabilities"] == {} and rec["choice"] is None
+    assert rec["stages"] == []
     json.dumps(rec)
 
 

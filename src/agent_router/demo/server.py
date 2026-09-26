@@ -5,10 +5,14 @@
 API
 ---
 ``GET  /api/catalog``            catalog entries, the ``none`` option, default threshold/mode
-``GET  /api/backends``           ``available_backends()`` as a list (read per request)
-``POST /api/route``              ``{text, point, tool_name?, tool_input?, backend, mode?,
+``GET  /api/backends``           ``available_backends()`` as a list (read per request) and the
+                                 ``default_backend()`` (cascade with a Jev key, else local)
+``POST /api/route``              ``{text, point, tool_name?, tool_input?, backend?, mode?,
                                  threshold?}`` -> ``{decision, result, options, hint,
-                                 latency_ms, state, threshold, mode, backend}``; stateless
+                                 latency_ms, state, threshold, mode, backend}``; stateless.
+                                 ``result.stages`` lists the cascade's per-stage answers.
+                                 Without ``threshold``: ``AGENT_ROUTER_THRESHOLD`` if set,
+                                 else the backend's calibrated threshold, else 0.5
 ``POST /api/run``                ``{prompt, mode, backend}`` -> ``{token, stream}``: a random
                                  single-use token valid for ``RUN_TOKEN_TTL`` seconds
 ``GET  /api/run/stream``         ``?token=`` -> ``text/event-stream`` of the timeline events
@@ -32,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import secrets
 import shutil
@@ -57,6 +62,7 @@ from agent_router.core.hints import render_deny, render_hint
 from agent_router.core.router import NONE_OPTION, Router, build_state
 from agent_router.core.types import NONE_ID, ChoiceResult, HookPoint, OptionSpec, RouterEvent
 from agent_router.deciders import registry
+from agent_router.deciders.base import recommended_threshold
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +70,6 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_AUDIT_DIR = Path(".agent-router/audit")
 SAMPLE_AUDIT_DIR = REPO_ROOT / "audit"
-DEFAULT_BACKEND = "local"
 PLAYGROUND_SESSION = "playground"
 SKILL_TOOL = "Skill"
 ALLOWED_HOSTS = ("127.0.0.1", "localhost")
@@ -81,15 +86,15 @@ class RouteRequest(BaseModel):
     point: str = "prompt"
     tool_name: str | None = None
     tool_input: dict[str, Any] | None = None
-    backend: str = DEFAULT_BACKEND
+    backend: str | None = None  # None: ``default_backend()``
     mode: str | None = None
-    threshold: float | None = None
+    threshold: float | None = None  # None: the backend's calibrated threshold (or env/default)
 
 
 class RunRequest(BaseModel):
     prompt: str = Field(max_length=20_000)
     mode: str = "advisory"
-    backend: str = DEFAULT_BACKEND
+    backend: str | None = None  # None: ``default_backend()``
 
 
 class _LockedDecider:
@@ -99,6 +104,7 @@ class _LockedDecider:
         self._decider = decider
         self._lock = threading.Lock()
         self.name = getattr(decider, "name", "")
+        self.recommended_threshold = recommended_threshold(decider)
 
     def decide(self, state: str, options: dict[str, OptionSpec]) -> ChoiceResult:
         with self._lock:
@@ -189,6 +195,7 @@ def create_app(
     read_dirs = [audit_root] + ([SAMPLE_AUDIT_DIR] if audit_dir is None else [])
     cat = catalog if catalog is not None else load_catalog()
     base_config = _load_base_config()
+    env_threshold = bool(os.environ.get("AGENT_ROUTER_THRESHOLD", "").strip())
     run_fn = runner if runner is not None else _default_runner(allow_shell)
     run_slot = asyncio.Semaphore(1)  # one paid live run at a time
     tokens: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -216,11 +223,17 @@ def create_app(
                 deciders[name] = _LockedDecider(registry.make_decider(name, cat))
             return deciders[name]
 
-    def config_for(mode: str | None, threshold: float | None) -> RouterConfig:
+    def config_for(mode: str | None, threshold: float | None, decider: Any = None) -> RouterConfig:
+        """Request threshold, else ``AGENT_ROUTER_THRESHOLD``, else the decider's calibrated
+        one, else the default."""
         mode = mode if mode is not None else base_config.mode
         if mode not in MODES:
             raise HTTPException(400, f"mode must be one of {MODES}")
-        thr = threshold if threshold is not None else base_config.threshold
+        thr = threshold
+        if thr is None and not env_threshold:
+            thr = recommended_threshold(decider)
+        if thr is None:
+            thr = base_config.threshold
         if not 0.0 <= thr <= 1.0:
             raise HTTPException(400, "threshold must be in [0, 1]")
         return RouterConfig(mode=mode, threshold=thr)  # type: ignore[arg-type]
@@ -292,24 +305,26 @@ def create_app(
         available = registry.available_backends()
         return {
             "backends": [{"name": k, "available": bool(v)} for k, v in available.items()],
-            "default": DEFAULT_BACKEND,
+            "default": registry.default_backend(),
         }
 
     @app.post("/api/route")
     def post_route(req: RouteRequest) -> dict[str, Any]:
         # sync def: FastAPI runs it in the threadpool, so jev/openrouter never block the loop
         point = point_of(req.point)
-        config = config_for(req.mode, req.threshold)
+        config_for(req.mode, req.threshold)  # validate before building a backend
+        backend = req.backend or registry.default_backend()
         tool_name = req.tool_name or None
         if point == HookPoint.SKILL and not tool_name:
             tool_name = SKILL_TOOL
         if point == HookPoint.TOOL and not tool_name:
             raise HTTPException(400, "tool_name is required at the tool hook point")
-        check_backend(req.backend)
+        check_backend(backend)
         try:
-            decider = decider_for(req.backend)
+            decider = decider_for(backend)
         except Exception as exc:
-            raise HTTPException(503, f"could not start backend {req.backend!r}: {exc}") from exc
+            raise HTTPException(503, f"could not start backend {backend!r}: {exc}") from exc
+        config = config_for(req.mode, req.threshold, decider)
         event = RouterEvent(
             point=point,
             session_id=PLAYGROUND_SESSION,
@@ -338,6 +353,7 @@ def create_app(
                 "confidence": float(res.confidence),
                 "backend": res.backend,
                 "latency_ms": float(res.latency_ms),
+                "stages": [dict(st) for st in res.stages],
             },
             "options": [_option_json(e) for e in eligible] + [NONE_JSON],
             "hint": decision.hint,
@@ -347,7 +363,7 @@ def create_app(
             "tool_name": event.tool_name,
             "threshold": config.threshold,
             "mode": config.mode,
-            "backend": req.backend,
+            "backend": backend,
         }
 
     @app.post("/api/run")
@@ -356,6 +372,7 @@ def create_app(
         if not req.prompt.strip():
             raise HTTPException(400, "prompt is empty")
         config_for(req.mode, None)
+        req.backend = req.backend or registry.default_backend()
         check_backend(req.backend)
         if run_slot.locked():
             raise HTTPException(409, "another live run is in progress; wait for it to finish")
@@ -375,12 +392,12 @@ def create_app(
         params = entry[1]
         if run_slot.locked():
             raise HTTPException(409, "another live run is in progress; wait for it to finish")
-        config = config_for(params["mode"], None)
         backend = params["backend"]
         try:
             decider = await run_in_threadpool(decider_for, backend)
         except Exception as exc:
             raise HTTPException(503, f"could not start backend {backend!r}: {exc}") from exc
+        config = config_for(params["mode"], None, decider)
         session = f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
         router = Router(cat, decider, config, AuditLog(audit_root / f"{session}.jsonl"))
         return StreamingResponse(

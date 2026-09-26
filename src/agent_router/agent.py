@@ -52,16 +52,21 @@ def prepare_workspace(src: Path = DEMO_WORKSPACE) -> Path:
 
 
 def make_router(
-    backend: str = "local",
+    backend: str | None = None,
     config: RouterConfig | None = None,
     audit: AuditLog | None = None,
 ) -> Router:
-    """Router over the bundled catalog with the named decider backend."""
-    from agent_router.deciders.registry import make_decider
+    """Router over the bundled catalog with the named decider backend (default:
+    ``default_backend()``). Without ``config``, the environment config applies, with the
+    decider's calibrated threshold unless ``AGENT_ROUTER_THRESHOLD`` is set."""
+    from agent_router.deciders import registry
+    from agent_router.deciders.base import recommended_threshold
 
     catalog = load_catalog()
-    config = config if config is not None else RouterConfig.from_env()
-    return Router(catalog, make_decider(backend, catalog), config, audit)
+    decider = registry.make_decider(backend or registry.default_backend(), catalog)
+    if config is None:
+        config = RouterConfig.from_env(recommended_threshold=recommended_threshold(decider))
+    return Router(catalog, decider, config, audit)
 
 
 def build_options(

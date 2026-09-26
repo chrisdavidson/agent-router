@@ -23,3 +23,13 @@ class Decider(Protocol):
 
 class DeciderError(RuntimeError):
     """Raised by a backend that could not answer. The router fails open to native."""
+
+
+def recommended_threshold(decider: object) -> float | None:
+    """The router threshold a decider was calibrated for, or None (use the config default).
+
+    Read as an attribute (``LocalJevDecider`` sets it from calibration; the cascade derives
+    it) so wrappers that forward attributes keep working.
+    """
+    value = getattr(decider, "recommended_threshold", None)
+    return float(value) if value is not None else None
