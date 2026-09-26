@@ -7,12 +7,14 @@ Branch: `feat/router-mvp`
 - [x] Decisions: own Jev-spec decider + plugins · advisory (enforce optional) · offline MIT tools · Python/uv
 - [x] Spec + plan written
 - [x] Task 1: Foundation (types, catalog, decider protocol, catalog.yaml)
-- [ ] Task 1b: catalog tests
-- [ ] Task 2: Local Jev-spec decider
-- [ ] Task 3: Catalog tools, MCP server, commit-writer skill
-- [ ] Task 4: Router, hints, audit, config
-- [ ] Task 5: Hosted Jev + semantic-router backends, adapter docs
-- [ ] Task 6: Claude SDK adapter + inner agent runner (+ live test)
-- [ ] Task 7: Eval set, calibration, CLI
-- [ ] Task 8: Visual demo (playground / live / replay)
+- [x] Task 1b: catalog tests
+- [x] Task 2: Local Jev-spec decider
+- [x] Task 3: Catalog tools, MCP server, commit-writer skill
+- [x] Task 4: Router, hints, audit, config
+- [x] Task 5: Hosted Jev + semantic-router backends, adapter docs
+- [x] Task 5b: Local Qwen logprob backend + AnyJev adapter (Reddit/HN variants)
+- [x] Task 6: Claude SDK adapter + inner agent runner (+ live test)
+- [x] Task 7: Eval set, calibration, CLI
+- [x] Task 8: Visual demo (playground / live / replay)
+- [ ] Task 10: Cascade decider local→Jev as default (user decision)
 - [ ] Task 9: README, Makefile, docs, verification, PR

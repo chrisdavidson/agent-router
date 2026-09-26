@@ -156,6 +156,15 @@
 `deciders/registry.py`, `docs/adapters.md`, `tests/test_backends.py`
 
 **Interfaces:**
+- Transport ruling (verified live 2026-09-26): the SAME Jev body works on OpenRouter:
+  `POST https://openrouter.ai/api/alpha/decisions` with `Authorization: Bearer $OPENROUTER_API_KEY` and
+  `"model": "~typesafe/jev-latest"`; response `{"model":"typesafe/jev-1.13-20260917","answers":{"route":{"type":"choice",
+  "choice":"none","probabilities":{"none":0.59,"json-query":0,"exact-calc":0.41},"confidence":0.39}},"usage":{...,"cost":1.5e-05},"id":...,"provider":"TypeSafe"}`.
+  So `TypeSafeJevDecider` takes `transport: Literal["auto","openrouter","typesafe"]="auto"`: auto → openrouter if
+  `OPENROUTER_API_KEY` set, else typesafe if `TYPESAFE_API_KEY` set, else DeciderError. openrouter uses
+  base_url `https://openrouter.ai/api/alpha/decisions` and model `~typesafe/jev-latest`; typesafe uses
+  `https://api.typesafe.ai/v1/systemone` and model `jev-latest`. Record the served `model` string in `ChoiceResult.backend`
+  (e.g. `jev:typesafe/jev-1.13-20260917`). Add a `@pytest.mark.live` test that calls OpenRouter when the key is set.
 - `TypeSafeJevDecider(api_key=None, model="jev-latest", base_url="https://api.typesafe.ai", timeout=2.0, client: httpx.Client|None=None)`,
   `name="jev"`. POST `/v1/systemone` body `{"state": state, "model": model, "questions": {"route": {"type":"choice","instructions": "Which catalog tool, if any, fits this agent step? Choose none if the agent's own tools are enough.", "criteria": {id: {"what":..., "not_for":[...], "examples":[...]}}}}}`,
   header `Authorization: Bearer`. Parse `answers.route.{choice,probabilities,confidence}`. Non-2xx / missing key → `DeciderError`.
@@ -171,6 +180,38 @@
 - [ ] Tests: Jev backend with `httpx.MockTransport` (request body shape, parse, 422 → DeciderError, no key → DeciderError);
   semantic-router test `pytest.importorskip("semantic_router")`; registry lists `local` as available.
 - [ ] Commit `feat(deciders): hosted Jev and semantic-router backends behind one contract`.
+
+### Task 5b: Local-LLM logprob backends (Reddit/HN variants)
+
+**Depends on:** Task 5 registry. **Files:** Create `src/agent_router/deciders/logprob.py`,
+`src/agent_router/deciders/anyjev_backend.py`, `tests/test_logprob.py`; modify `deciders/registry.py`
+(register `logprob`, `anyjev`), `pyproject.toml` (extras `llm = ["llama-cpp-python>=0.3", "huggingface-hub>=0.24"]`,
+`anyjev = ["anyjev>=0.0.2", "torch>=2.3", "transformers>=4.45"]`), `docs/research.md` (section "Local Jev alternatives").
+
+**Interfaces:**
+- `LogprobJevDecider(repo_id="unsloth/Qwen3-0.6B-GGUF", filename="Qwen3-0.6B-Q4_K_M.gguf", permutations=1, llm=None)`,
+  `name="logprob"`. Technique ("Jev in 25 lines", nobodywho.ai): prompt lists options as letters A.., each with its
+  `what`; ask for the single best letter (include `none` as an option); read the final-token logits for each letter
+  token; `logprobs = l - numpy.logaddexp.reduce(l)`; `probabilities = exp(logprobs)` keyed by option id.
+  `permutations>1` = AnyJev-L0-style debiasing: average probabilities over cyclic rotations of option order.
+  `confidence = 1 - H(p)/log(n)`. llama-cpp-python imported lazily → `DeciderError("pip install agent-router[llm]")`.
+  `llm` injectable (any object with `.tokenize()` and a logits API) so unit tests use a fake with scripted logits.
+- Engines for `LogprobJevDecider` (`engine="llama_cpp"|"openai"`): the `openai` engine calls any
+  OpenAI-compatible `/chat/completions` (default `base_url="https://openrouter.ai/api/v1"`, key from
+  `OPENROUTER_API_KEY`, default `model="qwen/qwen3.7-flash"`) with `max_tokens=1, temperature=0, logprobs=true,
+  top_logprobs=20, reasoning={"enabled": false}, provider={"require_parameters": true}`; letters missing from
+  top_logprobs get the smallest seen logprob minus 5 (floor). Verified 2026-09-26: returns
+  `[('A',-0.043),('C',-3.418),('B',-6.293)]` for the calc question. Registry names: `logprob` (local llama.cpp)
+  and `openrouter` (openai engine). Uses httpx (already a dependency); `client` injectable for tests via
+  `httpx.MockTransport`. No key → `DeciderError`.
+- Note in docs/research.md: Jev is on OpenRouter as `~typesafe/jev-latest` (a "decisions" model, served only by
+  `POST https://openrouter.ai/api/alpha/decisions`, not chat/completions); `typesafe/jev-router` is a different
+  product (LLM-selection router). See the `jev` backend (Task 5).
+- `AnyJevDecider(model="Qwen/Qwen3-0.6B")`, `name="anyjev"`: thin adapter over `anyjev` (Apache-2.0 — mark NON-MIT
+  optional plugin in docstring and docs); lazy import → `DeciderError`. Map its choice output into ChoiceResult.
+- [ ] Unit tests with fake llm: letter mapping, normalisation sums to 1, permutation averaging undoes a position bias,
+  missing dependency → DeciderError. `@pytest.mark.model` smoke test for real GGUF if installed (skip otherwise).
+- [ ] Commit `feat(deciders): local Qwen logprob backend and AnyJev adapter`.
 
 ### Task 6: Claude Agent SDK adapter and inner agent runner
 
@@ -249,3 +290,37 @@ with arxiv ids), `audit/sample-session.jsonl`, `docs/plans/2026-09-26-agent-rout
 - Run full verification: `make lint test test-model`, `make eval`, one live run recorded to
   `audit/sample-session.jsonl`, screenshots of demo.
 - Push branch, open PR to `main`.
+
+### Task 10: Cascade decider (local → Jev) as the default path
+
+**Decision (user, 2026-09-26):** default = cascade. Holdout (n=59): Jev 0.949/0.000, local-model2vec 0.780/0.250,
+openrouter-qwen 0.763/0.292, local Qwen3-0.6B 0.525/0.708. Eval targets (≥0.85 acc, ≤0.10 FPR) apply to the
+default path; the offline MIT classifier alone gets an honest regression floor.
+
+**Files:** Create `src/agent_router/deciders/cascade.py`, `tests/test_cascade.py`; modify `deciders/registry.py`
+(register `cascade`, add `default_backend()`), `deciders/local.py` (calibration objective/temperature only),
+`evaluate.py` + `calibration.json` (objective must enforce FPR on the cal split; temperature bounded so the
+distribution stays informative), `cli.py`/`agent.py`/`demo/server.py` (use `default_backend()`),
+`demo/static/*` (show cascade stages), `tests/test_eval.py` (targets on default path as `live`; local floor as `model`).
+
+**Interfaces:**
+- `CascadeDecider(primary: Decider, confirm: Decider, native_gate: float = 0.9)`, `name="cascade"`.
+  `decide(state, options)`: run primary. If primary.choice == none and p(none) ≥ native_gate → return primary
+  result with `backend="cascade:local"` (no escalation). Otherwise call confirm and return its result with
+  `backend="cascade:<confirm.backend>"`. If confirm raises DeciderError → return a NONE-biased fallback: primary's
+  result, but if its choice ≠ none and p(choice) < 0.95, move the choice to none (renormalised); backend
+  `"cascade:local-fallback"`. Expose `last_stages: list[dict]` (per-stage choice/probabilities/latency) — attach
+  stage info to ChoiceResult via a new optional field `stages: tuple[dict, ...] = ()` in core/types.py (additive).
+- `default_backend() -> str`: "cascade" if jev is available (OPENROUTER_API_KEY or TYPESAFE_API_KEY) else "local".
+- `make_decider("cascade", catalog)` = CascadeDecider(local, jev). `native_gate` calibrated on the cal split to
+  minimise escalations subject to cal accuracy/FPR not degrading vs jev-only; store in calibration.json under "cascade".
+- Carried in from earlier reviews (Task 10 owns these files next):
+  - CLI: add `--allow-shell` to `agent-router demo` and `agent-router run` (default off, matching demo server);
+    remove or clarify `demo --host` (TrustedHost only serves 127.0.0.1/localhost).
+  - Calibrated threshold must apply on every path (router factory used by agent.py, demo server, CLI), not only
+    `evaluate.make_router`: add `recommended_threshold()` on the decider (cascade delegates to its stages) and let
+    RouterConfig.from_env() use it unless AGENT_ROUTER_THRESHOLD is set.
+  - Eval test: `@pytest.mark.live` holdout test on the cascade asserting TARGET_ACCURACY/TARGET_FPR from evaluate.py,
+    and report the escalation rate (fraction of cases sent to Jev) and mean latency.
+  - Demo: when a decision carries `stages`, show both bar sets (local, then Jev) with a small "escalated" marker;
+    the default classifier in the UI becomes `default_backend()`.
