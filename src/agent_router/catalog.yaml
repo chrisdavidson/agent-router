@@ -1,0 +1,148 @@
+# agent-router catalog: the ONLY options the decision model can choose from (plus `none`).
+# Every entry must be MIT-licensed; the loader rejects anything else.
+# `examples` / `not_for` are Jev structured criteria and the local classifier's exemplars.
+version: "2026-09-26.1"
+
+entries:
+  - id: exact-calc
+    kind: tool
+    name: Exact calculator
+    project: agent-router (own code)
+    license: MIT
+    url: https://github.com/usathyan/agent-router
+    target: mcp__agent_router__calc
+    points: [prompt, tool]
+    replaces: [Bash]
+    what: >
+      Exact arithmetic and math evaluation: fractions, big integers, powers, roots,
+      percentages, factorials, gcd/lcm, compound interest, without floating point error.
+    not_for:
+      - symbolic calculus or algebra proofs
+      - statistics over a dataset file
+      - running or testing a program
+    examples:
+      - what is 17% of 2,340 exactly
+      - compute 2**200 exactly
+      - what's 3/7 + 5/11 as a fraction
+      - calculate the compound interest on 10000 at 5% for 7 years
+      - python3 -c "print(123456789 * 987654321)"
+      - echo "scale=10; 22/7" | bc
+      - what is the gcd of 462 and 1071
+      - how much is 12 factorial
+
+  - id: json-query
+    kind: tool
+    name: JSON query (JMESPath)
+    project: jmespath.py
+    license: MIT
+    url: https://github.com/jmespath/jmespath.py
+    target: mcp__agent_router__json_query
+    points: [prompt, tool]
+    replaces: [Bash, Read]
+    what: >
+      Extract, filter or reshape fields from a JSON file or JSON text with a JMESPath
+      expression, e.g. list names where a field matches, pluck nested values, count items.
+    not_for:
+      - editing or writing JSON files
+      - validating JSON against a schema
+      - YAML or CSV data
+    examples:
+      - get all package names from package-lock.json
+      - list the ids of items whose status is failed in results.json
+      - jq '.dependencies | keys' package.json
+      - cat data.json | jq '.users[] | select(.active) | .email'
+      - python -c "import json; print(json.load(open('config.json'))['servers'][0]['host'])"
+      - how many entries are in the records array of fixtures.json
+      - pull the version field out of this JSON blob
+
+  - id: html-to-markdown
+    kind: tool
+    name: HTML to Markdown
+    project: python-markdownify
+    license: MIT
+    url: https://github.com/matthewwithanm/python-markdownify
+    target: mcp__agent_router__html_to_markdown
+    points: [prompt, tool]
+    replaces: [Read, Bash, WebFetch]
+    what: >
+      Convert a local HTML file or HTML text into clean Markdown, keeping headings, links,
+      lists and tables, dropping scripts and styles.
+    not_for:
+      - fetching live web pages or searching the web
+      - converting Markdown to HTML
+      - PDF or Word documents
+    examples:
+      - convert docs/index.html to markdown
+      - turn this saved web page report.html into readable markdown
+      - pandoc page.html -t markdown
+      - strip the html tags from export.html and give me the text with headings
+      - summarize the saved html file changelog.html
+      - read the html file and show it as markdown
+
+  - id: repo-stats
+    kind: tool
+    name: Repository stats
+    project: agent-router (own code)
+    license: MIT
+    url: https://github.com/usathyan/agent-router
+    target: mcp__agent_router__repo_stats
+    points: [prompt, tool]
+    replaces: [Bash, Glob]
+    what: >
+      Count files and lines of code per language in a directory tree, skipping .git,
+      virtualenvs and node_modules; report totals and the largest files.
+    not_for:
+      - git history, blame or commit counts
+      - finding a specific symbol or string in code
+      - test coverage
+    examples:
+      - how many lines of python are in this repo
+      - count lines of code by language
+      - cloc .
+      - find . -name "*.py" | xargs wc -l
+      - what are the biggest source files in src
+      - give me a breakdown of the codebase size
+
+  - id: commit-writer
+    kind: skill
+    name: Conventional commit writer
+    project: agent-router (own skill)
+    license: MIT
+    url: https://github.com/usathyan/agent-router
+    target: commit-writer
+    points: [prompt, skill]
+    replaces: [Skill]
+    what: >
+      Write a Conventional Commits message (type(scope): subject, body, footer) from a
+      description of a change or a diff.
+    not_for:
+      - running git commit or pushing
+      - writing release notes or changelogs for many commits
+      - reviewing code quality
+    examples:
+      - write a commit message for these changes
+      - draft a conventional commit for fixing the login timeout bug
+      - what should my commit message be for adding retry logic
+      - give me a feat commit message for the new export button
+      - summarize this diff as a commit message
+
+# Exemplars where the agent's own tools are enough (compete as the `none` option).
+native_examples:
+  - explain what this function does
+  - fix the failing test in tests/test_api.py
+  - refactor the parser into smaller functions
+  - run the test suite
+  - git status
+  - ls -la
+  - npm install
+  - read src/main.py
+  - write a README for this project
+  - what is the capital of France
+  - add type hints to utils.py
+  - search the code for where the config is loaded
+  - create a new file hello.py that prints hello
+  - review this pull request
+  - how do I center a div in css
+  - install the dependencies and start the dev server
+  - rename the variable foo to bar across the project
+  - write unit tests for the calculator module

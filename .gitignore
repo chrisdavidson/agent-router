@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+.agent-router/
+audit/*.jsonl
+!audit/sample-session.jsonl
+.DS_Store
