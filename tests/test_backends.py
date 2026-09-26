@@ -259,7 +259,7 @@ def test_available_backends_no_keys(no_keys):
     avail = available_backends()
     assert avail["local"] is True
     assert avail["jev"] is False
-    assert set(avail) == {"local", "semantic-router", "jev"}
+    assert {"local", "semantic-router", "jev"} <= set(avail)
 
 
 def test_available_backends_with_key(no_keys, monkeypatch):

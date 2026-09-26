@@ -20,6 +20,8 @@ dependencies = [
 
 [project.optional-dependencies]
 semantic-router = ["semantic-router>=0.1.16"]
+llm = ["llama-cpp-python>=0.3", "huggingface-hub>=0.24"]
+anyjev = ["anyjev>=0.0.2", "torch>=2.3", "transformers>=4.45"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
 
 [project.scripts]
