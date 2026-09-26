@@ -8,8 +8,8 @@ Rules (in order):
 5. ask the decider; any exception                         -> NATIVE (fail open)
 6. choice outside the offered options                     -> treated as ``none``
 7. ``none`` or p(choice) < threshold                      -> NATIVE
-8. entry already suggested this (session, turn)           -> SKIPPED
-9. enforce mode at TOOL -> ENFORCE (deny); else SUGGEST (hint)
+8. enforce mode at TOOL -> ENFORCE (deny) every time; marks the entry as suggested
+9. entry already suggested this (session, turn) -> SKIPPED; else SUGGEST (hint)
 Every call writes exactly one audit record.
 """
 
@@ -120,8 +120,20 @@ class Router:
             )
         entry = self.catalog.get(choice)
         assert entry is not None  # eligible entries come from the catalog
-        # 8. once per (session, turn, entry)
         key = (event.session_id, event.turn_id, entry.id)
+        # 8. enforce at TOOL denies every matching call; it marks but never consults the set
+        if cfg.mode == "enforce" and event.point == HookPoint.TOOL:
+            with self._lock:
+                self._suggested.add(key)
+            return Decision(
+                Action.ENFORCE,
+                f"p={prob:.3f} >= {cfg.threshold:.3f}, enforce mode",
+                entry_id=entry.id,
+                hint=render_deny(entry, tool_name or ""),
+                result=result,
+                options=option_ids,
+            )
+        # 9. advisory hints: once per (session, turn, entry)
         with self._lock:
             if key in self._suggested:
                 return Decision(
@@ -132,16 +144,6 @@ class Router:
                     options=option_ids,
                 )
             self._suggested.add(key)
-        # 9. deny (enforce at TOOL) or advise
-        if cfg.mode == "enforce" and event.point == HookPoint.TOOL:
-            return Decision(
-                Action.ENFORCE,
-                f"p={prob:.3f} >= {cfg.threshold:.3f}, enforce mode",
-                entry_id=entry.id,
-                hint=render_deny(entry, tool_name or ""),
-                result=result,
-                options=option_ids,
-            )
         return Decision(
             Action.SUGGEST,
             f"p={prob:.3f} >= {cfg.threshold:.3f}",

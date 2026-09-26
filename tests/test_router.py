@@ -245,6 +245,30 @@ def test_enforce_denies_at_tool():
     assert d.hint == render_deny(CALC, "Bash")
 
 
+def test_enforce_denies_every_matching_call_same_turn():
+    router, _, _ = make(result("exact-calc"), result("exact-calc"), mode="enforce")
+    bash = ev(HookPoint.TOOL, tool_name="Bash", tool_input={"command": "bc"})
+    assert router.route(bash).action == Action.ENFORCE
+    assert router.route(bash).action == Action.ENFORCE
+
+
+def test_enforce_after_prompt_suggest_same_turn():
+    router, _, _ = make(*(result("exact-calc") for _ in range(3)), mode="enforce")
+    assert router.route(ev(HookPoint.PROMPT)).action == Action.SUGGEST
+    d = router.route(ev(HookPoint.TOOL, tool_name="Bash", tool_input={"command": "bc"}))
+    assert d.action == Action.ENFORCE
+    # an ENFORCE still marks the entry, so a later advisory hint stays suppressed
+    d = router.route(ev(HookPoint.PROMPT))
+    assert (d.action, d.reason) == (Action.SKIPPED, "already suggested this turn")
+
+
+def test_enforce_marks_entry_for_later_suggest():
+    router, _, _ = make(result("exact-calc"), result("exact-calc"), mode="enforce")
+    tool = ev(HookPoint.TOOL, tool_name="Bash", tool_input={"command": "bc"})
+    assert router.route(tool).action == Action.ENFORCE
+    assert router.route(ev(HookPoint.PROMPT)).action == Action.SKIPPED
+
+
 def test_enforce_mode_prompt_stays_suggest():
     router, _, _ = make(result("exact-calc"), mode="enforce")
     d = router.route(ev(HookPoint.PROMPT))
