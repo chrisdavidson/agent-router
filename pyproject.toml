@@ -39,7 +39,7 @@ markers = [
   "model: needs the model2vec potion-base-8M weights (downloads once from Hugging Face)",
   "live: runs a real Claude Agent SDK session (uses your Claude login, costs tokens)",
 ]
-addopts = "-m 'not live'"
+addopts = "-m 'not live and not model'"
 
 [tool.ruff]
 line-length = 100
