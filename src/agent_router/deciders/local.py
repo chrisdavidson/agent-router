@@ -28,6 +28,7 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass, fields
@@ -177,16 +178,18 @@ class LocalJevDecider:
         self.params = params if params is not None else LocalParams()
         self.native_examples = tuple(native_examples)
         self._cache: dict[tuple[str, str], np.ndarray] = {}
+        self._cache_lock = threading.Lock()  # deciders are shared across hook threads
 
     # -- embeddings --------------------------------------------------------
 
     def _embed_exemplars(self, keys: list[tuple[str, str]]) -> None:
-        missing = list(dict.fromkeys(k for k in keys if k not in self._cache))
-        if not missing:
-            return
-        vecs = self.embedder.encode([text for _, text in missing])
-        for key, vec in zip(missing, vecs, strict=True):
-            self._cache[key] = vec
+        with self._cache_lock:  # one thread embeds a missing exemplar, the others reuse it
+            missing = list(dict.fromkeys(k for k in keys if k not in self._cache))
+            if not missing:
+                return
+            vecs = self.embedder.encode([text for _, text in missing])
+            for key, vec in zip(missing, vecs, strict=True):
+                self._cache[key] = vec
 
     def _cosines(self, state_vec: np.ndarray, key_id: str, texts: Iterable[str]) -> list[float]:
         return [float(self._cache[(key_id, t)] @ state_vec) for t in texts]

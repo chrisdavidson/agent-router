@@ -291,3 +291,39 @@ def test_scores_the_current_step_only(decider, options):
     )
     assert with_recent.choice == alone.choice
     assert with_recent.probabilities == alone.probabilities
+
+
+def test_concurrent_decides_embed_each_exemplar_once(catalog, options):
+    import threading
+    import time
+
+    class SlowCounting(HashingEmbedder):
+        def __init__(self):
+            super().__init__()
+            self.encoded = []
+            self._lock = threading.Lock()
+
+        def encode(self, texts):
+            if len(texts) > 1:  # exemplar batches (the state is encoded alone)
+                time.sleep(0.05)
+                with self._lock:
+                    self.encoded.extend(texts)
+            return super().encode(texts)
+
+    emb = SlowCounting()
+    d = LocalJevDecider(embedder=emb, native_examples=catalog.native_examples)
+    errors = []
+
+    def run():
+        try:
+            d.decide("compute 2**200 exactly", options)
+        except Exception as exc:  # pragma: no cover - reported below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors
+    assert len(emb.encoded) == len(set(emb.encoded))
