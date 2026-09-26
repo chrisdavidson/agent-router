@@ -9,6 +9,9 @@ PORT    ?= 8765
 # Offline by default. BACKEND=cascade or BACKEND=jev calls TypeSafe Jev (paid, needs a key).
 BACKEND ?= local
 Q       ?= What is 17% of 2,340 exactly?
+# `make route` reads Q from the environment, so quotes and backticks in it stay literal
+# (a literal $ is written $$, as in any make variable).
+export Q
 
 .DEFAULT_GOAL := help
 .PHONY: help venv install clean test test-model test-live lint format eval calibrate \
@@ -57,4 +60,4 @@ run: ## Start the demo server (http://127.0.0.1:8765, override with PORT=)
 	$(CLI) demo --port $(PORT)
 
 route: ## Route one prompt: make route Q="..." [BACKEND=cascade]
-	$(CLI) route --backend $(BACKEND) "$(Q)"
+	$(CLI) route --backend $(BACKEND) -- "$$Q"
