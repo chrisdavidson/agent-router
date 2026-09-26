@@ -41,7 +41,7 @@ flowchart LR
     H1 --> G
     H2 --> G
     X --> AG["Agent: additionalContext<br/>or permission deny"]
-    X -. "one record per decision" .-> AU[("audit JSONL")]
+    X -.->|one record per decision| AU[("audit JSONL")]
 ```
 
 1. The adapter (`adapters/claude_sdk.py`) converts each hook call into a `RouterEvent`: the hook point,

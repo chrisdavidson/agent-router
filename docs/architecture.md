@@ -40,17 +40,17 @@ flowchart TB
     DEMO["demo/server.py<br/>FastAPI + static UI"]
     CLI["cli.py<br/>route, eval, calibrate, demo, run"]
 
-    SDK -- "hook callbacks" --> HK
-    HK -- "RouterEvent" --> RT
-    RT -- "Decision" --> HK
-    SDK -- "tool calls" --> MCP
+    SDK -->|hook callbacks| HK
+    HK -->|RouterEvent| RT
+    RT -->|Decision| HK
+    SDK -->|tool calls| MCP
     TL --> MCP
     MCP --> TOOLS
     RT --> CT
     RT --> HT
     RT --> AU
     RT --> CF
-    RT -- "decide()" --> CAS
+    RT -->|decide| CAS
     CAS --> LOC
     CAS --> JEV
     REG --> CAS

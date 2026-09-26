@@ -53,7 +53,7 @@ calibrate: ## Re-fit local decider params on the cal split (rewrites calibration
 calibrate-cascade: ## Re-fit the cascade gate (PAID: one Jev call per cal case)
 	$(CLI) calibrate-cascade
 
-run: ## Start the demo server on http://127.0.0.1:$(PORT)
+run: ## Start the demo server (http://127.0.0.1:8765, override with PORT=)
 	$(CLI) demo --port $(PORT)
 
 route: ## Route one prompt: make route Q="..." [BACKEND=cascade]
