@@ -378,3 +378,28 @@ async def test_calc_handler_missing_argument():
     assert res["content"][0]["text"] == "Error: missing required argument 'expression'"
     res = await tools["json_query"].handler({"path": "data/orders.json"})
     assert res["content"][0]["text"] == "Error: missing required argument 'expression'"
+
+
+# ---------------------------------------------------------------- fix round 2: flat chains
+
+
+def test_calc_long_flat_sum():
+    expr = "+".join(str(i) for i in range(1, 251))
+    assert len(expr) <= calc.MAX_EXPRESSION_CHARS
+    assert calc.evaluate(expr) == str(sum(range(1, 251)))
+
+
+def test_calc_long_flat_product():
+    expr = "*".join(["3"] * 250)
+    assert calc.evaluate(expr) == str(3**250)
+
+
+def test_calc_long_mixed_chain():
+    expr = "-".join(["1000"] + ["1/3"] * 150)
+    assert len(expr) <= calc.MAX_EXPRESSION_CHARS
+    assert calc.evaluate(expr) == "950"
+
+
+def test_calc_deep_unary_still_rejected_cleanly():
+    with pytest.raises(ValueError, match="nested too deeply"):
+        calc.evaluate("-" * 999 + "1")

@@ -162,6 +162,20 @@ def _bits(x: Fraction) -> int:
     return x.numerator.bit_length() + x.denominator.bit_length()
 
 
+def _binop(op_node: ast.operator, left: Fraction, right: Fraction, state: _Inexact) -> Fraction:
+    if isinstance(op_node, ast.Pow):
+        return _checked(_pow(left, right, state))
+    op = _BINOPS.get(type(op_node))
+    if op is None:
+        raise ValueError(f"unsupported operator {type(op_node).__name__}")
+    if _bits(left) + _bits(right) > MAX_RESULT_BITS:
+        raise ValueError("result too large")
+    try:
+        return op(left, right)
+    except ZeroDivisionError as e:
+        raise ValueError("division by zero") from e
+
+
 def _checked(x: Fraction) -> Fraction:
     if _bits(x) > MAX_RESULT_BITS:
         raise ValueError("result too large")
@@ -181,18 +195,15 @@ def _eval(node: ast.AST, state: _Inexact, depth: int = 0) -> Fraction:
         v = _eval(node.operand, state, depth + 1)
         return -v if isinstance(node.op, ast.USub) else v
     if isinstance(node, ast.BinOp):
-        left, right = _eval(node.left, state, depth + 1), _eval(node.right, state, depth + 1)
-        if isinstance(node.op, ast.Pow):
-            return _checked(_pow(left, right, state))
-        op = _BINOPS.get(type(node.op))
-        if op is None:
-            raise ValueError(f"unsupported operator {type(node.op).__name__}")
-        if _bits(left) + _bits(right) > MAX_RESULT_BITS:
-            raise ValueError("result too large")
-        try:
-            return op(left, right)
-        except ZeroDivisionError as e:
-            raise ValueError("division by zero") from e
+        # "a+b+c+..." parses as a left-leaning chain; walk it iteratively so long flat
+        # sums/products don't count as nesting. Only right operands add depth.
+        chain = [node]
+        while isinstance(chain[-1].left, ast.BinOp):
+            chain.append(chain[-1].left)
+        acc = _eval(chain[-1].left, state, depth + 1)
+        for link in reversed(chain):
+            acc = _binop(link.op, acc, _eval(link.right, state, depth + 1), state)
+        return acc
     if isinstance(node, ast.Call):
         if not isinstance(node.func, ast.Name) or node.keywords:
             raise ValueError("only plain calls to supported functions are allowed")
