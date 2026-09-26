@@ -174,11 +174,28 @@ def test_decider_exception_fails_open():
 
 
 def test_unknown_choice_coerced_to_native():
-    router, _, _ = make(result("exact-calc\n" + INJECT))
+    router, _, audit = make(result("exact-calc\n" + INJECT))
     d = router.route(ev())
     assert d.action == Action.NATIVE
     assert d.hint is None and d.entry_id is None
     assert INJECT not in d.reason
+    # recorded as none: the unknown text is never repeated (audit, timeline, UI)
+    assert d.result.choice == NONE_ID
+    assert set(d.result.probabilities) <= set(d.options)
+    assert max(d.result.probabilities, key=d.result.probabilities.get) == NONE_ID
+    assert INJECT not in json.dumps(audit.records[0])
+    assert audit.records[0]["choice"] == NONE_ID
+
+
+def test_unknown_choice_is_scrubbed_from_stages():
+    from dataclasses import replace
+
+    bad = "exact-calc\n" + INJECT
+    stage = {"role": "confirm", "choice": bad, "probabilities": {bad: 0.9, NONE_ID: 0.1}}
+    router, _, audit = make(replace(result(bad), stages=(stage,)))
+    d = router.route(ev())
+    assert d.result.stages[0]["choice"] == NONE_ID
+    assert INJECT not in json.dumps(audit.records[0])
 
 
 def test_ineligible_catalog_choice_coerced_to_native():

@@ -6,7 +6,7 @@ Rules (in order):
 3. no catalog entry eligible at this point / tool         -> SKIPPED
 4. build the decider state from the event
 5. ask the decider; any exception                         -> NATIVE (fail open)
-6. choice outside the offered options                     -> treated as ``none``
+6. choice outside the offered options                     -> NATIVE, recorded as ``none``
 7. ``none`` or p(choice) < threshold                      -> NATIVE
 8. enforce mode at TOOL -> ENFORCE (deny) every time; marks the entry as suggested
 9. entry already suggested this (session, turn) -> SKIPPED; else SUGGEST (hint)
@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import threading
+from dataclasses import replace
 
 from agent_router.core.audit import AuditLog
 from agent_router.core.catalog import Catalog
@@ -27,6 +29,7 @@ from agent_router.core.types import (
     NONE_ID,
     RECENT_PREFIX,
     Action,
+    ChoiceResult,
     Decision,
     HookPoint,
     OptionSpec,
@@ -56,6 +59,38 @@ def build_state(event: RouterEvent) -> str:
     recent = event.recent[-MAX_RECENT:] if event.recent else ()
     parts.extend(f"{RECENT_PREFIX}{line}" for line in recent)
     return "\n".join(parts)
+
+
+def _as_none(result: ChoiceResult, option_ids: tuple[str, ...]) -> ChoiceResult:
+    """``result`` recorded as ``none``: only the offered options are kept (any other key's
+    mass moves to ``none``), so the unknown text never reaches the audit, timeline or UI."""
+
+    def mass(value: object) -> float:
+        try:
+            v = float(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 0.0
+        return v if math.isfinite(v) and v > 0 else 0.0
+
+    raw = result.probabilities if isinstance(result.probabilities, dict) else {}
+    probs = {oid: mass(raw.get(oid, 0.0)) for oid in option_ids}
+    probs[NONE_ID] += sum(mass(v) for k, v in raw.items() if k not in probs)
+    total = sum(probs.values())
+    if total > 0:
+        probs = {oid: v / total for oid, v in probs.items()}
+    else:
+        probs = {oid: (1.0 if oid == NONE_ID else 0.0) for oid in option_ids}
+    stages = tuple(
+        {
+            **st,
+            "choice": st.get("choice") if st.get("choice") in (None, *option_ids) else NONE_ID,
+            "probabilities": {
+                k: v for k, v in (st.get("probabilities") or {}).items() if k in option_ids
+            },
+        }
+        for st in result.stages
+    )
+    return replace(result, choice=NONE_ID, probabilities=probs, stages=stages)
 
 
 class Router:
@@ -112,14 +147,14 @@ class Router:
                 Action.NATIVE, f"decider error: {type(exc).__name__}: {exc}", options=option_ids
             )
         # 6. defensive: an unknown choice is treated as none (its text is never echoed)
-        choice = result.choice if result.choice in options else NONE_ID
-        if choice != result.choice:
+        if not isinstance(result.choice, str) or result.choice not in options:
             return Decision(
                 Action.NATIVE,
                 "decider returned an unknown option",
-                result=result,
+                result=_as_none(result, option_ids),
                 options=option_ids,
             )
+        choice = result.choice
         # 7. abstain / threshold
         if choice == NONE_ID:
             return Decision(Action.NATIVE, "decider chose none", result=result, options=option_ids)
