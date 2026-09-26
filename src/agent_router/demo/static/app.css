@@ -216,6 +216,21 @@ button:disabled { opacity: 0.55; cursor: progress; }
 .why dt { font-weight: 600; }
 .why dd { margin: 0; overflow-wrap: anywhere; }
 
+/* cascade: the local stage, then Jev; only the deciding stage carries the threshold */
+.stages { display: grid; gap: 12px; }
+.stage-note {
+  margin: 0; justify-self: start; font-size: 12.5px; font-weight: 700;
+  padding: 3px 10px; border-radius: 999px; background: var(--none-soft); color: var(--ink-2);
+}
+.stage-note.escalated { color: var(--focus); background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--rule); }
+.stage-note.fallback { color: var(--stop); background: var(--stop-soft); }
+.stage { border-left: 2px solid var(--rule); padding-left: 12px; }
+.stage.deciding { border-left-color: var(--ink); }
+.stage:not(.deciding) .bars { opacity: 0.8; }
+.stage-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; margin-bottom: 6px; }
+.stage-name { font-size: 13px; font-weight: 700; }
+.stage-meta { font-size: 12px; color: var(--ink-2); font-family: var(--mono); overflow-wrap: anywhere; }
+
 .board-empty { color: var(--ink-2); padding: 30px 0; text-align: center; }
 .loading { opacity: 0.55; transition: opacity 120ms; }
 

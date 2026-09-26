@@ -10,6 +10,7 @@ const state = {
   entries: new Map(), // id -> entry
   backends: [], // [{name, available}]
   threshold: 0.5,
+  thrTouched: false, // until the slider moves, each backend routes at its own calibrated threshold
 };
 
 const PRESETS = [
@@ -98,6 +99,7 @@ function toCheckpoint(src) {
     optionIds,
     confidence: (result && result.confidence) ?? src.confidence ?? null,
     backend: (result && result.backend) || src.backend || null,
+    stages: (result && result.stages) || src.stages || [],
     latency: src.latency_ms ?? (result && result.latency_ms) ?? null,
     hint: src.hint || null,
     hintRestored: !!src.hint_restored,
@@ -153,16 +155,19 @@ function richText(text) {
 
 /* -- rendering ------------------------------------------------------------- */
 
-function renderBars(cp, t) {
+/** Bars for one distribution. `showThr=false` for a cascade stage that did not decide. */
+function renderBars(cp, t, showThr = true) {
   const bars = el("div", { class: "bars", role: "list", "aria-label": "Probability per option" });
   const thr = Math.max(0, Math.min(1, cp.threshold));
   const edge = thr < 0.08 ? "edge-l" : thr > 0.92 ? "edge-r" : "";
-  bars.append(
-    el("span"),
-    el("div", { class: "thr-head", "aria-hidden": "true" },
-      el("span", { class: `thr-tag ${edge}`, style: `left:${thr * 100}%`, text: `threshold ${thr.toFixed(2)}` })),
-    el("span"),
-  );
+  if (showThr) {
+    bars.append(
+      el("span"),
+      el("div", { class: "thr-head", "aria-hidden": "true" },
+        el("span", { class: `thr-tag ${edge}`, style: `left:${thr * 100}%`, text: `threshold ${thr.toFixed(2)}` })),
+      el("span"),
+    );
+  }
   cp.optionIds.forEach((id) => {
     const isNone = id === "none";
     if (isNone && cp.optionIds.length > 1) bars.append(el("div", { class: "bar-sep", "aria-hidden": "true" }));
@@ -179,13 +184,46 @@ function renderBars(cp, t) {
         el("span", { class: "nm", text: isNone ? "none" : meta.name }),
         el("span", { class: "id", text: isNone ? "the agent's own tools" : id })),
       el("div", { class: "bar-track" }, fill,
-        el("span", { class: "thr-mark", style: `left:${thr * 100}%`, "aria-hidden": "true" })),
+        showThr ? el("span", { class: "thr-mark", style: `left:${thr * 100}%`, "aria-hidden": "true" }) : null),
       el("div", { class: "bar-val", text: Object.keys(cp.probabilities).length ? pct(p) : "–" }),
     );
     bars.append(row);
     requestAnimationFrame(() => { fill.style.width = `${Math.max(p * 100, p > 0 ? 0.6 : 0)}%`; });
   });
   return bars;
+}
+
+/* -- cascade stages (local classifier, then Jev) --------------------------------- */
+
+const STAGE_NAMES = { primary: "Local classifier (MIT, offline)", confirm: "Jev (confirms)" };
+
+function cascadeNote(cp) {
+  if (cp.backend === "cascade:local") return { cls: "local", text: "Answered locally", why: "The local classifier was confidently none; Jev was not asked." };
+  if (cp.backend === "cascade:local-fallback") return { cls: "fallback", text: "Jev failed: local fallback", why: "Escalated, but Jev failed: the local answer is used, biased to none." };
+  return { cls: "escalated", text: "Escalated to Jev", why: "The local answer was not a confident none, so Jev confirms." };
+}
+
+/** One labelled bar set per stage; only the deciding one shows the router threshold. */
+function renderStages(cp, t) {
+  const note = cascadeNote(cp);
+  const box = el("div", { class: "stages" }, el("p", { class: `stage-note ${note.cls}`, text: note.text, title: note.why }));
+  const fallback = cp.backend === "cascade:local-fallback";
+  cp.stages.forEach((st, i) => {
+    const deciding = !fallback && i === cp.stages.length - 1;
+    const head = el("div", { class: "stage-head" },
+      el("span", { class: "stage-name", text: STAGE_NAMES[st.role] || st.role }),
+      el("span", { class: "stage-meta", text: [st.backend, st.latency_ms != null ? ms(st.latency_ms) : null].filter(Boolean).join(", ") }));
+    const body = st.error
+      ? el("p", { class: "cmp-off", text: `Failed: ${st.error}` })
+      : renderBars({ ...cp, probabilities: st.probabilities || {}, choice: st.choice }, deciding ? t : "stage", deciding);
+    box.append(el("section", { class: `stage${deciding ? " deciding" : ""}` }, head, body));
+  });
+  if (fallback) {
+    box.append(el("section", { class: "stage deciding" },
+      el("div", { class: "stage-head" }, el("span", { class: "stage-name", text: "Fallback answer" })),
+      renderBars(cp, t)));
+  }
+  return box;
 }
 
 function renderSees(cp, t) {
@@ -234,7 +272,8 @@ function renderCheckpoint(root, src, opts = {}) {
     el("div", { class: "cp-head" }, where, meta),
     el("div", { class: "verdict" }, el("h3", { text: v.title }), el("span", { class: `pill ${t}`, text: v.pill })),
   );
-  if (cp.optionIds.length) root.append(renderBars(cp, t));
+  if (cp.stages.length) root.append(renderStages(cp, t));
+  else if (cp.optionIds.length) root.append(renderBars(cp, t));
   if (opts.compact) {
     if (opts.extra) root.append(opts.extra);
     if (t === "error" && cp.reason) root.append(el("p", { class: "cmp-off", text: cp.reason }));
@@ -286,8 +325,17 @@ function readStep() {
     }
   }
   step.mode = $("input[name=mode]:checked", form).value;
-  step.threshold = Number($("#threshold").value);
+  // untouched slider: the server applies the backend's own (calibrated) threshold
+  step.threshold = state.thrTouched ? Number($("#threshold").value) : null;
   return step;
+}
+
+/** Show the threshold the server used while the slider is untouched (backend default). */
+function showThreshold(thr) {
+  if (thr == null) return;
+  $("#threshold").value = thr;
+  $("#thr-out").textContent = `${Number(thr).toFixed(2)} auto`;
+  $("#thr-out").title = "The classifier's own calibrated threshold. Move the slider to override it.";
 }
 
 function showFormError(msg) {
@@ -314,6 +362,7 @@ async function runRoute() {
   try {
     const res = await route(step, $("#backend").value || "local");
     if (seq !== routeSeq) return;
+    if (!state.thrTouched) showThreshold(res.threshold);
     renderCheckpoint(board, res);
   } catch (err) {
     if (seq === routeSeq) showFormError(`Routing failed: ${err.message}`);
@@ -363,6 +412,7 @@ function initPlayground() {
   $("#compare-btn").addEventListener("click", runCompare);
   let slideTimer;
   $("#threshold").addEventListener("input", (e) => {
+    state.thrTouched = true;
     $("#thr-out").textContent = Number(e.target.value).toFixed(2);
     clearTimeout(slideTimer);
     slideTimer = setTimeout(runRoute, 120);
@@ -604,8 +654,7 @@ async function boot() {
   $("#shell-note").textContent = catalog.live && catalog.live.allow_shell
     ? "Shell and web tools (Bash, WebFetch) are enabled: the server was started with allow_shell."
     : "Shell and web tools (Bash, WebFetch) are disabled. The router still sees those calls first; the SDK then refuses them. Start the server with --allow-shell to enable them.";
-  $("#threshold").value = catalog.threshold;
-  $("#thr-out").textContent = catalog.threshold.toFixed(2);
+  showThreshold(catalog.threshold);
   if (catalog.mode === "enforce") $("input[name=mode][value=enforce]").checked = true;
   for (const sel of [$("#backend"), $("#live-backend")]) {
     sel.replaceChildren(...state.backends.map((b) => el("option", { value: b.name, disabled: !b.available },
