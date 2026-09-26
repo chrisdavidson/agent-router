@@ -1,0 +1,26 @@
+{
+  "hashing": {
+    "alpha": 0.6,
+    "cal_accuracy": 0.6724,
+    "cal_fpr": 0.0,
+    "cal_misroute_rate": 0.0,
+    "feasible": true,
+    "n_cases": 58,
+    "none_floor": 0.2,
+    "not_for_penalty": 8.0,
+    "temperature": 0.05,
+    "threshold": 0.45
+  },
+  "model2vec": {
+    "alpha": 0.9,
+    "cal_accuracy": 0.931,
+    "cal_fpr": 0.0435,
+    "cal_misroute_rate": 0.0,
+    "feasible": true,
+    "n_cases": 58,
+    "none_floor": 0.2,
+    "not_for_penalty": 8.0,
+    "temperature": 0.05,
+    "threshold": 0.5
+  }
+}

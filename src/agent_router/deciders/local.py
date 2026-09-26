@@ -11,22 +11,38 @@ Per non-``none`` option::
 exemplars are the catalog-wide ``native_examples`` plus the none option's own
 ``what``/``examples``. ``probabilities = softmax(scores / temperature)``, ``choice`` is the
 argmax and ``confidence = 1 - H(p) / log(n)``.
+
+Calibration: when ``params`` is not given, ``src/agent_router/calibration.json`` (written by
+``agent-router calibrate``) supplies the ``LocalParams`` and a recommended router threshold
+for the active embedder (``{"model2vec": {...}, "hashing": {...}}``). Without the file, or
+for an embedder it has no block for, the ``LocalParams`` defaults apply unchanged.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import math
 import re
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from pathlib import Path
 
 import numpy as np
 
 from agent_router.core.types import NONE_ID, ChoiceResult, OptionSpec
 from agent_router.deciders.base import MAX_OPTIONS, DeciderError
-from agent_router.deciders.embedders import Embedder, default_embedder
+from agent_router.deciders.embedders import (
+    Embedder,
+    HashingEmbedder,
+    Model2VecEmbedder,
+    default_embedder,
+)
 
+log = logging.getLogger(__name__)
+
+CALIBRATION_PATH = Path(__file__).resolve().parent.parent / "calibration.json"
 _WORD = re.compile(r"\w+")
 _STOPWORDS_TEXT = """
 a an the and or but if then else of to in on at by for from with without into onto over
@@ -58,6 +74,32 @@ class LocalParams:
     not_for_penalty: float = 0.5  # scale of the penalty when state matches not_for best
 
 
+def embedder_key(embedder: object) -> str | None:
+    """Calibration block name for the embedder actually in use (not the env var)."""
+    if isinstance(embedder, Model2VecEmbedder):
+        return "model2vec"
+    if isinstance(embedder, HashingEmbedder):
+        return "hashing"
+    return None
+
+
+def load_calibration(key: str | None) -> tuple[LocalParams, float | None] | None:
+    """``(params, threshold)`` from ``CALIBRATION_PATH`` for ``key``; None when unavailable."""
+    if key is None or not CALIBRATION_PATH.is_file():
+        return None
+    try:
+        block = json.loads(CALIBRATION_PATH.read_text()).get(key)
+        if not isinstance(block, dict):
+            return None
+        known = {f.name for f in fields(LocalParams)}
+        params = LocalParams(**{k: float(v) for k, v in block.items() if k in known})
+        threshold = block.get("threshold")
+        return params, (float(threshold) if threshold is not None else None)
+    except (ValueError, TypeError, AttributeError) as exc:
+        log.warning("ignoring unreadable calibration %s: %s", CALIBRATION_PATH, exc)
+        return None
+
+
 class LocalJevDecider:
     name = "local"
 
@@ -68,6 +110,11 @@ class LocalJevDecider:
         native_examples: Iterable[str] = (),
     ) -> None:
         self.embedder = embedder if embedder is not None else default_embedder()
+        self.recommended_threshold: float | None = None
+        if params is None:
+            calibrated = load_calibration(embedder_key(self.embedder))
+            if calibrated is not None:
+                params, self.recommended_threshold = calibrated
         self.params = params if params is not None else LocalParams()
         self.native_examples = tuple(native_examples)
         self._cache: dict[tuple[str, str], np.ndarray] = {}
