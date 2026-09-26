@@ -9,14 +9,22 @@ API
 ``POST /api/route``              ``{text, point, tool_name?, tool_input?, backend, mode?,
                                  threshold?}`` -> ``{decision, result, options, hint,
                                  latency_ms, state, threshold, mode, backend}``; stateless
-``GET  /api/run``                ``?prompt=&mode=&backend=`` -> ``text/event-stream`` of the
-                                 timeline events (see ``adapters.claude_sdk``), framed by
-                                 ``session`` (first) and ``done`` (last)
+``POST /api/run``                ``{prompt, mode, backend}`` -> ``{token, stream}``: a random
+                                 single-use token valid for ``RUN_TOKEN_TTL`` seconds
+``GET  /api/run/stream``         ``?token=`` -> ``text/event-stream`` of the timeline events
+                                 (see ``adapters.claude_sdk``), framed by ``session`` (first)
+                                 and ``done`` (last); one live run at a time (else 409)
 ``GET  /api/audit/sessions``     audit JSONL files, newest first
 ``GET  /api/audit/{session}``    one session's records (bad lines skipped)
 
 Deciders are built once per backend name and serialised with a lock; every route call
 runs in the threadpool so network-backed deciders never block the event loop.
+
+Live runs start a real agent, so they are locked down: only ``127.0.0.1`` / ``localhost``
+Host headers are served (defeats DNS rebinding), run requests must be same-origin
+(``Sec-Fetch-Site`` and ``Origin`` checked when present), the run is started by a POST that
+mints a one-time token, and ``Bash`` / ``WebFetch`` are not auto-approved unless the server
+was started with ``allow_shell=True``.
 """
 
 from __future__ import annotations
@@ -36,6 +44,7 @@ from typing import Any
 
 import anyio
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -58,6 +67,9 @@ SAMPLE_AUDIT_DIR = REPO_ROOT / "audit"
 DEFAULT_BACKEND = "local"
 PLAYGROUND_SESSION = "playground"
 SKILL_TOOL = "Skill"
+ALLOWED_HOSTS = ("127.0.0.1", "localhost")
+RUN_TOKEN_TTL = 60.0
+WORKSPACE_WAIT = 30.0  # seconds to let a cancelled run wind down before cleanup
 _SESSION_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 Listener = Callable[[dict[str, Any]], None]
@@ -72,6 +84,12 @@ class RouteRequest(BaseModel):
     backend: str = DEFAULT_BACKEND
     mode: str | None = None
     threshold: float | None = None
+
+
+class RunRequest(BaseModel):
+    prompt: str = Field(max_length=20_000)
+    mode: str = "advisory"
+    backend: str = DEFAULT_BACKEND
 
 
 class _LockedDecider:
@@ -119,10 +137,21 @@ def _option_json(e: CatalogEntry) -> dict[str, Any]:
     }
 
 
-def _default_runner() -> Runner:
+def _default_runner(allow_shell: bool) -> Runner:
     from agent_router.agent import run_agent
 
-    return run_agent
+    async def run(prompt: str, router: Router, workspace: Path, on_event: Listener) -> Any:
+        return await run_agent(prompt, router, workspace, on_event, allow_shell=allow_shell)
+
+    return run
+
+
+def _load_base_config() -> RouterConfig:
+    """Environment config, validated once at startup with a readable error."""
+    try:
+        return RouterConfig.from_env()
+    except ValueError as exc:
+        raise ValueError(f"invalid AGENT_ROUTER_* environment for the demo server: {exc}") from exc
 
 
 def _prepare_workspace() -> Path:
@@ -151,17 +180,24 @@ def create_app(
     *,
     runner: Runner | None = None,
     catalog: Catalog | None = None,
+    allow_shell: bool = False,
 ) -> FastAPI:
-    """The demo app. ``runner`` defaults to ``agent_router.agent.run_agent`` (tests inject one)."""
+    """The demo app. ``runner`` defaults to ``agent_router.agent.run_agent`` (tests inject one);
+    ``allow_shell`` lets live runs use Bash/WebFetch without the SDK refusing them."""
     audit_root = Path(audit_dir) if audit_dir is not None else DEFAULT_AUDIT_DIR
     # With the default location, the committed sample session is offered for replay too.
     read_dirs = [audit_root] + ([SAMPLE_AUDIT_DIR] if audit_dir is None else [])
     cat = catalog if catalog is not None else load_catalog()
-    base_config = RouterConfig.from_env()
+    base_config = _load_base_config()
+    run_fn = runner if runner is not None else _default_runner(allow_shell)
+    run_slot = asyncio.Semaphore(1)  # one paid live run at a time
+    tokens: dict[str, tuple[float, dict[str, Any]]] = {}
     deciders: dict[str, _LockedDecider] = {}
     deciders_lock = threading.Lock()
 
     app = FastAPI(title="agent-router demo")
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(ALLOWED_HOSTS))
+    app.state.run_slot = run_slot
 
     # -- helpers --------------------------------------------------------------
 
@@ -188,6 +224,15 @@ def create_app(
         if not 0.0 <= thr <= 1.0:
             raise HTTPException(400, "threshold must be in [0, 1]")
         return RouterConfig(mode=mode, threshold=thr)  # type: ignore[arg-type]
+
+    def check_same_origin(request: Request) -> None:
+        """Refuse run requests another site (or another localhost port) triggered."""
+        fetch_site = request.headers.get("sec-fetch-site")
+        if fetch_site is not None and fetch_site not in ("same-origin", "none"):
+            raise HTTPException(403, "live runs must be started from the demo page itself")
+        origin = request.headers.get("origin")
+        if origin is not None and origin != f"{request.url.scheme}://{request.headers.get('host')}":
+            raise HTTPException(403, "live runs must be started from the demo page itself")
 
     def point_of(raw: str) -> HookPoint:
         try:
@@ -239,6 +284,7 @@ def create_app(
             "native_examples": list(cat.native_examples),
             "threshold": base_config.threshold,
             "mode": base_config.mode,
+            "live": {"allow_shell": allow_shell},
         }
 
     @app.get("/api/backends")
@@ -304,27 +350,41 @@ def create_app(
             "backend": req.backend,
         }
 
-    @app.get("/api/run")
-    async def get_run(
-        request: Request, prompt: str, mode: str = "advisory", backend: str = DEFAULT_BACKEND
-    ) -> StreamingResponse:
-        # A GET that starts an agent with Bash: refuse requests other sites trigger.
-        if request.headers.get("sec-fetch-site") == "cross-site":
-            raise HTTPException(403, "cross-site requests may not start the agent")
-        if not prompt.strip():
+    @app.post("/api/run")
+    async def post_run(req: RunRequest, request: Request) -> dict[str, Any]:
+        check_same_origin(request)
+        if not req.prompt.strip():
             raise HTTPException(400, "prompt is empty")
-        config = config_for(mode, None)
-        check_backend(backend)
+        config_for(req.mode, None)
+        check_backend(req.backend)
+        if run_slot.locked():
+            raise HTTPException(409, "another live run is in progress; wait for it to finish")
+        now = time.monotonic()
+        for tok in [t for t, (exp, _) in tokens.items() if exp < now]:
+            del tokens[tok]
+        token = secrets.token_urlsafe(24)
+        tokens[token] = (now + RUN_TOKEN_TTL, req.model_dump())
+        return {"token": token, "stream": f"/api/run/stream?token={token}"}
+
+    @app.get("/api/run/stream")
+    async def get_run_stream(token: str, request: Request) -> StreamingResponse:
+        check_same_origin(request)
+        entry = tokens.pop(token, None)  # single use
+        if entry is None or entry[0] < time.monotonic():
+            raise HTTPException(403, "unknown or expired run token; start the run again")
+        params = entry[1]
+        if run_slot.locked():
+            raise HTTPException(409, "another live run is in progress; wait for it to finish")
+        config = config_for(params["mode"], None)
+        backend = params["backend"]
         try:
             decider = await run_in_threadpool(decider_for, backend)
         except Exception as exc:
             raise HTTPException(503, f"could not start backend {backend!r}: {exc}") from exc
         session = f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
-        audit_path = audit_root / f"{session}.jsonl"
-        router = Router(cat, decider, config, AuditLog(audit_path))
-        run = runner if runner is not None else _default_runner()
+        router = Router(cat, decider, config, AuditLog(audit_root / f"{session}.jsonl"))
         return StreamingResponse(
-            _stream(run, prompt, router, session, config, backend),
+            _stream(run_fn, params["prompt"], router, session, config, backend, run_slot),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -383,66 +443,94 @@ async def _stream(
     session: str,
     config: RouterConfig,
     backend: str,
+    slot: asyncio.Semaphore,
 ) -> AsyncIterator[str]:
-    loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+    if slot.locked():  # lost a race with another stream
+        yield _sse("error", {"type": "error", "ts": time.time(), "message": "another run is live"})
+        yield _sse("done", {"session": None, "ts": time.time()})
+        return
+    async with slot:
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        workspace: Path | None = None
+        task: asyncio.Task[None] | None = None
 
-    def on_event(event: dict[str, Any]) -> None:
-        # safe from the loop thread and from worker threads alike
-        loop.call_soon_threadsafe(queue.put_nowait, event)
+        def on_event(event: dict[str, Any]) -> None:
+            # safe from the loop thread and from worker threads alike
+            loop.call_soon_threadsafe(queue.put_nowait, event)
 
-    workspace = await run_in_threadpool(_prepare_workspace)
+        async def drive(ws: Path) -> None:
+            try:
+                await run(prompt, router, ws, on_event)
+            except Exception as exc:  # run_agent emits ``error`` then re-raises
+                log.warning("demo run %s failed: %s", session, exc)
+                on_event({"type": "error", "ts": time.time(), "message": type(exc).__name__})
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
 
-    async def drive() -> None:
         try:
-            await run(prompt, router, workspace, on_event)
-        except Exception as exc:  # run_agent emits ``error`` then re-raises
-            log.warning("demo run %s failed: %s", session, exc)
-            on_event({"type": "error", "ts": time.time(), "message": f"{type(exc).__name__}"})
+            yield _sse(
+                "session",
+                {
+                    "session": session,
+                    "mode": config.mode,
+                    "threshold": config.threshold,
+                    "backend": backend,
+                    "ts": time.time(),
+                },
+            )
+            workspace = await run_in_threadpool(_prepare_workspace)
+            task = asyncio.create_task(drive(workspace))
+            errored = False
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                kind = str(event.get("type", "message"))
+                if kind == "error":
+                    if errored:
+                        continue  # the runner's own error event already went out
+                    errored = True
+                yield _sse(kind, event)
+            yield _sse("done", {"session": session, "ts": time.time()})
         finally:
-            loop.call_soon_threadsafe(queue.put_nowait, None)
-
-    yield _sse(
-        "session",
-        {
-            "session": session,
-            "mode": config.mode,
-            "threshold": config.threshold,
-            "backend": backend,
-            "ts": time.time(),
-        },
-    )
-    task = asyncio.create_task(drive())
-    errored = False
-    try:
-        while True:
-            event = await queue.get()
-            if event is None:
-                break
-            kind = str(event.get("type", "message"))
-            if kind == "error":
-                if errored:
-                    continue  # the runner's own error event already went out
-                errored = True
-            yield _sse(kind, event)
-        yield _sse("done", {"session": session, "ts": time.time()})
-    finally:
-        try:
-            if not task.done():
-                task.cancel()
-                with anyio.CancelScope(shield=True):  # we may be cancelled (disconnect)
-                    await asyncio.wait([task], timeout=5)
-        finally:
-            shutil.rmtree(workspace.parent, ignore_errors=True)
+            # We may be here because the client disconnected (cancellation): shield cleanup.
+            with anyio.CancelScope(shield=True):
+                await _finish(task, workspace, session)
 
 
-def main(port: int = 8765) -> None:
+async def _finish(task: asyncio.Task[None] | None, workspace: Path | None, session: str) -> None:
+    """Cancel the run, wait for it to stop, then remove its workspace (never under it)."""
+    if task is not None and not task.done():
+        task.cancel()
+        done, _ = await asyncio.wait([task], timeout=WORKSPACE_WAIT)
+        if not done:
+            log.warning("demo run %s did not stop within %.0fs", session, WORKSPACE_WAIT)
+            if workspace is not None:
+                ws_root = workspace.parent
+                task.add_done_callback(lambda _t: shutil.rmtree(ws_root, ignore_errors=True))
+            return
+    if workspace is not None:
+        shutil.rmtree(workspace.parent, ignore_errors=True)
+
+
+def main(port: int = 8765, allow_shell: bool = False) -> None:
     """Serve the demo on http://127.0.0.1:<port> (loopback only)."""
     import uvicorn
 
-    print(f"agent-router demo: http://127.0.0.1:{port}")
-    uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning")
+    note = " (live runs may use Bash/WebFetch)" if allow_shell else ""
+    print(f"agent-router demo: http://127.0.0.1:{port}{note}")
+    app = create_app(allow_shell=allow_shell)
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="agent-router visual demo")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument(
+        "--allow-shell", action="store_true", help="auto-approve Bash/WebFetch in live runs"
+    )
+    ns = parser.parse_args()
+    main(port=ns.port, allow_shell=ns.allow_shell)

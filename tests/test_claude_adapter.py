@@ -274,9 +274,18 @@ def test_build_options(tmp_path):
     assert opts.model == "claude-haiku-4-5-20251001"
     assert opts.max_turns == 8
     assert "agent_router" in opts.mcp_servers
-    for t in [*TOOL_NAMES, "Skill", "Read", "Glob", "Grep", "Bash", "WebFetch"]:
+    for t in [*TOOL_NAMES, "Skill", "Read", "Glob", "Grep"]:
         assert t in opts.allowed_tools
+    assert "Bash" not in opts.allowed_tools  # shell/network not auto-approved by default
+    assert "WebFetch" not in opts.allowed_tools
     assert set(opts.hooks) == {"UserPromptSubmit", "PreToolUse"}
+
+
+def test_build_options_allow_shell(tmp_path):
+    hooks, _, _ = make_hooks()
+    opts = build_options(hooks.router, tmp_path, allow_shell=True)
+    assert "Bash" in opts.allowed_tools
+    assert "WebFetch" in opts.allowed_tools
 
 
 async def test_run_agent_streams_events(monkeypatch, tmp_path):

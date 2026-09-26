@@ -38,6 +38,7 @@ from agent_router.core.router import Router
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 DEFAULT_MAX_TURNS = 8
 NATIVE_TOOLS = ["Skill", "Read", "Glob", "Grep", "Bash", "WebFetch"]
+SHELL_TOOLS = frozenset({"Bash", "WebFetch"})  # shell / network: auto-approved only on request
 DEMO_WORKSPACE = Path(__file__).resolve().parents[2] / "demo_workspace"
 
 
@@ -70,20 +71,24 @@ def build_options(
     max_turns: int = DEFAULT_MAX_TURNS,
     *,
     hooks: ClaudeRouterHooks | None = None,
+    allow_shell: bool = False,
 ) -> ClaudeAgentOptions:
     """SDK options: project skills, in-process MIT tools, router hooks.
 
     ``permission_mode`` is ``"default"`` (never ``bypassPermissions``): listed tools run
     without prompts, anything else is refused in this non-interactive session.
+    ``allow_shell=False`` (default) leaves ``Bash`` and ``WebFetch`` out of the approved
+    list: the router's PreToolUse hook still sees such a call first, then the SDK denies it.
     """
     hooks = hooks if hooks is not None else ClaudeRouterHooks(router)
+    native = [t for t in NATIVE_TOOLS if allow_shell or t not in SHELL_TOOLS]
     return ClaudeAgentOptions(
         model=model,
         max_turns=max_turns,
         cwd=workspace,
         setting_sources=["project"],
         mcp_servers={SERVER_NAME: build_mcp_server(workspace)},
-        allowed_tools=[*TOOL_NAMES, *NATIVE_TOOLS],
+        allowed_tools=[*TOOL_NAMES, *native],
         permission_mode="default",
         hooks=hooks.hooks(),
     )
@@ -111,13 +116,18 @@ async def run_agent(
     *,
     model: str = DEFAULT_MODEL,
     max_turns: int = DEFAULT_MAX_TURNS,
+    allow_shell: bool = False,
 ) -> str:
-    """Run one prompt through the inner agent; returns the final result text."""
+    """Run one prompt through the inner agent; returns the final result text.
+
+    ``allow_shell`` is passed to ``build_options`` (Bash/WebFetch approval)."""
     listeners: list[Listener] = [on_event] if on_event is not None else []
     hooks = ClaudeRouterHooks(router)
     for cb in listeners:
         hooks.on_decision(cb)
-    options = build_options(router, workspace, model, max_turns, hooks=hooks)
+    options = build_options(
+        router, workspace, model, max_turns, hooks=hooks, allow_shell=allow_shell
+    )
     emit(listeners, "prompt", prompt=prompt)
     final = ""
     try:

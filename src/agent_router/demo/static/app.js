@@ -402,7 +402,7 @@ function stopLive(message) {
   if (message) liveStatus(message);
 }
 
-function startLive(e) {
+async function startLive(e) {
   e.preventDefault();
   const prompt = $("#live-prompt").value.trim();
   if (!prompt) { liveStatus("Type a prompt for the agent first."); return; }
@@ -410,16 +410,28 @@ function startLive(e) {
   $("#timeline").replaceChildren();
   const mode = $("input[name=live-mode]:checked").value;
   const backend = $("#live-backend").value || "local";
-  const qs = new URLSearchParams({ prompt, mode, backend });
   $("#live-run").disabled = true;
-  $("#live-stop").hidden = false;
   liveStatus(`Starting a ${mode} session with the ${backend} classifier…`);
+  let start;
+  try {
+    // POST mints a one-time token; the stream itself is a plain same-origin GET.
+    start = await api("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, mode, backend }),
+    });
+  } catch (err) {
+    $("#live-run").disabled = false;
+    liveStatus(`The server did not start the run: ${err.message}`);
+    return;
+  }
+  $("#live-stop").hidden = false;
   const toolItems = new Map();
   let lastCheckpoint = null;
   let session = null;
   const pending = () => { $$(".tl.pending").forEach((n) => n.remove()); tlItem("", "pending", "Agent is working…"); };
 
-  live = new EventSource(`/api/run?${qs}`);
+  live = new EventSource(start.stream);
   const on = (type, fn) => live.addEventListener(type, (ev) => fn(JSON.parse(ev.data)));
   on("session", (d) => {
     session = d.session;
@@ -589,6 +601,9 @@ async function boot() {
   state.threshold = catalog.threshold;
   catalog.entries.forEach((e) => state.entries.set(e.id, e));
   state.backends = backends.backends;
+  $("#shell-note").textContent = catalog.live && catalog.live.allow_shell
+    ? "Shell and web tools (Bash, WebFetch) are enabled: the server was started with allow_shell."
+    : "Shell and web tools (Bash, WebFetch) are disabled. The router still sees those calls first; the SDK then refuses them. Start the server with --allow-shell to enable them.";
   $("#threshold").value = catalog.threshold;
   $("#thr-out").textContent = catalog.threshold.toFixed(2);
   if (catalog.mode === "enforce") $("input[name=mode][value=enforce]").checked = true;

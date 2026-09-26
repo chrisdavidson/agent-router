@@ -28,7 +28,15 @@ def audit_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def client(audit_dir: Path) -> TestClient:
-    return TestClient(server.create_app(audit_dir=audit_dir))
+    return _client(server.create_app(audit_dir=audit_dir))
+
+
+BASE = "http://127.0.0.1:8765"
+
+
+def _client(app) -> TestClient:
+    """The server only answers loopback Host headers."""
+    return TestClient(app, base_url=BASE)
 
 
 # -- catalog / backends -------------------------------------------------------
@@ -274,6 +282,17 @@ def _sse_events(text: str) -> list[tuple[str, dict]]:
     return out
 
 
+def _start(c: TestClient, **body):
+    body.setdefault("prompt", "hi")
+    return c.post("/api/run", json=body)
+
+
+def _run(c: TestClient, **body):
+    res = _start(c, **body)
+    assert res.status_code == 200, res.text
+    return c.get(res.json()["stream"])
+
+
 def test_run_streams_events_and_writes_audit(audit_dir: Path) -> None:
     seen: dict = {}
 
@@ -289,8 +308,8 @@ def test_run_streams_events_and_writes_audit(audit_dir: Path) -> None:
         return "42"
 
     app = server.create_app(audit_dir=audit_dir, runner=fake_runner)
-    with TestClient(app) as c:
-        res = c.get("/api/run", params={"prompt": "hi there", "mode": "enforce"})
+    with _client(app) as c:
+        res = _run(c, prompt="hi there", mode="enforce")
     assert res.status_code == 200
     assert res.headers["content-type"].startswith("text/event-stream")
     events = _sse_events(res.text)
@@ -312,15 +331,18 @@ def test_run_error_still_sends_done(audit_dir: Path) -> None:
         raise RuntimeError("boom")
 
     app = server.create_app(audit_dir=audit_dir, runner=failing)
-    with TestClient(app) as c:
-        res = c.get("/api/run", params={"prompt": "hi"})
+    with _client(app) as c:
+        res = _run(c)
     types = [e for e, _ in _sse_events(res.text)]
     assert "error" in types
     assert types[-1] == "done"
 
 
-def test_run_rejects_bad_mode(client: TestClient) -> None:
-    assert client.get("/api/run", params={"prompt": "hi", "mode": "loud"}).status_code == 400
+@pytest.mark.parametrize(
+    "body", [{"mode": "loud"}, {"prompt": "  "}, {"backend": "no-such-backend"}]
+)
+def test_run_rejects_bad_input(client: TestClient, body: dict) -> None:
+    assert _start(client, **body).status_code == 400
 
 
 def test_index_served(client: TestClient) -> None:
@@ -329,10 +351,175 @@ def test_index_served(client: TestClient) -> None:
     assert "agent-router" in res.text
 
 
-def test_run_refuses_cross_site(audit_dir: Path) -> None:
-    async def never(prompt, router, workspace, on_event):  # pragma: no cover
-        raise AssertionError("must not run")
+# -- live-run lockdown -----------------------------------------------------------
 
-    c = TestClient(server.create_app(audit_dir=audit_dir, runner=never))
-    res = c.get("/api/run", params={"prompt": "hi"}, headers={"Sec-Fetch-Site": "cross-site"})
-    assert res.status_code == 403
+
+async def _never(prompt, router, workspace, on_event):  # pragma: no cover
+    raise AssertionError("must not run")
+
+
+def test_foreign_host_is_rejected(audit_dir: Path) -> None:
+    """DNS rebinding: evil.example resolving to 127.0.0.1 still sends its own Host."""
+    app = server.create_app(audit_dir=audit_dir, runner=_never)
+    c = TestClient(app, base_url="http://evil.example:8765")
+    assert c.post("/api/run", json={"prompt": "hi"}).status_code == 400
+    assert c.get("/api/audit/sessions").status_code == 400
+    assert TestClient(app, base_url="http://localhost:8765").get("/api/catalog").status_code == 200
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Sec-Fetch-Site": "cross-site"},
+        {"Sec-Fetch-Site": "same-site"},  # another localhost port
+        {"Origin": "http://localhost:3000"},
+        {"Origin": "http://evil.example"},
+    ],
+)
+def test_run_refuses_other_origins(audit_dir: Path, headers: dict) -> None:
+    c = _client(server.create_app(audit_dir=audit_dir, runner=_never))
+    assert c.post("/api/run", json={"prompt": "hi"}, headers=headers).status_code == 403
+
+
+def test_run_accepts_same_origin_headers(client: TestClient) -> None:
+    headers = {"Sec-Fetch-Site": "same-origin", "Origin": BASE}
+    assert client.post("/api/run", json={"prompt": "hi"}, headers=headers).status_code == 200
+
+
+def test_run_token_is_single_use(audit_dir: Path) -> None:
+    async def quick(prompt, router, workspace, on_event):
+        on_event({"type": "result", "ts": 1.0, "result": "ok", "is_error": False})
+
+    app = server.create_app(audit_dir=audit_dir, runner=quick)
+    with _client(app) as c:
+        stream = _start(c).json()["stream"]
+        assert c.get(stream).status_code == 200
+        assert c.get(stream).status_code == 403
+        assert c.get("/api/run/stream", params={"token": "forged"}).status_code == 403
+        assert c.get("/api/run", params={"prompt": "hi"}).status_code == 405  # no GET start
+
+
+def test_run_token_expires(audit_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    c = _client(server.create_app(audit_dir=audit_dir, runner=_never))
+    stream = _start(c).json()["stream"]
+    real = server.time.monotonic
+    monkeypatch.setattr(server.time, "monotonic", lambda: real() + server.RUN_TOKEN_TTL + 1)
+    assert c.get(stream).status_code == 403
+
+
+def test_bad_threshold_env_fails_at_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_ROUTER_THRESHOLD", "2")
+    with pytest.raises(ValueError, match="AGENT_ROUTER_"):
+        server.create_app()
+
+
+def test_catalog_reports_shell_setting(audit_dir: Path) -> None:
+    off = _client(server.create_app(audit_dir=audit_dir)).get("/api/catalog").json()
+    on = _client(server.create_app(audit_dir=audit_dir, allow_shell=True)).get("/api/catalog")
+    assert off["live"] == {"allow_shell": False}
+    assert on.json()["live"] == {"allow_shell": True}
+
+
+def test_default_runner_passes_allow_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    import agent_router.agent as agent_mod
+
+    seen = {}
+
+    async def fake_run_agent(prompt, router, workspace, on_event, *, allow_shell=False):
+        seen["allow_shell"] = allow_shell
+
+    monkeypatch.setattr(agent_mod, "run_agent", fake_run_agent)
+    for flag in (False, True):
+        asyncio.run(server._default_runner(flag)("p", None, Path("."), lambda e: None))
+        assert seen["allow_shell"] is flag
+
+
+# -- stream lifecycle (driven directly: disconnect == closing the generator) --------
+
+
+def _router(audit_dir: Path):
+    from agent_router.core.audit import AuditLog
+    from agent_router.core.config import RouterConfig
+    from agent_router.core.router import Router
+
+    return Router(load_catalog(), _StubDecider(), RouterConfig(), AuditLog(None))
+
+
+async def test_disconnect_mid_stream_cancels_run_and_removes_workspace(audit_dir: Path) -> None:
+    import asyncio
+
+    seen: dict = {}
+
+    async def hanging(prompt, router, workspace, on_event):
+        seen["workspace"] = workspace
+        on_event({"type": "prompt", "ts": 1.0, "prompt": prompt})
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            seen["cancelled"] = True
+            raise
+
+    slot = asyncio.Semaphore(1)
+    cfg = _router(audit_dir).config
+    gen = server._stream(hanging, "hi", _router(audit_dir), "s1", cfg, "local", slot)
+    assert (await gen.__anext__()).startswith("event: session")
+    assert (await gen.__anext__()).startswith("event: prompt")
+    assert slot.locked()
+    await gen.aclose()  # what Starlette does when the client goes away
+    assert seen["cancelled"] is True
+    assert not seen["workspace"].parent.exists()
+    assert not slot.locked()
+
+
+async def test_disconnect_before_workspace_leaks_nothing(
+    audit_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import asyncio
+
+    made: list[Path] = []
+    real = server._prepare_workspace
+
+    def tracking():
+        ws = real()
+        made.append(ws)
+        return ws
+
+    monkeypatch.setattr(server, "_prepare_workspace", tracking)
+    slot = asyncio.Semaphore(1)
+    gen = server._stream(
+        _never, "hi", _router(audit_dir), "s2", None or _router(audit_dir).config, "local", slot
+    )
+    await gen.__anext__()  # session event, workspace not created yet
+    await gen.aclose()
+    assert made == []
+    assert not slot.locked()
+
+
+async def test_second_concurrent_run_is_refused(audit_dir: Path) -> None:
+    import asyncio
+
+    slot = asyncio.Semaphore(1)
+    await slot.acquire()
+    gen = server._stream(
+        _never, "hi", _router(audit_dir), "s3", _router(audit_dir).config, "local", slot
+    )
+    chunks = [c async for c in gen]
+    assert chunks[0].startswith("event: error") and chunks[-1].startswith("event: done")
+    slot.release()
+
+
+def test_run_while_busy_is_409(audit_dir: Path) -> None:
+    import asyncio
+
+    app = server.create_app(audit_dir=audit_dir, runner=_never)
+    c = _client(app)
+    stream = _start(c).json()["stream"]  # minted while idle
+    asyncio.run(app.state.run_slot.acquire())  # a live run holds the slot
+    try:
+        assert _start(c).status_code == 409
+        assert c.get(stream).status_code == 409
+    finally:
+        app.state.run_slot.release()
+    assert _start(c).status_code == 200
