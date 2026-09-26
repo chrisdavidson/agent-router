@@ -10,3 +10,4 @@ build/
 audit/*.jsonl
 !audit/sample-session.jsonl
 .DS_Store
+.superpowers/
