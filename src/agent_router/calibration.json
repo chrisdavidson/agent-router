@@ -1,26 +1,45 @@
 {
   "hashing": {
-    "alpha": 0.6,
-    "cal_accuracy": 0.6724,
-    "cal_fpr": 0.0,
-    "cal_misroute_rate": 0.0,
-    "feasible": true,
+    "alpha": 0.8,
+    "cal_accuracy": 0.6897,
+    "cal_false_positives": 1,
+    "cal_fpr": 0.0435,
+    "cal_misroute_rate": 0.0286,
+    "catalog_version": "2026-09-26.1",
+    "cv_accuracy": 0.6207,
+    "cv_agreement": 0.6,
+    "cv_fpr": 0.1304,
+    "edge_params": [],
+    "embedder": "hashing:dim=16384,char=3-5",
+    "feasible": false,
     "n_cases": 58,
-    "none_floor": 0.2,
-    "not_for_penalty": 8.0,
-    "temperature": 0.05,
-    "threshold": 0.45
+    "none_floor": 0.1,
+    "not_for_penalty": 4.0,
+    "saturated": 0.0,
+    "temperature": 0.12,
+    "threshold": 0.35
   },
   "model2vec": {
-    "alpha": 0.9,
+    "alpha": 0.8,
     "cal_accuracy": 0.931,
-    "cal_fpr": 0.0435,
+    "cal_false_positives": 0,
+    "cal_fpr": 0.0,
     "cal_misroute_rate": 0.0,
+    "catalog_version": "2026-09-26.1",
+    "cv_accuracy": 0.8966,
+    "cv_agreement": 0.6,
+    "cv_fpr": 0.0,
+    "edge_params": [
+      "temperature",
+      "not_for_penalty"
+    ],
+    "embedder": "model2vec:minishlab/potion-base-8M",
     "feasible": true,
     "n_cases": 58,
     "none_floor": 0.2,
-    "not_for_penalty": 8.0,
-    "temperature": 0.05,
-    "threshold": 0.5
+    "not_for_penalty": 32.0,
+    "saturated": 0.0172,
+    "temperature": 0.08,
+    "threshold": 0.35
   }
 }

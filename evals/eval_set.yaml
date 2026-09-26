@@ -186,7 +186,7 @@ cases:
      tool_input: {skill: "vcs-helper", args: "one commit message for fixing the flaky retry test"}}
   - {id: commit-s4, split: cal, point: skill, expected: commit-writer,
      text: "", tool_name: Skill,
-     tool_input: {skill: "git-commit-msg", args: "feat: dark mode toggle in settings"}}
+     tool_input: {skill: "msg-drafter", args: "feat: dark mode toggle in settings"}}
   - {id: commit-s5, split: test, point: skill, expected: commit-writer,
      text: "", tool_name: Skill,
      tool_input: {skill: "writer", args: "a conventional commit for the added rate limiter"}}
@@ -264,7 +264,7 @@ cases:
   - {id: decoy-1, split: test, point: prompt, expected: none, decoy: true,
      text: "plot a graph of monthly sales from sales.csv"}
   - {id: decoy-2, split: cal, point: prompt, expected: none, decoy: true,
-     text: "validate config.json against schema.json"}
+     text: "check that config.json conforms to the rules in schema.json"}
   - {id: decoy-3, split: test, point: prompt, expected: none, decoy: true,
      text: "differentiate x^3 * sin(x) symbolically"}
   - {id: decoy-4, split: cal, point: prompt, expected: none, decoy: true,
@@ -285,7 +285,7 @@ cases:
      text: "", tool_name: Skill,
      tool_input: {skill: "release-notes", args: "summarize all changes since v2.0 for the changelog"}}
   - {id: decoy-12, split: cal, point: tool, expected: none, decoy: true,
-     text: "what's our test coverage", tool_name: Bash,
+     text: "how much of the code do our tests exercise", tool_name: Bash,
      tool_input: {command: "python3 -m pytest --cov=src"}}
   - {id: decoy-13, split: test, point: prompt, expected: none, decoy: true,
      text: "convert this pdf manual to markdown"}

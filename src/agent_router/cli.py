@@ -152,7 +152,6 @@ def cmd_eval(args: argparse.Namespace) -> int:
 def cmd_calibrate(args: argparse.Namespace) -> int:
     from agent_router.core.catalog import load_catalog
     from agent_router.deciders.embedders import HashingEmbedder, Model2VecEmbedder
-    from agent_router.deciders.local import CALIBRATION_PATH
     from agent_router.evaluate import (
         DEFAULT_EVAL_SET,
         DEFAULT_GRID,
@@ -172,16 +171,25 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
             emb: Any = HashingEmbedder()
         else:
             emb = Model2VecEmbedder()
-            emb.load()
+            try:
+                emb.load()
+            except Exception as exc:  # network, package or file problems
+                raise CliError(f"cannot load the model2vec embedder: {exc}") from exc
         res = grid_search(cases, grid, embedder=emb, catalog=catalog)
         results[name] = res
-        flag = "" if res.feasible else "  (no point met FPR <= 0.10; minimum-FPR point)"
+        p = res.params
         print(
-            f"{name}: none_floor={res.params.none_floor} temperature={res.params.temperature} "
-            f"threshold={res.threshold}  cal accuracy={res.accuracy:.3f} "
-            f"FPR={res.fpr:.3f} (n={res.n_cases}){flag}"
+            f"{name}: none_floor={p.none_floor} temperature={p.temperature} "
+            f"not_for_penalty={p.not_for_penalty} threshold={res.threshold}\n"
+            f"  cal accuracy={res.accuracy:.3f} FPR={res.fpr:.3f} FP={res.false_positives} "
+            f"| {len(cases)}-case CV accuracy={res.cv_accuracy:.3f} FPR={res.cv_fpr:.3f} "
+            f"fold agreement={res.cv_agreement:.2f} | saturated={res.saturated:.2f}"
         )
-    path = write_calibration(results, args.out or CALIBRATION_PATH)
+        if not res.feasible:
+            print(f"  WARNING: {name}: not feasible (FP, saturation or CV FPR bound); not loaded")
+        if res.edge_params:
+            print(f"  WARNING: {name}: on the grid edge: {', '.join(res.edge_params)}")
+    path = write_calibration(results, args.out)
     print(f"wrote {path}")
     return 0
 

@@ -14,8 +14,9 @@ argmax and ``confidence = 1 - H(p) / log(n)``.
 
 Calibration: when ``params`` is not given, ``src/agent_router/calibration.json`` (written by
 ``agent-router calibrate``) supplies the ``LocalParams`` and a recommended router threshold
-for the active embedder (``{"model2vec": {...}, "hashing": {...}}``). Without the file, or
-for an embedder it has no block for, the ``LocalParams`` defaults apply unchanged.
+for the active embedder (``{"model2vec": {...}, "hashing": {...}}``). A block applies only
+if it is feasible and matches the embedder id and the catalog version (``catalog_version``,
+default: the packaged catalog's). Otherwise the ``LocalParams`` defaults apply unchanged.
 """
 
 from __future__ import annotations
@@ -42,7 +43,8 @@ from agent_router.deciders.embedders import (
 
 log = logging.getLogger(__name__)
 
-CALIBRATION_PATH = Path(__file__).resolve().parent.parent / "calibration.json"
+DEFAULT_CALIBRATION_PATH = Path(__file__).resolve().parent.parent / "calibration.json"
+CALIBRATION_PATH = DEFAULT_CALIBRATION_PATH  # tests point this elsewhere
 _WORD = re.compile(r"\w+")
 _STOPWORDS_TEXT = """
 a an the and or but if then else of to in on at by for from with without into onto over
@@ -83,20 +85,66 @@ def embedder_key(embedder: object) -> str | None:
     return None
 
 
-def load_calibration(key: str | None) -> tuple[LocalParams, float | None] | None:
-    """``(params, threshold)`` from ``CALIBRATION_PATH`` for ``key``; None when unavailable."""
-    if key is None or not CALIBRATION_PATH.is_file():
+def embedder_id(embedder: object) -> str | None:
+    """Identity of the embedder's vector space; a calibration is only valid for the same one."""
+    if isinstance(embedder, Model2VecEmbedder):
+        return f"model2vec:{embedder.model}"
+    if isinstance(embedder, HashingEmbedder):
+        lo, hi = embedder.char_ngrams
+        return f"hashing:dim={embedder.dim},char={lo}-{hi}"
+    return None
+
+
+def _default_catalog_version() -> str | None:
+    from agent_router.core.catalog import load_catalog
+
+    try:
+        return load_catalog().version
+    except Exception as exc:  # an unreadable catalog just disables calibration
+        log.warning("cannot read the default catalog version (%s); calibration disabled", exc)
+        return None
+
+
+def load_calibration(
+    key: str | None,
+    *,
+    embedder: str | None = None,
+    catalog_version: str | None = None,
+) -> tuple[LocalParams, float | None] | None:
+    """``(params, threshold)`` from ``CALIBRATION_PATH`` for block ``key``, or None.
+
+    The block is refused (with a warning) when it was not feasible (no grid point met the
+    FPR bound), or when its recorded ``embedder`` id / ``catalog_version`` differ from the
+    given ones: a calibration is only valid for the vector space and catalog it was fit on.
+    """
+    path = CALIBRATION_PATH
+    if key is None or not path.is_file():
         return None
     try:
-        block = json.loads(CALIBRATION_PATH.read_text()).get(key)
+        block = json.loads(path.read_text()).get(key)
         if not isinstance(block, dict):
             return None
+        if block.get("feasible") is False:
+            log.warning("calibration %s[%s] is not feasible; using defaults", path, key)
+            return None
+        for name, want in (("embedder", embedder), ("catalog_version", catalog_version)):
+            have = block.get(name)
+            if want is not None and have != want:
+                log.warning(
+                    "calibration %s[%s] was fit for %s=%r, not %r; using defaults",
+                    path,
+                    key,
+                    name,
+                    have,
+                    want,
+                )
+                return None
         known = {f.name for f in fields(LocalParams)}
         params = LocalParams(**{k: float(v) for k, v in block.items() if k in known})
         threshold = block.get("threshold")
         return params, (float(threshold) if threshold is not None else None)
     except (ValueError, TypeError, AttributeError) as exc:
-        log.warning("ignoring unreadable calibration %s: %s", CALIBRATION_PATH, exc)
+        log.warning("ignoring unreadable calibration %s: %s", path, exc)
         return None
 
 
@@ -108,11 +156,19 @@ class LocalJevDecider:
         embedder: Embedder | None = None,
         params: LocalParams | None = None,
         native_examples: Iterable[str] = (),
+        catalog_version: str | None = None,
     ) -> None:
         self.embedder = embedder if embedder is not None else default_embedder()
         self.recommended_threshold: float | None = None
         if params is None:
-            calibrated = load_calibration(embedder_key(self.embedder))
+            key = embedder_key(self.embedder)
+            calibrated = None
+            if key is not None and CALIBRATION_PATH.is_file():
+                version = catalog_version or _default_catalog_version()
+                if version is not None:  # an unverifiable calibration is never applied
+                    calibrated = load_calibration(
+                        key, embedder=embedder_id(self.embedder), catalog_version=version
+                    )
             if calibrated is not None:
                 params, self.recommended_threshold = calibrated
         self.params = params if params is not None else LocalParams()
