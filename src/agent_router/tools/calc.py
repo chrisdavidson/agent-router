@@ -25,7 +25,8 @@ _NUM = r"\d+(?:\.\d+)?"
 _THOUSANDS = re.compile(r"(?<![\d.,])\d{1,3}(?:,\d{3})+(?![\d.,])")
 _CALL = re.compile(r"[A-Za-z_]\w*\s*\(")
 _PERCENT_OF = re.compile(rf"({_NUM})\s*%\s*of\s+(.+)$", re.IGNORECASE)
-_POSTFIX_PERCENT = re.compile(rf"({_NUM})\s*%(?=\s*(?:$|[)*/,]))")
+# "50%" / "50% * x": percent. "50% + 10" (no space before %) is percent; "10 % -3" is modulo.
+_POSTFIX_PERCENT = re.compile(rf"({_NUM})(?:\s*%(?=\s*(?:$|[)*/,]))|%(?=\s*[+\-]))")
 
 
 class _Inexact:
