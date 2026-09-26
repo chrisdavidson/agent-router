@@ -51,20 +51,47 @@ def _resolve_backend(args: argparse.Namespace) -> str:
     return args.backend
 
 
-def _router(args: argparse.Namespace):
+def _router(args: argparse.Namespace, *, env: bool = False):
+    """The router for a command.
+
+    ``env=True`` (``route``, ``run``): the ``AGENT_ROUTER_*`` environment config applies
+    (mode, threshold, disabled, audit path), with the decider's calibrated threshold unless
+    ``AGENT_ROUTER_THRESHOLD`` is set; an explicit ``--mode`` / ``--threshold`` beats it.
+    ``env=False`` (``eval``): an explicit advisory config and an in-memory audit, so scores
+    never depend on the shell.
+    """
+    from dataclasses import replace
+
+    from agent_router.core.audit import AuditLog
     from agent_router.core.catalog import load_catalog
+    from agent_router.core.config import RouterConfig
+    from agent_router.core.router import Router
+    from agent_router.deciders.base import recommended_threshold
     from agent_router.evaluate import make_router
 
     _check_backend(_resolve_backend(args))
     _set_embedder(getattr(args, "embedder", None))
     catalog = load_catalog()
-    return make_router(
+    mode = getattr(args, "mode", None)
+    threshold = getattr(args, "threshold", None)
+    router = make_router(
         args.backend,
         catalog,
-        threshold=getattr(args, "threshold", None),
+        threshold=threshold,
         timeout=getattr(args, "timeout", None),
-        mode=getattr(args, "mode", "advisory"),
+        mode=mode or "advisory",
     )
+    if not env:
+        return router
+    try:
+        config = RouterConfig.from_env(recommended_threshold=recommended_threshold(router.decider))
+        if mode is not None:
+            config = replace(config, mode=mode)
+        if threshold is not None:
+            config = replace(config, threshold=threshold)
+    except ValueError as exc:
+        raise CliError(f"invalid AGENT_ROUTER_* setting or flag: {exc}") from exc
+    return Router(catalog, router.decider, config, AuditLog(config.audit_path))
 
 
 def _print_json(obj: Any) -> None:
@@ -79,7 +106,7 @@ def cmd_route(args: argparse.Namespace) -> int:
     tool_name = args.tool
     if point == HookPoint.SKILL and tool_name is None:
         tool_name = "Skill"
-    router = _router(args)
+    router = _router(args, env=True)
     event = RouterEvent(
         point=point,
         session_id="cli",
@@ -304,7 +331,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     import asyncio
     import time
 
-    router = _router(args)
+    router = _router(args, env=True)
     start = time.perf_counter()
 
     def on_event(event: Any) -> None:
@@ -343,7 +370,11 @@ def _add_backend(p: argparse.ArgumentParser) -> None:
         help="decider backend (default: cascade when a Jev API key is set, else local)",
     )
     p.add_argument("--embedder", choices=EMBEDDERS, help="local backend embedder")
-    p.add_argument("--threshold", type=float, help="override the router threshold")
+    p.add_argument(
+        "--threshold",
+        type=float,
+        help="router threshold (default: AGENT_ROUTER_THRESHOLD for route/run, else calibrated)",
+    )
     p.add_argument("--timeout", type=float, help="hosted backend request timeout (s)")
 
 
@@ -401,7 +432,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("run", help="run the live agent and print its timeline")
     p.add_argument("prompt")
-    p.add_argument("--mode", choices=["advisory", "enforce"], default="advisory")
+    p.add_argument(
+        "--mode",
+        choices=["advisory", "enforce"],
+        help="router mode (default: AGENT_ROUTER_MODE, else advisory)",
+    )
     p.add_argument("--workspace", default=".")
     p.add_argument(
         "--allow-shell",

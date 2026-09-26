@@ -625,3 +625,53 @@ def test_route_stages_carry_no_error_text(client: TestClient, monkeypatch) -> No
     assert "SECRET" not in res.text
     stage = res.json()["result"]["stages"][-1]
     assert stage["failed"] is True and stage["error_type"] == "DeciderError"
+
+
+def test_env_disabled_skips_playground_and_live_runs(
+    audit_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGENT_ROUTER_DISABLED", "1")
+    seen = {}
+
+    async def runner(prompt, router, workspace, on_event):
+        seen["enabled"] = router.config.enabled
+
+    with _client(server.create_app(audit_dir=audit_dir, runner=runner)) as c:
+        body = _route(c, text="compute 2**200 exactly", point="prompt").json()
+        assert (body["decision"]["action"], body["decision"]["reason"]) == ("skipped", "disabled")
+        _run(c, prompt="hi", backend="local")
+    assert seen["enabled"] is False
+
+
+class _FailingDecider:
+    name = "failing"
+
+    def decide(self, state, options):
+        from agent_router.deciders.base import DeciderError
+
+        raise DeciderError("Jev returned HTTP 500: <html>SECRET provider body</html>")
+
+
+def test_route_decider_error_reason_hides_the_provider_body(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server.registry, "make_decider", lambda name, catalog: _FailingDecider())
+    body = _route(client, text="compute 2**200 exactly", point="prompt").json()
+    assert body["decision"]["action"] == "native"
+    assert body["decision"]["reason"] == "decider error: DeciderError"
+    assert "SECRET" not in json.dumps(body)
+
+
+def test_replay_decider_error_reason_hides_the_provider_body(
+    client: TestClient, audit_dir: Path
+) -> None:
+    rec = {
+        "session": "s-err",
+        "turn": 1,
+        "point": "prompt",
+        "action": "native",
+        "reason": "decider error: DeciderError: Jev returned HTTP 500: SECRET body",
+    }
+    (audit_dir / "s-err.jsonl").write_text(json.dumps(rec) + "\n")
+    body = client.get("/api/audit/s-err").json()
+    assert body["records"][0]["reason"] == "decider error: DeciderError"

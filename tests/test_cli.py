@@ -10,6 +10,8 @@ from agent_router import cli
 @pytest.fixture(autouse=True)
 def hashing(monkeypatch):
     monkeypatch.setenv("AGENT_ROUTER_EMBEDDER", "hashing")
+    for name in ("MODE", "THRESHOLD", "DISABLED", "AUDIT"):
+        monkeypatch.delenv(f"AGENT_ROUTER_{name}", raising=False)
 
 
 def test_route_json_prompt(capsys):
@@ -230,3 +232,97 @@ def test_run_passes_allow_shell(monkeypatch, capsys):
     assert seen == {"allow_shell": False, "backend": "local"}
     assert cli.main(["run", "hi", "--embedder", "hashing", "--allow-shell"]) == 0
     assert seen["allow_shell"] is True
+
+
+# -- AGENT_ROUTER_* environment (route and run honour it; eval scores explicitly) ------------
+
+CALC_PROMPT = ["route", "compute 3**80 exactly", "--backend", "local", "--json"]
+
+
+def _route_json(capsys, *extra):
+    assert cli.main([*CALC_PROMPT, *extra]) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+def test_route_honours_agent_router_disabled(capsys, monkeypatch):
+    monkeypatch.setenv("AGENT_ROUTER_DISABLED", "1")
+    out = _route_json(capsys)
+    assert (out["action"], out["reason"]) == ("skipped", "disabled")
+
+
+def test_route_honours_agent_router_threshold(capsys, monkeypatch):
+    monkeypatch.setenv("AGENT_ROUTER_THRESHOLD", "0.99")
+    assert _route_json(capsys)["threshold"] == 0.99
+    assert _route_json(capsys, "--threshold", "0.2")["threshold"] == 0.2  # flag beats env
+
+
+def test_route_honours_agent_router_mode(capsys, monkeypatch):
+    from agent_router.deciders import registry
+
+    monkeypatch.setattr(registry, "make_decider", lambda name, cat: _Always("local", "exact-calc"))
+    monkeypatch.setenv("AGENT_ROUTER_MODE", "enforce")
+    tool = ["--point", "tool", "--tool", "Bash", "--input", '{"command": "bc"}']
+    assert _route_json(capsys, *tool)["action"] == "enforce"
+    monkeypatch.delenv("AGENT_ROUTER_MODE")
+    assert _route_json(capsys, *tool)["action"] == "suggest"
+
+
+def test_route_writes_agent_router_audit(capsys, monkeypatch, tmp_path):
+    path = tmp_path / "audit" / "cli.jsonl"
+    monkeypatch.setenv("AGENT_ROUTER_AUDIT", str(path))
+    _route_json(capsys)
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    assert len(records) == 1 and records[0]["text"] == "compute 3**80 exactly"
+
+
+def test_invalid_env_is_a_cli_error(capsys, monkeypatch):
+    monkeypatch.setenv("AGENT_ROUTER_MODE", "loud")
+    assert cli.main(CALC_PROMPT) == 2
+    assert "AGENT_ROUTER" in capsys.readouterr().err
+    monkeypatch.setenv("AGENT_ROUTER_MODE", "advisory")
+    monkeypatch.setenv("AGENT_ROUTER_THRESHOLD", "high")
+    assert cli.main(CALC_PROMPT) == 2
+
+
+def test_run_honours_env_config_and_audit(monkeypatch, tmp_path):
+    import agent_router.agent as agent
+    from agent_router.core.types import HookPoint, RouterEvent
+
+    path = tmp_path / "run.jsonl"
+    monkeypatch.setenv("AGENT_ROUTER_AUDIT", str(path))
+    monkeypatch.setenv("AGENT_ROUTER_MODE", "enforce")
+    monkeypatch.setenv("AGENT_ROUTER_THRESHOLD", "0.42")
+    seen = {}
+
+    async def fake_run(prompt, router, workspace, on_event, **kw):
+        seen["config"] = router.config
+        seen["workspace"] = workspace
+        router.route(RouterEvent(HookPoint.PROMPT, "run", 1, prompt))
+        return "ok"
+
+    monkeypatch.setattr(agent, "run_agent", fake_run)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    assert cli.main(["run", "hi", "--backend", "local", "--workspace", str(ws)]) == 0
+    cfg = seen["config"]
+    assert (cfg.mode, cfg.threshold, cfg.enabled) == ("enforce", 0.42, True)
+    assert seen["workspace"] == ws.resolve()
+    assert json.loads(path.read_text().splitlines()[0])["text"] == "hi"
+    # explicit flags beat the environment
+    assert (
+        cli.main(["run", "hi", "--backend", "local", "--mode", "advisory", "--threshold", "0.3"])
+        == 0
+    )
+    assert (seen["config"].mode, seen["config"].threshold) == ("advisory", 0.3)
+    monkeypatch.setenv("AGENT_ROUTER_DISABLED", "yes")
+    assert cli.main(["run", "hi", "--backend", "local"]) == 0
+    assert seen["config"].enabled is False
+
+
+def test_eval_scores_explicitly_and_ignores_router_env(capsys, monkeypatch):
+    monkeypatch.setenv("AGENT_ROUTER_DISABLED", "1")
+    monkeypatch.setenv("AGENT_ROUTER_THRESHOLD", "0.99")
+    assert cli.main(["eval", "--backend", "local", "--json"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["threshold"] != 0.99
+    assert all(c["reason"] != "disabled" for c in out["cases"])

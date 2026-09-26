@@ -159,6 +159,17 @@ def _default_runner(allow_shell: bool) -> Runner:
     return run
 
 
+DECIDER_ERROR = "decider error"  # the router's fail-open reason prefix
+
+
+def _public_reason(reason: str) -> str:
+    """A decider error keeps only its exception type: the rest may be a provider's body."""
+    if reason.startswith(DECIDER_ERROR):
+        kind = reason[len(DECIDER_ERROR) :].lstrip(": ").split(":", 1)[0].strip()
+        return f"{DECIDER_ERROR}: {kind}" if kind else DECIDER_ERROR
+    return reason
+
+
 def _load_base_config() -> RouterConfig:
     """Environment config, validated once at startup with a readable error."""
     try:
@@ -243,7 +254,11 @@ def create_app(
             thr = base_config.threshold
         if not 0.0 <= thr <= 1.0:
             raise HTTPException(400, "threshold must be in [0, 1]")
-        return RouterConfig(mode=mode, threshold=thr)  # type: ignore[arg-type]
+        return RouterConfig(
+            mode=mode,  # type: ignore[arg-type]
+            threshold=thr,
+            enabled=base_config.enabled,  # AGENT_ROUTER_DISABLED
+        )
 
     def check_same_origin(request: Request) -> None:
         """Refuse run requests another site (or another localhost port) triggered."""
@@ -274,6 +289,8 @@ def create_app(
     def restore_hint(rec: dict[str, Any]) -> dict[str, Any]:
         """The audit keeps 300 chars of the hint; re-render the full templated text."""
         rec = dict(rec)
+        if isinstance(rec.get("reason"), str):  # the replay UI shows it, like the playground
+            rec["reason"] = _public_reason(rec["reason"])
         rec["hint_restored"] = False
         hint, entry_id = rec.get("hint"), rec.get("entry_id")
         entry = cat.get(entry_id) if isinstance(entry_id, str) else None
@@ -349,7 +366,7 @@ def create_app(
         return {
             "decision": {
                 "action": str(decision.action),
-                "reason": decision.reason,
+                "reason": _public_reason(decision.reason),
                 "entry_id": decision.entry_id,
             },
             "result": None
