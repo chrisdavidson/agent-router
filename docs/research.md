@@ -21,14 +21,14 @@ this as the `logprob` backend (local llama.cpp GGUF, default `unsloth/Qwen3-0.6B
 OpenAI-compatible `/chat/completions` with `top_logprobs`). Both live in
 `src/agent_router/deciders/logprob.py` and are MIT.
 
-| Project | License | Popularity | What it is | Use here |
-|---|---|---|---|---|
-| NobodyWho, "Jev in 25 lines" (nobodywho.ai blog; HN item 49812769) | blog post | HN front page | The letter-logit readout above, with numpy normalisation | Re-implemented as `logprob` / `openrouter` (MIT) |
-| AnyJev (github.com/MorrisZJ/AnyJev, PyPI `anyjev`) | Apache-2.0 | 769★ | Any causal LM as a Jev-style model; L0 debiasing (cyclic-shift marginalisation, label-prior correction), L1 temperature scaling | **NON-MIT optional plugin**: `anyjev` backend, extra `anyjev` (pulls torch + transformers). Our `permutations>1` borrows the L0 idea |
-| Kev (jaredpalmer/kev) | Apache-2.0 | 7.1k★ | Jev-like decision library | Reference only |
-| Laya (NandhaKishorM/laya) | Apache-2.0 | 25k★ | Jev-like local decision model | Reference only |
-| jevlike (vinnylarouge/jevlike) | MIT | 1.3k★ | MIT Jev-style classifier; needs training, no published text checkpoint | Not usable out of the box |
-| zlh1992/jev_local_qwen | none stated | — | Local Qwen Jev clone | Not usable (no license) |
+| Project | License | What it is | Use here |
+|---|---|---|---|
+| NobodyWho, "Jev in 25 lines" (nobodywho.ai blog; HN item 49812769) | blog post | The letter-logit readout above, with numpy normalisation | Re-implemented as `logprob` / `openrouter` (MIT) |
+| AnyJev (github.com/MorrisZJ/AnyJev, PyPI `anyjev`) | Apache-2.0 | Any causal LM as a Jev-style model; L0 debiasing (cyclic-shift marginalisation, label-prior correction), L1 temperature scaling | **NON-MIT optional plugin**: `anyjev` backend, extra `anyjev` (pulls torch + transformers). Our `permutations>1` borrows the L0 idea |
+| Kev (jaredpalmer/kev) | Apache-2.0 | Jev-like decision library | Reference only |
+| Laya (NandhaKishorM/laya) | Apache-2.0 | Jev-like local decision model | Reference only |
+| jevlike (vinnylarouge/jevlike) | MIT | MIT Jev-style classifier; needs training, no published text checkpoint | Not usable out of the box |
+| zlh1992/jev_local_qwen | none stated | Local Qwen Jev clone | Not usable (no license) |
 
 Notes:
 
@@ -56,7 +56,7 @@ Notes:
   get the smallest logprob seen minus 5.
 - The Alibaba provider caps `top_logprobs` at 5 (HTTP 400 "Range of top_logprobs should
   be [0, 5]"); the backend retries once with 5 when that happens.
-\n
+
 ## Jev (TypeSafe)
 
 - **What it is.** Jev is TypeSafe's hosted "System One" decision model. It launched on 2026-09-15.
@@ -100,7 +100,7 @@ agent-router keeps that shape and changes three things:
 ## Router literature
 
 | Work | arXiv / source | License | Idea | Used here |
-|---|---|---|---|---|
+|---|---|---|---|
 | RouteLLM | 2406.18665 | Apache-2.0 | Learns routers from preference data to send each query to a strong or a weak LLM | Framing: a cheap classifier decides and a threshold trades quality for cost. No code used |
 | semantic-router (aurelio-labs) | GitHub | MIT | Embeds example utterances per route and picks the route by nearest-neighbour similarity | The `semantic-router` backend. The local decider uses the same exemplar approach |
 | Gorilla | 2305.15334 | Apache-2.0 | An LLM fine-tuned with retrieval to write API calls | Background: retrieval over a tool catalog |

@@ -38,7 +38,7 @@ flowchart TB
     end
     TOOLS["tools/<br/>pure-Python MIT tools"]
     DEMO["demo/server.py<br/>FastAPI + static UI"]
-    CLI["cli.py<br/>route, eval, calibrate, demo, run"]
+    CLI["cli.py<br/>route, eval, calibrate,<br/>calibrate-cascade, demo, run"]
 
     SDK -->|hook callbacks| HK
     HK -->|RouterEvent| RT
@@ -81,9 +81,10 @@ sequenceDiagram
     H->>R: route(RouterEvent point=tool) in a worker thread
     R->>R: gates: enabled, not own tool, eligible = exact-calc, json-query, html, repo-stats
     R->>L: decide(state, options + none)
+    Note over L: scores the current step only (drops the "previous:" lines)
     L-->>R: exact-calc (not a confident none)
     Note over R,J: cascade escalates: local did not answer none with p(none) >= gate 0.6
-    R->>J: POST /api/alpha/decisions, choice question with criteria
+    R->>J: POST /api/alpha/decisions, full state (with recent prompts) and criteria
     J-->>R: choice=exact-calc, probabilities, confidence
     R->>R: accept: choice is not none and p >= threshold 0.50
     R->>R: first suggestion of exact-calc this turn, so render_hint(entry)
@@ -105,14 +106,20 @@ sequenceDiagram
 
 ## Router rules (`core/router.py`)
 
+The same nine rules, in the same order, as the `core/router.py` docstring:
+
 1. Routing is disabled, or the hook point is not enabled: `skipped`.
 2. The pending call targets `mcp__agent_router__*` or a catalog target (loop guard): `skipped`.
 3. No catalog entry lists this point, or at tool/skill points this tool in `replaces`: `skipped`.
-4. The decider raises: `native` (fail open).
-5. The choice is not one of the offered options: `native`.
-6. The choice is `none`, or p(choice) < threshold: `native`.
-7. Enforce mode at the tool point: `enforce` (deny) on every matching call.
-8. The entry was already suggested this (session, turn): `skipped`. Otherwise: `suggest`.
+4. Build the decider state: prompt text, the pending call as compact JSON (tool/skill points), and
+   up to three recent prompts as `previous: ...` lines. The local classifiers drop those lines and
+   score the current step only; Jev gets the whole state.
+5. Ask the decider. If it raises: `native` (fail open).
+6. The choice is not one of the offered options: `native`, recorded as `none` (the unknown text is
+   never repeated).
+7. The choice is `none`, or p(choice) < threshold: `native`.
+8. Enforce mode at the tool point: `enforce` (deny) on every matching call.
+9. The entry was already suggested this (session, turn): `skipped`. Otherwise: `suggest`.
 
 ## Audit record (`core/audit.py`)
 
@@ -130,14 +137,14 @@ Writes are locked and fail open.
 | `probabilities`, `choice`, `confidence` | dict, str, float | the decider's answer; `{}` / null when not asked |
 | `action`, `reason`, `entry_id` | str | `suggest` / `enforce` / `native` / `skipped`; `reason` never reaches the agent |
 | `hint` | str or null | templated text, first 300 characters (Replay re-renders the full hint) |
-| `backend`, `latency_ms` | str, float | e.g. `local`, `jev:~typesafe/jev-latest`, `cascade:local`, `cascade:local-fallback` |
-| `stages` | list[dict] | cascade only: one entry per stage (`role`, `backend`, `choice`, `probabilities`, `confidence`, `latency_ms`, `error`, `skipped`); `error` is truncated and kept out of the timeline and UI |
+| `backend`, `latency_ms` | str, float | e.g. `local`, `jev:typesafe/jev-1.13-20260917` (the served model), `cascade:local`, `cascade:jev:…`, `cascade:local-fallback` |
+| `stages` | list[dict] | cascade only: one entry per stage (`role`, `backend`, `choice`, `probabilities`, `confidence`, `latency_ms`, `failed`, `error_type`, `error`, `skipped`); `failed` is a bool, `error_type` the exception class name, `skipped` e.g. `"circuit-open"`; `error` (exception text) is truncated and kept out of the timeline and UI |
 | `catalog_version`, `thresholds` | str, dict | `{threshold, mode}` in effect |
 
 **Where the log goes and who reads it:**
 
 - **Default location.** The demo writes to `.agent-router/audit/<session>.jsonl`. `agent-router run`
-  writes to `AGENT_ROUTER_AUDIT` if set, otherwise it keeps records in memory.
+  and `route` write to `AGENT_ROUTER_AUDIT` if set, otherwise they keep records in memory.
 - **Replay** lists the demo's `.agent-router/audit/` sessions and the bundled `audit/sample-session.jsonl`.
 - **Live agent timeline.** The adapter's `decision` event carries the same fields, minus `reason`.
   Its schema is in the `adapters/claude_sdk.py` docstring.

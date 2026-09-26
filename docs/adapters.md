@@ -8,11 +8,13 @@ The router core never imports a host SDK. An adapter does two translations:
 | `Decision.action` | Meaning | Host output |
 |---|---|---|
 | `suggest` | advisory hint; the agent decides | inject `hint` as model-visible context |
-| `enforce` | native call denied | deny the tool call with `reason` |
+| `enforce` | native call denied | deny the tool call with `hint` (the templated deny text) |
 | `native` / `skipped` | do nothing | empty output (exit 0) |
 
-Enforcement only applies at `tool` / `skill` points. At `prompt` the router can only suggest:
-denying a prompt would discard the user's message on every host.
+Enforcement only applies at the `tool` point. At `prompt` and `skill` the router only suggests,
+even in enforce mode: denying a prompt would discard the user's message on every host.
+Never forward `Decision.reason` to the model: it can hold exception text from a backend. Only
+`hint` is built from catalog fields.
 
 ## Mapping
 
@@ -84,9 +86,9 @@ catalog = load_catalog()
 d = Router(catalog, make_decider("local", catalog)).route(ev)
 out = {}
 if d.action is Action.ENFORCE and point is HookPoint.TOOL:
-    out = ({"decision": "deny", "reason": d.reason} if HOST == "gemini" else
+    out = ({"decision": "deny", "reason": d.hint} if HOST == "gemini" else
            {"hookSpecificOutput": {"hookEventName": event_name, "permissionDecision": "deny",
-                                   "permissionDecisionReason": d.reason}})
+                                   "permissionDecisionReason": d.hint}})
 elif d.action is Action.SUGGEST and d.hint and not (HOST == "gemini" and point is HookPoint.TOOL):
     out = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": d.hint}}
 print(json.dumps(out))  # exit 0; any router failure should also print {} and exit 0 (fail open)

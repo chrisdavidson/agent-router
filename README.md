@@ -45,7 +45,8 @@ flowchart LR
 ```
 
 1. The adapter (`adapters/claude_sdk.py`) converts each hook call into a `RouterEvent`: the hook point,
-   the prompt text, the pending tool name and input, and up to three recent prompts.
+   the prompt text, the pending tool name and input, and up to three recent prompts. The local
+   classifiers score only the current step; Jev also sees the recent prompts.
 2. `Router.route` (`core/router.py`) applies its gates in this order. It skips the step when routing is
    disabled. It skips calls to the router's own tools and to catalog targets (loop guard). It skips when
    no catalog entry is eligible for this point and tool.
@@ -62,7 +63,8 @@ The decision model picks from a list; nothing it produces reaches the agent as t
 the code enforce this, and tests cover each one:
 
 - **Enum output.** The only answers are catalog ids and `none`. If a backend returns anything else,
-  the router treats it as `none` and never repeats that text.
+  the router treats it as `none`, records it as `none` (audit and timeline), and never repeats that
+  text. The playground shows a decider error as its exception type only.
 - **Templated hints.** `core/hints.py` builds hint and deny text only from catalog fields (name,
   project, `what`, target). `Decision.reason` can hold exception text, so it stays in the audit log
   and the adapter never passes it to the agent.
@@ -100,8 +102,11 @@ Run the real agent. This needs a Claude Code login (or `ANTHROPIC_API_KEY`) and 
 default model is `claude-haiku-4-5`:
 
 ```bash
-.venv/bin/agent-router run "What is 2**200 exactly?"
+.venv/bin/agent-router run "What is 2**200 exactly?" --workspace demo_workspace
 ```
+
+`--workspace` is the agent's working directory (default: the current one); `demo_workspace/` holds
+the sample files and the `commit-writer` skill.
 
 The demo has three tabs:
 
@@ -158,30 +163,34 @@ directly. A key passed in code picks OpenRouter when it starts with `sk-or-`.
 
 **Cost and timeout.**
 
-- A Jev decision costs about $0.000015. The 59-case holdout cost about $0.001.
-- At runtime the Jev request timeout is 2 s. The measurements below used 15 s.
+- A Jev decision costs about $0.000015. A holdout run costs about $0.001.
+- At runtime the Jev request timeout is 2 s. The cascade row below was measured with that 2 s
+  timeout (`agent-router eval --backend cascade --timeout 2`) and had no timeouts.
 - If Jev times out, the cascade falls back to its local answer, biased to `none`. That keeps the
   false-positive rate low but can lose recall on a slow network.
 
 ### Measured on the holdout
 
-`evals/eval_set.yaml` has 117 labelled cases: 58 for calibration and 59 held out (35 positive,
-24 negative, including decoys). Each backend below was run once on the 59 holdout cases.
+`evals/eval_set.yaml` has 127 labelled cases: 63 for calibration and 64 held out (37 positive,
+27 negative, including decoys). Ten of them are multi-turn "context" cases whose earlier prompts
+point at a different entry (for example "run the tests again" after an HTML-conversion prompt).
 
-- **Accuracy** is top-1 over all 59 cases.
-- **FPR** is the share of the 24 cases where the right answer is `none` but the backend suggested
+- **Accuracy** is top-1 over the holdout cases.
+- **FPR** is the share of holdout cases where the right answer is `none` but the backend suggested
   an entry anyway.
 
-| Backend | Accuracy | FPR | Notes |
-|---|---|---|---|
-| **cascade** (default with key) | **0.898** | **0.000** | 72.9% of steps escalated to Jev; mean 212 ms, p95 330 ms; 0 fallbacks |
-| jev | 0.949 | 0.000 | every step is a Jev call; mean 240 ms |
-| local, model2vec (calibrated) | 0.797 | 0.167 | offline; mean 0.3 ms per step when warm (the first call loads the model) |
-| openrouter (Qwen logprob) | 0.763 | 0.292 | 7 request errors (router failed open) |
-| logprob (local Qwen3-0.6B) | 0.525 | 0.708 | leans towards suggesting |
-| semantic-router (TF-IDF) | 0.458 | 0.250 | |
-| local, hashing embedder (defaults) | 0.390 | 0.042 | conservative, low recall |
+| Backend | Holdout | Accuracy | FPR | Notes |
+|---|---|---|---|---|
+| **cascade** (default with key) | 64 | **0.891** | **0.000** | 70.3% of steps escalated to Jev (45/64); 2 s timeout: mean 183 ms, p95 302 ms, max 403 ms; 0 fallbacks |
+| local, model2vec (calibrated) | 64 | 0.797 | 0.148 | offline; mean 0.3 ms per step when warm (the first call loads the model) |
+| jev | 59 | 0.949 | 0.000 | every step is a Jev call; mean 240 ms |
+| openrouter (Qwen logprob) | 59 | 0.763 | 0.292 | 7 request errors (router failed open) |
+| logprob (local Qwen3-0.6B) | 59 | 0.525 | 0.708 | leans towards suggesting |
+| semantic-router (TF-IDF) | 59 | 0.458 | 0.250 | |
+| local, hashing embedder (defaults) | 59 | 0.390 | 0.042 | conservative, low recall |
 
+The cascade and local model2vec rows are from the current 64-case holdout. The other rows were
+measured on the earlier 59-case holdout, before the context cases were added, and were not re-run.
 The two Qwen rows come from a single controller run and have no saved raw output. The other rows are
 reproducible:
 
@@ -191,16 +200,17 @@ agent-router eval --backend <name> [--embedder hashing] [--json]
 
 **Where each backend goes wrong:**
 
-- **cascade.** It misses 3 cases that Jev also misses (short `python3 -c` and `sed` one-liners). It
-  also misses 3 positives that `local` answered as a confident `none`. That is the price of
-  skipping 27% of Jev calls.
+- **cascade.** It misses 4 tool-point cases that Jev also misses (short `python3 -c`, `node -e`
+  and `sed` one-liners). It also misses 3 positives that `local` answered as a confident `none`.
+  That is the price of skipping 30% of Jev calls.
 - **local.** Its errors are near-misses that static embeddings cannot separate: "edit package.json"
   versus "query JSON", and "review a diff" versus "write a commit message for a diff".
-- **local, with conversation history.** `local` also reads the last few prompts as part of its
-  input, so an earlier JSON request can pull a later, unrelated prompt towards `json-query`.
-  `audit/sample-session.jsonl` shows two real cases: "run the test suite" (p=0.69) and "explain
-  what the retry helper in src/ does" (p=0.44) were both nudged to `json-query` after an earlier
-  JSON prompt. The cascade sends non-`none` local answers like this one to Jev.
+- **Conversation history.** The router passes the last three prompts along with each step. The
+  local classifiers score only the current step (the `previous: ...` lines are dropped), so an
+  earlier JSON request can no longer pull "run the test suite" towards `json-query`; the regenerated
+  `audit/sample-session.jsonl` shows both former false positives staying native. Jev, the cascade's
+  confirm stage, still gets the recent prompts as context. The eval set's context cases cover this:
+  on them the cascade scored 5/5 on the holdout.
 
 ## Catalog
 
@@ -256,13 +266,18 @@ A sample hint:
 |---|---|
 | `AGENT_ROUTER_MODE` | `advisory` (default) or `enforce` |
 | `AGENT_ROUTER_THRESHOLD` | Overrides the calibrated threshold (local 0.35, cascade/jev 0.50) |
-| `AGENT_ROUTER_DISABLED` | `1` turns routing off. Every step is skipped, but still audited |
-| `AGENT_ROUTER_AUDIT` | JSONL path for `agent-router run`. Without it, records stay in memory. The demo writes to `.agent-router/audit/` |
+| `AGENT_ROUTER_DISABLED` | `1` (or `true`, `yes`, `on`) turns routing off. Every step is skipped, but still audited |
+| `AGENT_ROUTER_AUDIT` | JSONL audit path for `agent-router run` and `route`. Without it, records stay in memory. The demo writes to `.agent-router/audit/` |
 | `AGENT_ROUTER_EMBEDDER` | `model2vec` (default) or `hashing` (no download) |
 | `OPENROUTER_API_KEY` / `TYPESAFE_API_KEY` | Enables `jev` and `cascade`, and makes the cascade the default |
 
-The `run`, `route` and `eval` commands also accept `--backend`, `--threshold` and `--timeout`.
-`agent-router <cmd> --help` lists every flag.
+- **Who reads them.** `agent-router run` and `route` and `agent.make_router` apply
+  `AGENT_ROUTER_MODE`, `_THRESHOLD`, `_DISABLED` and `_AUDIT`. The demo server applies the first
+  three and keeps its own audit directory. `agent-router eval` ignores them (it always scores in advisory mode at the calibrated
+  threshold, with an in-memory audit), so its numbers never depend on your shell.
+- **Flags win.** `--threshold` (run, route, eval) and `--mode` (run) override the environment.
+  All three commands also accept `--backend` and `--timeout`. `agent-router <cmd> --help` lists
+  every flag.
 
 ## Security notes
 
