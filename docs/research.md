@@ -7,7 +7,7 @@ These notes explain the design choices behind agent-router:
 - the router and tool-retrieval literature
 - local alternatives to Jev
 
-Measured results are in the [README](../README.md#backends-and-results).
+Measured results are in the [technical guide](technical-guide.md#backends-and-results).
 
 
 ## Local Jev alternatives

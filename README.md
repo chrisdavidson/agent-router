@@ -1,318 +1,170 @@
 # agent-router
 
-agent-router is an MIT-licensed router for [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)
-agents. It listens at three hook points: the user's prompt, native tool calls such as `Bash` and `Read`, and skill
-invocations. At each one it asks a classifier built to TypeSafe Jev's `choice` spec whether a tool from a
-small, fixed catalog of MIT-licensed tools fits the step better than the agent's own approach. If one does,
-the agent gets a one-line templated hint, or in enforce mode the native call is denied. The classifier can
-only pick a catalog id or `none`. It never writes text that the agent sees. The design follows
-[Tenjin](https://github.com/BackTrackCo/tenjin-agent) (ideas only, no code reused) in an MIT codebase
-with pluggable decision backends.
+**A checkpoint for your AI agent.** Every time the agent is about to act, agent-router stops it for a
+moment, looks at what it's about to do, and checks it against a short, fixed list of approved tools.
 
-![Playground, compare view: every backend's probabilities for one step](docs/img/demo-compare.png)
+MIT licensed · works with the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) today ·
+designed to also plug into Codex CLI and Gemini CLI.
 
-## Contents
+![The demo: one agent step, judged by every classifier](docs/img/demo-compare.png)
 
-[How it works](#how-it-works) ·
-[Quick start](#quick-start) ·
-[Backends and results](#backends-and-results) ·
-[Catalog](#catalog) ·
-[Hook points and modes](#hook-points-and-modes) ·
-[Configuration](#configuration) ·
-[Security notes](#security-notes) ·
-[Other hosts](#adapting-to-codex-cli-and-gemini-cli) ·
-[Research](#research) ·
-[License](#license)
+## The idea, explained simply
 
-## How it works
+Think of an AI agent as a very capable new employee who improvises. Ask it to add two numbers and it
+might write a Python script, run it in a shell, and read the output. That usually works, but it's
+different every time, and you can't easily predict or audit it.
 
-```mermaid
-flowchart LR
-    P["User prompt"] --> H1["UserPromptSubmit hook"]
-    T["Native tool call<br/>Bash, Read, Glob, WebFetch"] --> H2["PreToolUse hook"]
-    S["Skill call"] --> H2
-    subgraph RT["Router"]
-        G["Gates: disabled, own tool,<br/>eligible entries"]
-        D["Decider: cascade<br/>local model2vec, then Jev"]
-        A["Accept if choice is not none<br/>and p is at least the threshold,<br/>once per entry per turn"]
-        X["Templated hint or deny,<br/>from catalog fields only"]
-        G --> D --> A --> X
-    end
-    H1 --> G
-    H2 --> G
-    X --> AG["Agent: additionalContext<br/>or permission deny"]
-    X -.->|one record per decision| AU[("audit JSONL")]
-```
+agent-router puts a **gatekeeper at every door the agent walks through**:
 
-1. The adapter (`adapters/claude_sdk.py`) converts each hook call into a `RouterEvent`: the hook point,
-   the prompt text, the pending tool name and input, and up to three recent prompts. The local
-   classifiers score only the current step; Jev also sees the recent prompts.
-2. `Router.route` (`core/router.py`) applies its gates in this order. It skips the step when routing is
-   disabled. It skips calls to the router's own tools and to catalog targets (loop guard). It skips when
-   no catalog entry is eligible for this point and tool.
-3. The decider answers a Jev `choice` question over the eligible entries plus `none`. It returns a
-   choice, a probability for each option, and a confidence.
-4. `none`, or a probability below the threshold, means the agent carries on unchanged. Otherwise the
-   router builds a hint from a fixed template over catalog fields. Each entry is suggested at most once
-   per turn.
-5. Each decision writes one audit record to JSONL.
+1. **When you ask it something.** This is your prompt.
+2. **When it's about to use a tool**, like running a shell command or reading a file.
+3. **When it's about to use a skill**, which is a packaged set of instructions.
 
-### The classifier can only point, never write
+At each door, the gatekeeper asks one question: *"Is there an approved tool on our list for this?"*
+It can only answer by **pointing at one item on the list**, or by saying **"none, carry on"**. It never
+writes instructions or makes up commands. Pointing is all it can do.
 
-The decision model picks from a list; nothing it produces reaches the agent as text. Four parts of
-the code enforce this, and tests cover each one:
+- If an approved tool fits, the agent gets a short note that names it (for example, the exact
+  calculator) and says how to call it. In **enforce** mode, the gatekeeper can also block the agent's
+  improvised approach, such as a shell command.
+- If nothing fits, the agent carries on as usual, and nothing changes.
+- Every stop is written to a log, so you can replay exactly what was checked and why.
 
-- **Enum output.** The only answers are catalog ids and `none`. If a backend returns anything else,
-  the router treats it as `none`, records it as `none` (audit and timeline), and never repeats that
-  text. The playground shows a decider error as its exception type only.
-- **Templated hints.** `core/hints.py` builds hint and deny text only from catalog fields (name,
-  project, `what`, target). `Decision.reason` can hold exception text, so it stays in the audit log
-  and the adapter never passes it to the agent.
-- **Loop guard.** Calls to `mcp__agent_router__*` or to a catalog skill are never routed, and each
-  entry is suggested at most once per (session, turn).
-- **Fail open.** If a decider raises an error or times out, the step is `native` and the hook
-  returns `{}`. A broken backend cannot block the agent. Audit write failures are logged and
-  swallowed.
+### Why: a more predictable inner agent
 
-## Quick start
+agent-router is meant to make the agent inside a harness (the "inner Claude") **more deterministic**.
+Claude Code and the Agent SDK already have *hooks*: places where your code can run when the agent acts.
+Hooks are the doors. agent-router is the **gatekeeper that stands at those doors**. It makes sure every
+decision is inspected, and it steers the agent toward a predefined set of approved tools and
+instructions, instead of whatever it would have improvised.
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+**What that means today, precisely:**
+
+| | Today |
+|---|---|
+| Every prompt, tool call and skill call is inspected | ✅ Yes, and each one is logged |
+| The gatekeeper can only pick from a fixed, approved list | ✅ Yes (every item must be MIT-licensed) |
+| The same step gets the same routing answer | ✅ Yes for the offline classifier; near-identical with Jev |
+| The agent is *told* the approved way | ✅ Yes (advisory mode) |
+| The agent is *stopped* from using a shell or file tool when an approved tool fits | ✅ Yes, in enforce mode |
+| The agent is *forced* to then use the approved tool | ❌ Not yet. It's blocked and pointed at it, but it chooses its next move |
+| The agent is made to follow a predefined **graph** of steps (step A, then B, then C) | ❌ Not yet. Today each step is judged on its own. This is the planned next stage |
+| If the gatekeeper breaks, the agent is blocked | ❌ No, on purpose: a failure lets the step through so the agent never gets stuck |
+
+## Try the demo in 3 minutes
+
+You need Python 3.11+, [uv](https://docs.astral.sh/uv/), and (for the live agent) a Claude Code login.
 
 ```bash
 git clone https://github.com/usathyan/agent-router && cd agent-router
-make install          # uv venv .venv, then uv pip install -e ".[dev]"
-make test             # offline unit tests, about 5 s
-make run              # demo on http://127.0.0.1:8765
+make install                          # one-time setup
+export OPENROUTER_API_KEY=sk-or-...   # optional: lets the real Jev classifier double-check
+make run                              # open http://127.0.0.1:8765
 ```
 
-- **Default backend.** With no API key, every command uses the offline `local` backend.
-  `export OPENROUTER_API_KEY=sk-or-...` (or `TYPESAFE_API_KEY`) makes the cascade the default
-  and enables `jev`.
-- **`make route` and `make eval`** use `BACKEND=local` unless you pass another one.
+No API key? Everything still works, using a free classifier that runs on your machine.
 
-```bash
-make route Q="What is 17% of 2,340 exactly?"                  # offline
-make route Q="What is 17% of 2,340 exactly?" BACKEND=cascade  # asks Jev if local is unsure
-make eval                                                     # holdout accuracy / FPR, local
-.venv/bin/agent-router route "compute 2**200" --point tool --tool Bash \
-    --input '{"command": "python3 -c \"print(2**200)\""}' --json
-```
+The page has three tabs:
 
-Run the real agent. This needs a Claude Code login (or `ANTHROPIC_API_KEY`) and spends tokens; the
-default model is `claude-haiku-4-5`:
+| Tab | What it is | Costs |
+|---|---|---|
+| **Playground** | Test the gatekeeper on one step. You describe the step, it shows its decision. No agent runs. | Free (a fraction of a cent if Jev is asked) |
+| **Live agent** | Give a real Claude agent a task and watch every checkpoint happen, step by step. | A few cents per run |
+| **Replay** | Step back through any earlier run, one checkpoint at a time. | Free |
 
-```bash
-.venv/bin/agent-router run "What is 2**200 exactly?" --workspace demo_workspace
-```
+### How to read a decision
 
-`--workspace` is the agent's working directory (default: the current one); `demo_workspace/` holds
-the sample files and the `commit-writer` skill.
+![A live run: the checkpoint, the decision bars, the note the agent receives](docs/img/demo-live.png)
 
-The demo has three tabs:
+- **The bars** show how strongly the gatekeeper leans toward each approved tool, and toward
+  **none** (let the agent carry on). The dashed line is the bar a choice must clear before anyone acts.
+- **"Escalated to Jev"** means the free local classifier wasn't sure it could say "none", so a second,
+  more careful classifier (Jev) confirmed the answer. **"Answered locally"** means no second opinion
+  was needed.
+- **"What the agent sees"** is the exact note added to the agent's context. It always comes from the
+  approved list, never from the classifier itself.
+- **Badges:** **Hint injected** means the agent got the note. **Blocked** means enforce mode stopped the
+  agent's own approach. **Native path** means nothing fit, so nothing changed.
 
-- **Playground** routes one step with any backend and shows the probability bars. For the cascade it
-  shows both stages.
-- **Live agent** streams a real SDK run: hooks, decisions, tool calls and the answer.
-- **Replay** steps through an audit session. `audit/sample-session.jsonl` is included.
+## Test the scenarios
 
-| Live agent | Replay |
-|---|---|
-| ![Live agent timeline](docs/img/demo-live.png) | ![Replay](docs/img/demo-replay.png) |
+Each scenario is one click in the **Playground** (the buttons under *Examples*), then **Route this step**.
 
-`make help` lists all targets:
-
-| Target | What it does |
-|---|---|
-| `venv` | Creates the virtual environment |
-| `install` | Installs the package and dev dependencies |
-| `clean` | Removes build artifacts |
-| `test` | Runs the unit tests offline |
-| `test-model` | Runs the model2vec tests (downloads the model once) |
-| `test-live` | Runs a real SDK session plus paid Jev/OpenRouter calls |
-| `lint` | Checks the code |
-| `format` | Formats the code |
-| `eval` | Runs the evaluation |
-| `calibrate` | Re-fits the local decider and rewrites `calibration.json` |
-| `calibrate-cascade` | Paid: calls Jev once per cal case |
-| `run` | Starts the demo server |
-| `route` | Routes one step |
-
-Extras are optional:
-
-- `uv pip install -e ".[semantic-router]"` adds the `semantic-router` backend.
-- `".[llm]"` adds the local Qwen3-0.6B `logprob` backend (builds llama.cpp).
-- `".[anyjev]"` adds the Apache-2.0 plugin.
-
-## Backends and results
-
-Choose a backend with `--backend`. Without the flag, the default is `cascade` when a Jev key is set,
-otherwise `local`.
-
-| Backend | What it is | License | Needs |
+| # | Scenario | Click | What should happen |
 |---|---|---|---|
-| `cascade` (default with a key) | Runs `local` first. If `local` is confidently `none` (p(none) ≥ gate 0.6), that answer is final. Otherwise Jev is asked. If Jev fails, the cascade falls back to `local`, biased to `none`. After 3 Jev failures in a row it stops asking Jev for 60 s | MIT (our code) + Jev API | Jev key |
-| `local` (default offline) | Our Jev-spec classifier: model2vec `potion-base-8M` embeddings against each entry's `what` / `examples` / `not_for`, softmax scores, calibrated on the cal split | MIT | nothing (model downloads once) |
-| `jev` | TypeSafe Jev `~typesafe/jev-latest` through OpenRouter `POST /api/alpha/decisions`, or directly at `api.typesafe.ai/v1/systemone` | MIT client, proprietary model | `OPENROUTER_API_KEY` or `TYPESAFE_API_KEY` |
-| `openrouter` | Letter-logprob readout ("Jev in 25 lines") from `qwen/qwen3.7-flash` over OpenRouter chat completions | MIT client | `OPENROUTER_API_KEY` |
-| `logprob` | The same readout from a local Qwen3-0.6B GGUF through llama.cpp | MIT | extra `llm` |
-| `semantic-router` | aurelio-labs semantic-router with a TF-IDF encoder | MIT | extra `semantic-router` |
-| `anyjev` | [AnyJev](https://github.com/MorrisZJ/AnyJev) turns any causal LM into a Jev-style classifier. Our adapter is MIT; the plugin is not | **Apache-2.0**, opt-in | extra `anyjev` (torch) |
+| 1 | The user asks for exact math | **17% of 2,340** | Points to the **Exact calculator**; a note is added |
+| 2 | The agent is about to do math in a shell | **python3 -c 2\*\*200** | Points to the calculator instead of running Python in a shell |
+| 3 | The agent is about to read a saved web page | **Read release.html** | Points to **HTML to Markdown** |
+| 4 | The user asks a question about a JSON file | **failed orders** | Points to **JSON query** |
+| 5 | The agent is about to use a skill that isn't on the list | **release-notes skill** | Points to the approved **commit-writer** skill |
+| 6 | An ordinary request | **run the test suite** | Says **none**. The agent is left alone, which is the point |
 
-**Jev transport.** `jev` uses OpenRouter when `OPENROUTER_API_KEY` is set, otherwise TypeSafe
-directly. A key passed in code picks OpenRouter when it starts with `sk-or-`.
+Then try these variations:
 
-**Cost and timeout.**
+- **Block instead of suggest.** Pick scenario 2, switch **Mode** to **Enforce**, and route again. The
+  badge becomes **Blocked**. The agent's shell command would be refused, with the reason shown.
+- **Compare classifiers.** Pick any scenario and click **Compare classifiers**. Every available
+  classifier answers the same question side by side, and you can see where they agree and disagree.
+- **Be stricter or looser.** Move the **Threshold** slider. Higher means the gatekeeper speaks up less
+  often; lower means more often.
+- **Your own step.** Type any request in *Prompt*. For a tool step, pick a tool and edit its JSON input.
+- **Watch a real agent.** In **Live agent**, ask *"What is 17% of 2,340 exactly?"* and click **Run
+  agent**. You'll see the note go in, the agent pick the approved calculator, and the exact answer
+  come back (1989/5 = 397.8). Then open **Replay** to step through it again.
+- **Run a live task in Enforce mode.** Ask *"Use python to compute 2\*\*200"* with **Enforce** on. If
+  the agent reaches for the shell, that call is blocked and the agent is pointed at the calculator.
+  Often the prompt note alone is enough and it goes straight to the calculator. Either way, the
+  timeline shows every checkpoint.
 
-- A Jev decision costs about $0.000015. A holdout run costs about $0.001.
-- At runtime the Jev request timeout is 2 s. The cascade row below was measured with that 2 s
-  timeout (`agent-router eval --backend cascade --timeout 2`) and had no timeouts.
-- If Jev times out, the cascade falls back to its local answer, biased to `none`. That keeps the
-  false-positive rate low but can lose recall on a slow network.
-
-### Measured on the holdout
-
-`evals/eval_set.yaml` has 127 labelled cases: 63 for calibration and 64 held out (37 positive,
-27 negative, including decoys). Ten of them are multi-turn "context" cases whose earlier prompts
-point at a different entry (for example "run the tests again" after an HTML-conversion prompt).
-
-- **Accuracy** is top-1 over the holdout cases.
-- **FPR** is the share of holdout cases where the right answer is `none` but the backend suggested
-  an entry anyway.
-
-| Backend | Holdout | Accuracy | FPR | Notes |
-|---|---|---|---|---|
-| **cascade** (default with key) | 64 | **0.891** | **0.000** | 70.3% of steps escalated to Jev (45/64); 2 s timeout: mean 183 ms, p95 302 ms, max 403 ms; 0 fallbacks |
-| local, model2vec (calibrated) | 64 | 0.797 | 0.148 | offline; mean 0.3 ms per step when warm (the first call loads the model) |
-| jev | 59 | 0.949 | 0.000 | every step is a Jev call; mean 240 ms |
-| openrouter (Qwen logprob) | 59 | 0.763 | 0.292 | 7 request errors (router failed open) |
-| logprob (local Qwen3-0.6B) | 59 | 0.525 | 0.708 | leans towards suggesting |
-| semantic-router (TF-IDF) | 59 | 0.458 | 0.250 | |
-| local, hashing embedder (defaults) | 59 | 0.390 | 0.042 | conservative, low recall |
-
-The cascade and local model2vec rows are from the current 64-case holdout. The other rows were
-measured on the earlier 59-case holdout, before the context cases were added, and were not re-run.
-The two Qwen rows come from a single controller run and have no saved raw output. The other rows are
-reproducible:
+Prefer the terminal?
 
 ```bash
-agent-router eval --backend <name> [--embedder hashing] [--json]
+make route Q="What is 17% of 2,340 exactly?"                       # one decision
+.venv/bin/agent-router run "What is 2**200 exactly?" --workspace demo_workspace   # a live run
+make test                                                         # 405 automated checks, offline
 ```
 
-**Where each backend goes wrong:**
+## The approved list (today)
 
-- **cascade.** It misses 4 tool-point cases that Jev also misses (short `python3 -c`, `node -e`
-  and `sed` one-liners). It also misses 3 positives that `local` answered as a confident `none`.
-  That is the price of skipping 30% of Jev calls.
-- **local.** Its errors are near-misses that static embeddings cannot separate: "edit package.json"
-  versus "query JSON", and "review a diff" versus "write a commit message for a diff".
-- **Conversation history.** The router passes the last three prompts along with each step. The
-  local classifiers score only the current step (the `previous: ...` lines are dropped), so an
-  earlier JSON request can no longer pull "run the test suite" towards `json-query`; the regenerated
-  `audit/sample-session.jsonl` shows both former false positives staying native. Jev, the cascade's
-  confirm stage, still gets the recent prompts as context. The eval set's context cases cover this:
-  on them the cascade scored 5/5 on the holdout.
+The list is deliberately small: a demo catalog of free, MIT-licensed tools that run on your machine.
 
-## Catalog
-
-The decision model can only choose one of these entries or `none`. They are defined in
-`src/agent_router/catalog.yaml` (version `2026-09-26.1`).
-
-| id | kind | Target | Backed by (MIT) | Points | Replaces |
-|---|---|---|---|---|---|
-| `exact-calc` | tool | `mcp__agent_router__calc` | own code | prompt, tool | Bash |
-| `json-query` | tool | `mcp__agent_router__json_query` | [jmespath.py](https://github.com/jmespath/jmespath.py) | prompt, tool | Bash, Read |
-| `html-to-markdown` | tool | `mcp__agent_router__html_to_markdown` | [python-markdownify](https://github.com/matthewwithanm/python-markdownify) | prompt, tool | Read, Bash, WebFetch |
-| `repo-stats` | tool | `mcp__agent_router__repo_stats` | own code | prompt, tool | Bash, Glob |
-| `commit-writer` | skill | `commit-writer` | own skill (`demo_workspace/.claude/skills/`) | prompt, skill | Skill |
-
-- **Where the tools run.** The four tools are served in process by the MCP server `agent_router`
-  (`adapters/claude_tools.py`). They run offline.
-- **MIT only.** `core/catalog.py` rejects any entry whose `license` is not `MIT`. It also rejects
-  duplicate ids, the reserved id `none`, and missing fields.
-
-**Adding an entry:**
-
-1. **Implement the target.** A new tool goes in `src/agent_router/tools/` and is registered in
-   `adapters/claude_tools.py`. A skill goes under `.claude/skills/<name>/SKILL.md` in the agent's
-   workspace.
-2. **Describe it in `catalog.yaml`:**
-   - fields: `id`, `kind`, `name`, `project`, `license: MIT`, `url`, `target`, `points`, `replaces`
-   - `what`: one sentence
-   - `not_for`: the near-misses it must not match
-   - `examples`: 5–8 real phrasings, including shell commands for the tool point
-3. **Bump `version`.** Both calibration blocks are tied to the catalog version. Until you re-run
-   `make calibrate` (offline) and `make calibrate-cascade` (paid), both deciders fall back to their
-   uncalibrated defaults. They log a warning when this happens.
-4. **Add eval cases** to `evals/eval_set.yaml` and run `make eval`. A test rejects eval cases that
-   copy catalog examples.
-
-## Hook points and modes
-
-| Point | Claude SDK hook | Advisory (default) | Enforce (`--mode enforce` / `AGENT_ROUTER_MODE=enforce`) |
-|---|---|---|---|
-| prompt | `UserPromptSubmit` | `additionalContext` hint | hint (a prompt is never denied) |
-| tool | `PreToolUse` (native tools) | `additionalContext` hint | `permissionDecision: deny` with the templated deny text, on every matching call |
-| skill | `PreToolUse` with `tool_name="Skill"` | `additionalContext` hint | hint (enforce applies to the tool point only) |
-
-A sample hint:
-
-> [agent-router] An MIT-licensed alternative may fit this step: Exact calculator (agent-router (own code),
-> MIT) — Exact arithmetic and math evaluation: … Call tool mcp__agent_router__calc. Optional: ignore it if
-> your current approach is better.
-
-## Configuration
-
-| Variable | Effect |
+| Approved tool | Used instead of |
 |---|---|
-| `AGENT_ROUTER_MODE` | `advisory` (default) or `enforce` |
-| `AGENT_ROUTER_THRESHOLD` | Overrides the calibrated threshold (local 0.35, cascade/jev 0.50) |
-| `AGENT_ROUTER_DISABLED` | `1` (or `true`, `yes`, `on`) turns routing off. Every step is skipped, but still audited |
-| `AGENT_ROUTER_AUDIT` | JSONL audit path for `agent-router run` and `route`. Without it, records stay in memory. The demo writes to `.agent-router/audit/` |
-| `AGENT_ROUTER_EMBEDDER` | `model2vec` (default) or `hashing` (no download) |
-| `OPENROUTER_API_KEY` / `TYPESAFE_API_KEY` | Enables `jev` and `cascade`, and makes the cascade the default |
+| Exact calculator | Doing math in a shell (`python -c`, `bc`) |
+| JSON query | Hand-written `jq` or Python scripts to pull fields out of JSON |
+| HTML to Markdown | Reading or scraping raw HTML |
+| Repository stats | `wc`/`find`/`cloc` pipelines to count lines of code |
+| Conventional commit writer (skill) | Other, unapproved skills for writing commit messages |
 
-- **Who reads them.** `agent-router run` and `route` and `agent.make_router` apply
-  `AGENT_ROUTER_MODE`, `_THRESHOLD`, `_DISABLED` and `_AUDIT`. The demo server applies the first
-  three and keeps its own audit directory. `agent-router eval` ignores them (it always scores in advisory mode at the calibrated
-  threshold, with an in-memory audit), so its numbers never depend on your shell.
-- **Flags win.** `--threshold` (run, route, eval) and `--mode` (run) override the environment.
-  All three commands also accept `--backend` and `--timeout`. `agent-router <cmd> --help` lists
-  every flag.
+Adding your own entries is described in the [technical guide](docs/technical-guide.md#catalog).
 
-## Security notes
+## How well does it choose?
 
-- **Loopback only.** The demo binds to `127.0.0.1` and accepts only the `127.0.0.1` and `localhost`
-  Host headers, which blocks DNS rebinding.
-- **Live runs.** The Live agent runs a real agent in a throwaway copy of `demo_workspace/`. A run
-  needs:
-  - a same-origin POST that mints a single-use token valid for 60 s
-  - no other run in progress (one at a time)
-- **Shell tools are off by default.** `Bash` and `WebFetch` are not auto-approved unless you start
-  with `agent-router demo --allow-shell` or `run --allow-shell`. The router still sees the attempted
-  call first.
-- **Audit logs are local and unredacted.**
-  - They store a SHA-256 of the full state and the first 300 characters of the prompt and hint.
-  - Secrets that appear in prompts are **not** redacted (MVP).
-  - `audit/*.jsonl` is git-ignored, except for the sample.
+We measured the gatekeeper on 64 test steps it had never seen:
 
-## Adapting to Codex CLI and Gemini CLI
+- **Default (with a key):** it picks the right answer **89%** of the time and **never** points at a
+  tool when it shouldn't (0 false alarms). It asks Jev only when the free classifier isn't sure;
+  a decision takes about 0.2 s on average.
+- **Free and offline (no key):** it's right **80%** of the time, with some false alarms (15%). That's
+  good for trying things out, but not as reliable.
 
-The core never imports a host SDK. An adapter only maps host hook input to a `RouterEvent` and maps a
-`Decision` back to hook output. [docs/adapters.md](docs/adapters.md) has the field-by-field mapping for
-Codex CLI (`UserPromptSubmit` / `PreToolUse` command hooks) and Gemini CLI (`BeforeAgent` / `BeforeTool`),
-and notes what was verified and what was assumed.
+## Learn more
 
-## Research
+- **[Technical guide](docs/technical-guide.md)**: how it works, all classifiers and their measured
+  accuracy, the catalog format, modes, configuration, security, and command-line reference.
+- **[Architecture](docs/architecture.md)**: diagrams of the components and of one decision.
+- **[Other agent harnesses](docs/adapters.md)**: how to connect Codex CLI and Gemini CLI.
+- **[Research](docs/research.md)**: the papers and projects this design builds on, including TypeSafe's
+  Jev and Tenjin.
 
-- [docs/architecture.md](docs/architecture.md) covers the components, one `PreToolUse` decision through
-  the cascade, and the audit schema.
-- [docs/research.md](docs/research.md) covers:
-  - the router and tool-retrieval literature (arXiv ids)
-  - the Jev API
-  - what was borrowed from Tenjin
-  - local alternatives to Jev
+## Roadmap
+
+- **Decision graphs.** A predefined map of allowed steps (A, then B or C, then D) that the gatekeeper
+  enforces, so the agent must follow a workflow and not just pick approved tools step by step.
+- **Force the approved tool** after a block, not just point at it.
+- Adapters for **Codex CLI** and **Gemini CLI** (the mappings are designed and documented).
 
 ## License
 
-MIT. See [LICENSE](LICENSE). The optional `anyjev` extra installs Apache-2.0 code, and the `jev`
-backend calls a proprietary hosted model. Neither is required.
+MIT. See [LICENSE](LICENSE). Two optional pieces are not MIT: the `jev` classifier calls TypeSafe's
+hosted (proprietary) model, and the `anyjev` extra installs Apache-2.0 code. Neither is required.
