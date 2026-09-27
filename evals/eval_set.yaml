@@ -1,0 +1,340 @@
+# agent-router labelled eval set.
+#
+# Written independently of catalog.yaml `examples` / `native_examples` (tests/test_eval.py
+# checks there is no near-copy). Each case is one agent step:
+#   text       the user's prompt (at tool/skill points: the prompt of the turn, may be empty)
+#   point      prompt | tool | skill
+#   tool_name  native tool about to run (tool: Bash/Read/Glob/WebFetch, skill: Skill)
+#   tool_input its input
+#   expected   catalog entry id, or `none` when the agent's own tools are enough
+#   decoy      true for near-misses that must stay `none`
+#   split      cal (used by `agent-router calibrate`) | test (holdout; metrics are reported here)
+#   recent     earlier prompts of the same session (optional; the router appends up to 3 of
+#              them to the state as "previous: ..." lines)
+# Splits alternate inside each group (entry x point, negatives, decoys) so the holdout covers
+# every entry at every point it is eligible for.
+version: "2026-09-26.1"
+
+cases:
+  # ---------------------------------------------------------------- exact-calc
+  - {id: calc-p1, split: cal, point: prompt, expected: exact-calc,
+     text: "what does 3 to the power of 45 come out to, every digit"}
+  - {id: calc-p2, split: test, point: prompt, expected: exact-calc,
+     text: "multiply 48,213,907 by 7,302,118 and give me the exact product"}
+  - {id: calc-p3, split: cal, point: prompt, expected: exact-calc,
+     text: "reduce 1071/462 to lowest terms"}
+  - {id: calc-p4, split: test, point: prompt, expected: exact-calc,
+     text: "what's a 15 percent tip on an $86.40 bill"}
+  - {id: calc-p5, split: cal, point: prompt, expected: exact-calc,
+     text: "work out the least common multiple of 84 and 360"}
+  - {id: calc-p6, split: test, point: prompt, expected: exact-calc,
+     text: "evaluate 30! / (27! * 3!) without rounding"}
+  - {id: calc-p7, split: cal, point: prompt, expected: exact-calc,
+     text: "if I put $2,500 away at 4.2% compounded yearly, what is it worth after 12 years"}
+  - {id: calc-p8, split: test, point: prompt, expected: exact-calc,
+     text: "square root of 1764, and is it an integer"}
+  - {id: calc-t1, split: test, point: tool, expected: exact-calc,
+     text: "how big is 2^64", tool_name: Bash,
+     tool_input: {command: "python3 -c 'print(2**64)'"}}
+  - {id: calc-t2, split: cal, point: tool, expected: exact-calc,
+     text: "", tool_name: Bash,
+     tool_input: {command: "echo $((7919 * 104729))"}}
+  - {id: calc-t3, split: test, point: tool, expected: exact-calc,
+     text: "exact value of 1/3 + 1/6", tool_name: Bash,
+     tool_input: {command: "python3 -c \"from fractions import Fraction as F; print(F(1,3)+F(1,6))\""}}
+  - {id: calc-t4, split: cal, point: tool, expected: exact-calc,
+     text: "what's the remainder when 1234567 is divided by 97", tool_name: Bash,
+     tool_input: {command: "echo '1234567 % 97' | bc"}}
+  - {id: calc-t5, split: test, point: tool, expected: exact-calc,
+     text: "what is 2 to the 100th", tool_name: Bash,
+     tool_input: {command: "node -e 'console.log(2n**100n)'"}}
+  - {id: calc-t6, split: cal, point: tool, expected: exact-calc,
+     text: "divide 355 by 113", tool_name: Bash,
+     tool_input: {command: "awk 'BEGIN{print 355/113}'"}}
+
+  # ---------------------------------------------------------------- json-query
+  - {id: json-p1, split: test, point: prompt, expected: json-query,
+     text: "which npm scripts are defined in package.json"}
+  - {id: json-p2, split: cal, point: prompt, expected: json-query,
+     text: "from api_response.json, give me the email of every user whose role is admin"}
+  - {id: json-p3, split: test, point: prompt, expected: json-query,
+     text: "count how many objects the orders list inside orders.json holds"}
+  - {id: json-p4, split: cal, point: prompt, expected: json-query,
+     text: "extract the nested database.port value from settings.json"}
+  - {id: json-p5, split: test, point: prompt, expected: json-query,
+     text: "list the titles of all open issues in issues.json"}
+  - {id: json-p6, split: cal, point: prompt, expected: json-query,
+     text: "what tags does each image have in the images array of manifest.json"}
+  - {id: json-p7, split: test, point: prompt, expected: json-query,
+     text: "show me just the top-level keys of tsconfig.json"}
+  - {id: json-p8, split: cal, point: prompt, expected: json-query,
+     text: "in coverage-summary.json, what is total.lines.pct"}
+  - {id: json-t1, split: test, point: tool, expected: json-query,
+     text: "which pods are in the dump", tool_name: Bash,
+     tool_input: {command: "jq -r '.items[].metadata.name' pods.json"}}
+  - {id: json-t2, split: cal, point: tool, expected: json-query,
+     text: "how many failures were recorded", tool_name: Bash,
+     tool_input: {command: "cat results.json | python3 -c \"import sys,json; d=json.load(sys.stdin); print(len(d['failures']))\""}}
+  - {id: json-t3, split: test, point: tool, expected: json-query,
+     text: "", tool_name: Bash,
+     tool_input: {command: "jq '.compilerOptions.target' tsconfig.json"}}
+  - {id: json-t4, split: cal, point: tool, expected: json-query,
+     text: "what is the performance score in the lighthouse json report", tool_name: Read,
+     tool_input: {file_path: "reports/lighthouse.json"}}
+  - {id: json-t5, split: test, point: tool, expected: json-query,
+     text: "get the names of users with active set to false in data/users.json", tool_name: Read,
+     tool_input: {file_path: "data/users.json"}}
+  - {id: json-t6, split: cal, point: tool, expected: json-query,
+     text: "what version is composer.json at", tool_name: Bash,
+     tool_input: {command: "grep -o '\"version\": \"[^\"]*\"' composer.json"}}
+
+  # ---------------------------------------------------------------- html-to-markdown
+  - {id: html-p1, split: test, point: prompt, expected: html-to-markdown,
+     text: "I need docs/release.html in markdown syntax for the wiki"}
+  - {id: html-p2, split: cal, point: prompt, expected: html-to-markdown,
+     text: "I downloaded invoice.html, give me its contents as markdown including the table"}
+  - {id: html-p3, split: test, point: prompt, expected: html-to-markdown,
+     text: "make a markdown version of the exported confluence page export/onboarding.html"}
+  - {id: html-p4, split: cal, point: prompt, expected: html-to-markdown,
+     text: "extract the headings and links from site/about.html as markdown"}
+  - {id: html-p5, split: test, point: prompt, expected: html-to-markdown,
+     text: "convert this html snippet to markdown: <h2>Setup</h2><ul><li>clone</li></ul>"}
+  - {id: html-p6, split: cal, point: prompt, expected: html-to-markdown,
+     text: "the api reference lives in build/api.html, I want it as a .md file"}
+  - {id: html-p7, split: test, point: prompt, expected: html-to-markdown,
+     text: "clean up the scraped article.htm into readable markdown, no scripts"}
+  - {id: html-p8, split: cal, point: prompt, expected: html-to-markdown,
+     text: "email_template.html: drop the markup but keep the bullet points"}
+  - {id: html-t1, split: test, point: tool, expected: html-to-markdown,
+     text: "what changed according to the release page", tool_name: Read,
+     tool_input: {file_path: "docs/release.html"}}
+  - {id: html-t2, split: cal, point: tool, expected: html-to-markdown,
+     text: "show me the terms page as markdown", tool_name: Read,
+     tool_input: {file_path: "public/terms.html"}}
+  - {id: html-t3, split: test, point: tool, expected: html-to-markdown,
+     text: "strip the markup from index.html", tool_name: Bash,
+     tool_input: {command: "sed -e 's/<[^>]*>//g' index.html"}}
+  - {id: html-t4, split: cal, point: tool, expected: html-to-markdown,
+     text: "", tool_name: Bash,
+     tool_input: {command: "python3 -c \"import html2text; print(html2text.html2text(open('faq.html').read()))\""}}
+  - {id: html-t5, split: test, point: tool, expected: html-to-markdown,
+     text: "read pricing.html as plain text", tool_name: Bash,
+     tool_input: {command: "lynx -dump saved/pricing.html"}}
+  - {id: html-t6, split: cal, point: tool, expected: html-to-markdown,
+     text: "what does the saved coverage html page say", tool_name: Read,
+     tool_input: {file_path: "out/coverage/index.html"}}
+
+  # ---------------------------------------------------------------- repo-stats
+  - {id: repo-p1, split: test, point: prompt, expected: repo-stats,
+     text: "tally source lines per programming language in this project"}
+  - {id: repo-p2, split: cal, point: prompt, expected: repo-stats,
+     text: "which files in the repo have the most lines"}
+  - {id: repo-p3, split: test, point: prompt, expected: repo-stats,
+     text: "how much typescript versus javascript do we have here, in lines"}
+  - {id: repo-p4, split: cal, point: prompt, expected: repo-stats,
+     text: "total line count of everything under src/ ignoring node_modules"}
+  - {id: repo-p5, split: test, point: prompt, expected: repo-stats,
+     text: "roughly how many files and LOC does the backend folder contain"}
+  - {id: repo-p6, split: cal, point: prompt, expected: repo-stats,
+     text: "show the ten largest files by line count"}
+  - {id: repo-p7, split: test, point: prompt, expected: repo-stats,
+     text: "what languages is this project written in and how much code of each"}
+  - {id: repo-p8, split: cal, point: prompt, expected: repo-stats,
+     text: "is this repo mostly go or rust, measured by lines of code"}
+  - {id: repo-t1, split: test, point: tool, expected: repo-stats,
+     text: "", tool_name: Bash,
+     tool_input: {command: "wc -l src/**/*.ts | sort -n | tail -5"}}
+  - {id: repo-t2, split: cal, point: tool, expected: repo-stats,
+     text: "how large is this project, roughly", tool_name: Bash,
+     tool_input: {command: "tokei ."}}
+  - {id: repo-t3, split: test, point: tool, expected: repo-stats,
+     text: "count lines across the repo", tool_name: Bash,
+     tool_input: {command: "git ls-files | xargs wc -l"}}
+  - {id: repo-t4, split: cal, point: tool, expected: repo-stats,
+     text: "", tool_name: Bash,
+     tool_input: {command: "scc --sort lines src"}}
+  - {id: repo-t5, split: test, point: tool, expected: repo-stats,
+     text: "measure the size of our .py sources", tool_name: Glob,
+     tool_input: {pattern: "**/*.py"}}
+  - {id: repo-t6, split: cal, point: tool, expected: repo-stats,
+     text: "rank our modules by how long they are", tool_name: Glob,
+     tool_input: {pattern: "src/**/*"}}
+
+  # ---------------------------------------------------------------- commit-writer
+  - {id: commit-p1, split: test, point: prompt, expected: commit-writer,
+     text: "I renamed the config loader and updated imports; what's a good conventional commit for that"}
+  - {id: commit-p2, split: cal, point: prompt, expected: commit-writer,
+     text: "compose a commit msg: bumped lodash to 4.17.21 to patch a CVE"}
+  - {id: commit-p3, split: test, point: prompt, expected: commit-writer,
+     text: "need a fix(...) style message for the null pointer in the cart total"}
+  - {id: commit-p4, split: cal, point: prompt, expected: commit-writer,
+     text: "turn this diff into a commit message:\n- timeout = 5\n+ timeout = 30"}
+  - {id: commit-p5, split: test, point: prompt, expected: commit-writer,
+     text: "suggest a commit title and body for removing the deprecated v1 endpoints"}
+  - {id: commit-p6, split: cal, point: prompt, expected: commit-writer,
+     text: "write a chore commit for updating the CI node version"}
+  - {id: commit-p7, split: test, point: prompt, expected: commit-writer,
+     text: "how should I word the commit for the docs typo fixes"}
+  - {id: commit-p8, split: cal, point: prompt, expected: commit-writer,
+     text: "commit message please: added pagination to the orders API"}
+  - {id: commit-s1, split: test, point: skill, expected: commit-writer,
+     text: "", tool_name: Skill,
+     tool_input: {skill: "git-assistant", args: "commit text for what is staged right now"}}
+  - {id: commit-s2, split: cal, point: skill, expected: commit-writer,
+     text: "", tool_name: Skill,
+     tool_input: {skill: "commit", args: "message for the refactor of the auth middleware"}}
+  - {id: commit-s3, split: test, point: skill, expected: commit-writer,
+     text: "wrap this up with a commit", tool_name: Skill,
+     tool_input: {skill: "vcs-helper", args: "one commit message for fixing the flaky retry test"}}
+  - {id: commit-s4, split: cal, point: skill, expected: commit-writer,
+     text: "", tool_name: Skill,
+     tool_input: {skill: "msg-drafter", args: "feat: dark mode toggle in settings"}}
+  - {id: commit-s5, split: test, point: skill, expected: commit-writer,
+     text: "", tool_name: Skill,
+     tool_input: {skill: "writer", args: "a conventional commit for the added rate limiter"}}
+  - {id: commit-s6, split: cal, point: skill, expected: commit-writer,
+     text: "describe my change for git", tool_name: Skill,
+     tool_input: {skill: "scm", args: "commit message for this diff: +retry(3) around fetch"}}
+
+  # ---------------------------------------------------------------- negatives (native is enough)
+  - {id: neg-p1, split: test, point: prompt, expected: none,
+     text: "why does my useEffect run twice in development"}
+  - {id: neg-p2, split: cal, point: prompt, expected: none,
+     text: "add a --verbose flag to the cli argument parser"}
+  - {id: neg-p3, split: test, point: prompt, expected: none,
+     text: "what's the difference between a process and a thread"}
+  - {id: neg-p4, split: cal, point: prompt, expected: none,
+     text: "set up a github actions workflow that lints every PR"}
+  - {id: neg-p5, split: test, point: prompt, expected: none,
+     text: "debug why the websocket connection drops after 60 seconds"}
+  - {id: neg-p6, split: cal, point: prompt, expected: none,
+     text: "delete the unused imports in app.py"}
+  - {id: neg-p7, split: test, point: prompt, expected: none,
+     text: "write a dockerfile for this flask app"}
+  - {id: neg-p8, split: cal, point: prompt, expected: none,
+     text: "translate this error message into spanish"}
+  - {id: neg-p9, split: test, point: prompt, expected: none,
+     text: "migrate the database schema to add a created_at column"}
+  - {id: neg-p10, split: cal, point: prompt, expected: none,
+     text: "explain the big-O of quicksort in the worst case"}
+  - {id: neg-p11, split: test, point: prompt, expected: none,
+     text: "rebase my branch onto main and resolve the conflicts"}
+  - {id: neg-p12, split: cal, point: prompt, expected: none,
+     text: "make the login form accessible for screen readers"}
+  - {id: neg-t1, split: test, point: tool, expected: none,
+     text: "run the tests", tool_name: Bash, tool_input: {command: "pytest -q"}}
+  - {id: neg-t2, split: cal, point: tool, expected: none,
+     text: "what did I change", tool_name: Bash, tool_input: {command: "git diff"}}
+  - {id: neg-t3, split: test, point: tool, expected: none,
+     text: "", tool_name: Bash, tool_input: {command: "npm run build"}}
+  - {id: neg-t4, split: cal, point: tool, expected: none,
+     text: "bring the stack up", tool_name: Bash, tool_input: {command: "docker compose up -d"}}
+  - {id: neg-t5, split: test, point: tool, expected: none,
+     text: "", tool_name: Bash, tool_input: {command: "python3 manage.py migrate"}}
+  - {id: neg-t6, split: cal, point: tool, expected: none,
+     text: "show recent commits", tool_name: Bash, tool_input: {command: "git log --oneline -20"}}
+  - {id: neg-t7, split: test, point: tool, expected: none,
+     text: "lint the source", tool_name: Bash, tool_input: {command: "ruff check src"}}
+  - {id: neg-t8, split: cal, point: tool, expected: none,
+     text: "", tool_name: Bash, tool_input: {command: "mkdir -p build && cp -r assets build/"}}
+  - {id: neg-t9, split: test, point: tool, expected: none,
+     text: "check the repo metadata on github", tool_name: Bash,
+     tool_input: {command: "curl -s https://api.github.com/repos/octo/hello"}}
+  - {id: neg-t10, split: cal, point: tool, expected: none,
+     text: "seed the dev database", tool_name: Bash, tool_input: {command: "python3 scripts/seed_db.py"}}
+  - {id: neg-t11, split: test, point: tool, expected: none,
+     text: "look at how the routes are wired", tool_name: Read,
+     tool_input: {file_path: "src/server/routes.py"}}
+  - {id: neg-t12, split: cal, point: tool, expected: none,
+     text: "", tool_name: Read, tool_input: {file_path: "README.md"}}
+  - {id: neg-t13, split: test, point: tool, expected: none,
+     text: "what's the log level set to", tool_name: Read,
+     tool_input: {file_path: "config/settings.yaml"}}
+  - {id: neg-t14, split: cal, point: tool, expected: none,
+     text: "find all the test files", tool_name: Glob, tool_input: {pattern: "**/test_*.py"}}
+  - {id: neg-t15, split: test, point: tool, expected: none,
+     text: "where do the react components live", tool_name: Glob,
+     tool_input: {pattern: "src/components/**/*.tsx"}}
+  - {id: neg-t16, split: cal, point: tool, expected: none,
+     text: "", tool_name: Bash, tool_input: {command: "pip install -r requirements.txt"}}
+  - {id: neg-s1, split: cal, point: skill, expected: none,
+     text: "", tool_name: Skill, tool_input: {skill: "pdf", args: "extract the tables from report.pdf"}}
+  - {id: neg-s2, split: test, point: skill, expected: none,
+     text: "", tool_name: Skill, tool_input: {skill: "frontend-design", args: "a hero section for the landing page"}}
+
+  # ---------------------------------------------------------------- decoys (near-misses, must stay none)
+  - {id: decoy-1, split: test, point: prompt, expected: none, decoy: true,
+     text: "plot a graph of monthly sales from sales.csv"}
+  - {id: decoy-2, split: cal, point: prompt, expected: none, decoy: true,
+     text: "check that config.json conforms to the rules in schema.json"}
+  - {id: decoy-3, split: test, point: prompt, expected: none, decoy: true,
+     text: "differentiate x^3 * sin(x) symbolically"}
+  - {id: decoy-4, split: cal, point: prompt, expected: none, decoy: true,
+     text: "compute the mean and standard deviation of the latency column in metrics.csv"}
+  - {id: decoy-5, split: test, point: prompt, expected: none, decoy: true,
+     text: "edit package.json to add a start script"}
+  - {id: decoy-6, split: cal, point: prompt, expected: none, decoy: true,
+     text: "convert README.md to html"}
+  - {id: decoy-7, split: test, point: prompt, expected: none, decoy: true,
+     text: "how many commits has alice made this year"}
+  - {id: decoy-8, split: cal, point: prompt, expected: none, decoy: true,
+     text: "find where parse_config is defined"}
+  - {id: decoy-9, split: test, point: prompt, expected: none, decoy: true,
+     text: "run git commit -m 'fix typo' and push it"}
+  - {id: decoy-10, split: cal, point: prompt, expected: none, decoy: true,
+     text: "write release notes covering everything since v1.2"}
+  - {id: decoy-11, split: test, point: skill, expected: none, decoy: true,
+     text: "", tool_name: Skill,
+     tool_input: {skill: "release-notes", args: "summarize all changes since v2.0 for the changelog"}}
+  - {id: decoy-12, split: cal, point: tool, expected: none, decoy: true,
+     text: "how much of the code do our tests exercise", tool_name: Bash,
+     tool_input: {command: "python3 -m pytest --cov=src"}}
+  - {id: decoy-13, split: test, point: prompt, expected: none, decoy: true,
+     text: "convert this pdf manual to markdown"}
+  - {id: decoy-14, split: cal, point: tool, expected: none, decoy: true,
+     text: "which image does the web service use", tool_name: Bash,
+     tool_input: {command: "yq '.services.web.image' docker-compose.yml"}}
+  - {id: decoy-15, split: test, point: prompt, expected: none, decoy: true,
+     text: "review this diff for bugs before I merge"}
+  - {id: decoy-16, split: cal, point: tool, expected: none, decoy: true,
+     text: "get the latest docs page", tool_name: WebFetch,
+     tool_input: {url: "https://docs.python.org/3/library/asyncio.html", prompt: "summarize this page"}}
+  - {id: decoy-17, split: test, point: tool, expected: none, decoy: true,
+     text: "fetch the vendor's changelog page", tool_name: WebFetch,
+     tool_input: {url: "https://example.com/changelog.html", prompt: "list the latest changes"}}
+
+  # ---------------------------------------------------------------- context (multi-turn)
+  # The current step decides; the recent prompts are misleading or distracting.
+  - {id: ctx-1, split: cal, point: prompt, expected: none,
+     text: "kick off the whole test suite and tell me what fails",
+     recent: ["pull the name field out of every entry in customers.json"]}
+  - {id: ctx-2, split: test, point: prompt, expected: none,
+     text: "explain what the retry helper in src/ does",
+     recent: ["in inventory.json, which products have fewer than 5 units in stock"]}
+  - {id: ctx-3, split: cal, point: tool, expected: none,
+     text: "make sure nothing broke", tool_name: Bash, tool_input: {command: "pytest -q"},
+     recent: ["turn the saved docs/index.html page into a markdown file"]}
+  - {id: ctx-4, split: test, point: tool, expected: none,
+     text: "run the tests again", tool_name: Bash, tool_input: {command: "pytest -q"},
+     recent: ["strip the tags out of landing.html and hand me clean markdown"]}
+  - {id: ctx-5, split: cal, point: prompt, expected: exact-calc,
+     text: "give me 7 to the 31st power with every digit",
+     recent: ["convert the faq.html export to markdown",
+              "what's the total size of this repository broken down by file type"]}
+  - {id: ctx-6, split: test, point: prompt, expected: exact-calc,
+     text: "I need 3**150 written out in full, no scientific notation",
+     recent: ["change about.html into a markdown document",
+              "how many lines of code per language are in this repo"]}
+  - {id: ctx-7, split: cal, point: prompt, expected: json-query,
+     text: "list the top-level keys of tsconfig.json",
+     recent: ["multiply 9,871 by 4,409 and give me the exact result"]}
+  - {id: ctx-8, split: test, point: prompt, expected: json-query,
+     text: "from settings.json, what timeout values are configured under services",
+     recent: ["what is 12.5% of 18,400 exactly"]}
+  - {id: ctx-9, split: cal, point: prompt, expected: none,
+     text: "rename the helper function to fetch_with_retry everywhere",
+     recent: ["divide 7,340,221 by 17 and keep it exact"]}
+  - {id: ctx-10, split: test, point: prompt, expected: none,
+     text: "split the payment service class into smaller modules",
+     recent: ["which users in accounts.json have an expired plan",
+              "turn changelog.html into markdown"]}

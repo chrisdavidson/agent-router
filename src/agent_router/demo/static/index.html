@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-router</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Cpath d=%22M3 13 L8 3 L13 13%22 fill=%22none%22 stroke=%22%2313804f%22 stroke-width=%222.5%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="masthead">
+  <div class="wrap masthead-inner">
+    <div class="brand">
+      <h1>agent-router</h1>
+      <p class="tagline">Every step the agent takes passes a checkpoint. A classifier points at one option from a fixed list, or at <b>none</b>. It can only point, never write.</p>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button role="tab" id="tab-play" aria-controls="view-play" aria-selected="true">Playground</button>
+      <button role="tab" id="tab-live" aria-controls="view-live" aria-selected="false">Live agent</button>
+      <button role="tab" id="tab-replay" aria-controls="view-replay" aria-selected="false">Replay</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- Playground -->
+  <section id="view-play" role="tabpanel" aria-labelledby="tab-play" class="view">
+    <div class="play-grid">
+      <form id="step-form" class="composer" autocomplete="off">
+        <h2>Step</h2>
+        <div class="field">
+          <span class="field-label" id="lbl-presets">Examples</span>
+          <div id="presets" class="presets" role="group" aria-labelledby="lbl-presets"></div>
+        </div>
+        <fieldset class="field">
+          <legend class="field-label">Hook point</legend>
+          <div class="seg" id="point-seg">
+            <label><input type="radio" name="point" value="prompt" checked><span>User prompt</span></label>
+            <label><input type="radio" name="point" value="tool"><span>Tool call</span></label>
+            <label><input type="radio" name="point" value="skill"><span>Skill call</span></label>
+          </div>
+        </fieldset>
+        <label class="field">
+          <span class="field-label" id="text-label">Prompt</span>
+          <textarea id="text" rows="3" spellcheck="false"></textarea>
+        </label>
+        <div class="tool-fields" id="tool-fields" hidden>
+          <label class="field">
+            <span class="field-label">Native tool</span>
+            <select id="tool-name">
+              <option>Bash</option><option>Read</option><option>Glob</option><option>WebFetch</option><option>Grep</option><option>Edit</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Tool input (JSON)</span>
+            <textarea id="tool-input" class="mono" rows="4" spellcheck="false"></textarea>
+          </label>
+        </div>
+        <div class="knobs">
+          <label class="field">
+            <span class="field-label">Threshold <output id="thr-out">0.50</output></span>
+            <input type="range" id="threshold" min="0" max="1" step="0.01" value="0.5">
+          </label>
+          <fieldset class="field">
+            <legend class="field-label">Mode</legend>
+            <div class="seg small">
+              <label><input type="radio" name="mode" value="advisory" checked><span>Advisory</span></label>
+              <label><input type="radio" name="mode" value="enforce"><span>Enforce</span></label>
+            </div>
+          </fieldset>
+          <label class="field">
+            <span class="field-label">Classifier</span>
+            <select id="backend"></select>
+          </label>
+        </div>
+        <div class="actions">
+          <button type="submit" class="primary">Route this step</button>
+          <button type="button" id="compare-btn" class="secondary">Compare classifiers</button>
+        </div>
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+      </form>
+
+      <article class="checkpoint" id="board" aria-live="polite"></article>
+    </div>
+
+    <section class="compare" id="compare" hidden>
+      <div class="compare-head">
+        <h2>Same step, every classifier</h2>
+        <p class="muted">Each backend answers the same Jev <code>choice</code> question over the same options.</p>
+      </div>
+      <div class="compare-grid" id="compare-grid"></div>
+    </section>
+  </section>
+
+  <!-- Live agent -->
+  <section id="view-live" role="tabpanel" aria-labelledby="tab-live" class="view" hidden>
+    <form id="live-form" class="live-form" autocomplete="off">
+      <label class="field grow">
+        <span class="field-label">Ask the agent</span>
+        <textarea id="live-prompt" rows="2" spellcheck="false">What is 17% of 2,340 exactly?</textarea>
+      </label>
+      <div class="live-knobs">
+        <fieldset class="field">
+          <legend class="field-label">Mode</legend>
+          <div class="seg small">
+            <label><input type="radio" name="live-mode" value="advisory" checked><span>Advisory</span></label>
+            <label><input type="radio" name="live-mode" value="enforce"><span>Enforce</span></label>
+          </div>
+        </fieldset>
+        <label class="field">
+          <span class="field-label">Classifier</span>
+          <select id="live-backend"></select>
+        </label>
+        <button type="submit" class="primary" id="live-run">Run agent</button>
+        <button type="button" class="secondary" id="live-stop" hidden>Stop</button>
+      </div>
+      <p class="muted small-print">Runs a real Claude Agent SDK session in a throwaway copy of <code>demo_workspace/</code>. Uses your Claude login and costs a few cents. <span id="shell-note"></span></p>
+    </form>
+    <div class="live-status" id="live-status" hidden></div>
+    <ol class="timeline" id="timeline"></ol>
+  </section>
+
+  <!-- Replay -->
+  <section id="view-replay" role="tabpanel" aria-labelledby="tab-replay" class="view" hidden>
+    <div class="replay-bar">
+      <label class="field grow">
+        <span class="field-label">Audit session</span>
+        <select id="session-select"></select>
+      </label>
+      <button type="button" class="secondary" id="session-refresh">Refresh</button>
+    </div>
+    <div id="replay-empty" class="empty" hidden>
+      No audit sessions yet. Run the agent from the Live agent tab and every checkpoint it passes is recorded here.
+    </div>
+    <div id="replay-body" hidden>
+      <div class="stepper">
+        <button type="button" class="secondary" id="step-prev" aria-label="Previous checkpoint">Previous</button>
+        <ol class="step-pills" id="step-pills"></ol>
+        <button type="button" class="secondary" id="step-next" aria-label="Next checkpoint">Next</button>
+      </div>
+      <article class="checkpoint" id="replay-board" aria-live="polite"></article>
+    </div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+{
+  "cascade": {
+    "cal_accuracy": 0.9048,
+    "cal_escalation_rate": 0.6667,
+    "cal_fpr": 0.0,
+    "cal_jev_accuracy": 0.9048,
+    "cal_jev_fpr": 0.0,
+    "cal_local_errors": 1,
+    "catalog_version": "2026-09-26.1",
+    "embedder": "model2vec:minishlab/potion-base-8M",
+    "feasible": true,
+    "local_params": {
+      "alpha": 0.8,
+      "none_floor": 0.2,
+      "not_for_penalty": 32.0,
+      "temperature": 0.08
+    },
+    "n_cases": 63,
+    "native_gate": 0.6,
+    "sweep": [
+      {
+        "accuracy": 0.873,
+        "escalation_rate": 0.6032,
+        "fpr": 0.0,
+        "gate": 0.5
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.6667,
+        "fpr": 0.0,
+        "gate": 0.6
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.7778,
+        "fpr": 0.0,
+        "gate": 0.7
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.8254,
+        "fpr": 0.0,
+        "gate": 0.8
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.8413,
+        "fpr": 0.0,
+        "gate": 0.85
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.873,
+        "fpr": 0.0,
+        "gate": 0.9
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.8889,
+        "fpr": 0.0,
+        "gate": 0.93
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.9524,
+        "fpr": 0.0,
+        "gate": 0.95
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.9683,
+        "fpr": 0.0,
+        "gate": 0.97
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.9841,
+        "fpr": 0.0,
+        "gate": 0.98
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.9841,
+        "fpr": 0.0,
+        "gate": 0.99
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.9841,
+        "fpr": 0.0,
+        "gate": 0.995
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.9841,
+        "fpr": 0.0,
+        "gate": 0.999
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 0.9841,
+        "fpr": 0.0,
+        "gate": 0.9999
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 1.0,
+        "fpr": 0.0,
+        "gate": 1.0
+      },
+      {
+        "accuracy": 0.9048,
+        "escalation_rate": 1.0,
+        "fpr": 0.0,
+        "gate": 1.01
+      }
+    ],
+    "threshold": 0.5
+  },
+  "hashing": {
+    "alpha": 0.8,
+    "cal_accuracy": 0.6897,
+    "cal_false_positives": 1,
+    "cal_fpr": 0.0435,
+    "cal_misroute_rate": 0.0286,
+    "catalog_version": "2026-09-26.1",
+    "cv_accuracy": 0.6207,
+    "cv_agreement": 0.6,
+    "cv_fpr": 0.1304,
+    "edge_params": [],
+    "embedder": "hashing:dim=16384,char=3-5",
+    "feasible": false,
+    "n_cases": 58,
+    "none_floor": 0.1,
+    "not_for_penalty": 4.0,
+    "saturated": 0.0,
+    "temperature": 0.12,
+    "threshold": 0.35
+  },
+  "model2vec": {
+    "alpha": 0.8,
+    "cal_accuracy": 0.931,
+    "cal_false_positives": 0,
+    "cal_fpr": 0.0,
+    "cal_misroute_rate": 0.0,
+    "catalog_version": "2026-09-26.1",
+    "cv_accuracy": 0.8966,
+    "cv_agreement": 0.6,
+    "cv_fpr": 0.0,
+    "edge_params": [
+      "temperature",
+      "not_for_penalty"
+    ],
+    "embedder": "model2vec:minishlab/potion-base-8M",
+    "feasible": true,
+    "n_cases": 58,
+    "none_floor": 0.2,
+    "not_for_penalty": 32.0,
+    "saturated": 0.0172,
+    "temperature": 0.08,
+    "threshold": 0.35
+  }
+}

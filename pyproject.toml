@@ -1,0 +1,52 @@
+[project]
+name = "agent-router"
+version = "0.1.0"
+description = "MIT-licensed router that asks a Jev-spec classifier whether an MIT open-source alternative from a fixed catalog fits, at each hook point of a Claude Agent SDK agent."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Umesh Bhatt" }]
+dependencies = [
+  "claude-agent-sdk>=0.2.160",
+  "model2vec>=0.9",
+  "numpy>=1.26",
+  "pyyaml>=6",
+  "jmespath>=1.0",
+  "markdownify>=1.2",
+  "beautifulsoup4>=4.12",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+semantic-router = ["semantic-router>=0.1.16"]
+llm = ["llama-cpp-python>=0.3", "huggingface-hub>=0.24"]
+anyjev = ["anyjev>=0.0.2", "torch>=2.3", "transformers>=4.45"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
+
+[project.scripts]
+agent-router = "agent_router.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_router"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+  "model: needs the model2vec potion-base-8M weights (downloads once from Hugging Face)",
+  "live: real Claude Agent SDK sessions (your Claude login, costs tokens) and paid Jev / OpenRouter API calls (needs OPENROUTER_API_KEY or TYPESAFE_API_KEY)",
+]
+addopts = "-m 'not live and not model'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
