@@ -266,6 +266,7 @@ A sample hint:
 | `AGENT_ROUTER_AUDIT` | JSONL audit path for `agent-router run` and `route`. Without it, records stay in memory. The demo writes to `.agent-router/audit/` |
 | `AGENT_ROUTER_EMBEDDER` | `model2vec` (default) or `hashing` (no download) |
 | `OPENROUTER_API_KEY` / `TYPESAFE_API_KEY` | Enables `jev` and `cascade`, and makes the cascade the default |
+| `HF_TOKEN` | Hugging Face access token. Not read by agent-router itself yet; `huggingface_hub` picks it up for the model downloads (`model2vec`, `logprob`, `anyjev`), which lifts anonymous rate limits and allows gated models |
 
 - **Who reads them.** `agent-router run` and `route` and `agent.make_router` apply
   `AGENT_ROUTER_MODE`, `_THRESHOLD`, `_DISABLED` and `_AUDIT`. The demo server applies the first
