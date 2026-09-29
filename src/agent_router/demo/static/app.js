@@ -596,7 +596,7 @@ async function loadSession(name) {
   pills.replaceChildren(...replay.records.map((r, i) => {
     const t = tone(toCheckpoint(r));
     const label = r.point === "prompt" ? "P" : r.point === "skill" ? "S" : "T";
-    return el("li", {}, el("button", { type: "button", class: t, title: `${r.point}${r.tool_name ? ` ${r.tool_name}` : ""}: ${r.action}`,
+    return el("li", {}, el("button", { type: "button", class: t, title: `${r.point}${r.tool_name ? ` ${r.tool_name}` : ""}${r.agent_type ? ` (inside ${r.agent_type})` : ""}: ${r.action}`,
       "aria-label": `Checkpoint ${i + 1}, ${r.point}, ${r.action}`, onclick: () => showStep(i) }, `${i + 1}${label}`));
   }));
   showStep(0);
@@ -610,6 +610,7 @@ function showStep(i) {
   renderCheckpoint($("#replay-board"), rec, { title: `Checkpoint ${replay.index + 1} of ${n}: ${POINT_LONG[rec.point] || rec.point}` });
   const board = $("#replay-board");
   if (rec.text) board.insertBefore(el("p", { class: "muted", text: `Prompt: ${rec.text}` }), board.children[1]);
+  board.insertBefore(el("p", { class: "muted", text: rec.agent_type ? `Called inside the ${rec.agent_type} agent` : "Called on the main thread" }), board.children[1]);
   $$("#step-pills button").forEach((b, j) => (j === replay.index ? b.setAttribute("aria-current", "step") : b.removeAttribute("aria-current")));
   $("#step-prev").disabled = replay.index === 0;
   $("#step-next").disabled = replay.index === n - 1;

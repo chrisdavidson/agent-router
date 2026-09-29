@@ -55,6 +55,7 @@ agent-router, plus `agent_type`).
 | `calibration.json`, `calibrate.py` | classifier parameters, then one threshold per entry, all fit on the `cal` split only |
 | `plugin/` | the Claude Code plugin: hooks, `.mcp.json`, `bin/hook`, `bin/mcp` |
 | `battery.py` | live A/B: first-principles' routing catalog with and without this plugin |
+| `run_examples.py` | runs first-principles' 14 worked examples through the agent and tabulates every router decision |
 
 ## Measuring it
 
@@ -65,6 +66,9 @@ agent-router, plus `agent_type`).
   first-principles' routing catalog with and without this plugin, one fresh `claude -p`
   session per prompt, scored with first-principles' own `detect_routing`. It costs tokens; a
   delegated session is stopped at the delegation.
+- **Worked examples:** `.venv/bin/python integrations/first-principles/run_examples.py` runs
+  first-principles' 14 worked examples through the agent and writes a per-example summary
+  and a table of every router decision to a local output folder.
 
 ## Known gaps
 

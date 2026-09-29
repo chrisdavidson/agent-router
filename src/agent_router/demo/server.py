@@ -132,6 +132,8 @@ def _entry_json(e: CatalogEntry) -> dict[str, Any]:
         "replaces": list(e.replaces),
         "not_for": list(e.not_for),
         "examples": list(e.examples),
+        "agents": list(e.agents),
+        "threshold": e.threshold,
     }
 
 
@@ -555,13 +557,27 @@ async def _finish(task: asyncio.Task[None] | None, workspace: Path | None, sessi
         shutil.rmtree(workspace.parent, ignore_errors=True)
 
 
-def main(port: int = 8765, allow_shell: bool = False) -> None:
-    """Serve the demo on http://127.0.0.1:<port> (loopback only)."""
+def main(
+    port: int = 8765,
+    allow_shell: bool = False,
+    *,
+    catalog: Catalog | None = None,
+    audit_dir: Path | None = None,
+) -> None:
+    """Serve the demo on http://127.0.0.1:<port> (loopback only).
+
+    ``catalog`` / ``audit_dir`` point the demo at another catalog and another audit folder,
+    e.g. an integration's catalog and the audit logs its Claude Code hooks wrote.
+    """
     import uvicorn
 
     note = " (live runs may use Bash/WebFetch)" if allow_shell else ""
     print(f"agent-router demo: http://127.0.0.1:{port}{note}")
-    app = create_app(allow_shell=allow_shell)
+    if catalog is not None:
+        print(f"  catalog {catalog.version} ({len(catalog.entries)} entries)")
+    if audit_dir is not None:
+        print(f"  replaying audit logs from {audit_dir}")
+    app = create_app(audit_dir, allow_shell=allow_shell, catalog=catalog)
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 

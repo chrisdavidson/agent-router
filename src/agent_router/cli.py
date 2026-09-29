@@ -349,7 +349,11 @@ def cmd_demo(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    server.main(port=args.port, allow_shell=args.allow_shell)  # loopback only
+    catalog = _catalog(args) if (args.catalog or os.environ.get("AGENT_ROUTER_CATALOG")) else None
+    audit_dir = Path(args.audit_dir) if args.audit_dir else None
+    server.main(  # loopback only
+        port=args.port, allow_shell=args.allow_shell, catalog=catalog, audit_dir=audit_dir
+    )
     return 0
 
 
@@ -518,6 +522,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="auto-approve Bash/WebFetch in live agent runs (default: off)",
     )
+    p.add_argument(
+        "--audit-dir", help="audit JSONL folder to replay (default: .agent-router/audit)"
+    )
+    _add_catalog(p)
     p.set_defaults(func=cmd_demo)
 
     p = sub.add_parser("run", help="run the live agent and print its timeline")
