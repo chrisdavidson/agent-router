@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# agent-router command hook for the first-principles integration.
+# Hook JSON on stdin, hook JSON on stdout. Fails open: prints {} whenever it cannot route.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
+repo="$(dirname "$(dirname "$integ")")"
+bin="${AGENT_ROUTER_BIN:-$repo/.venv/bin/agent-router}"
+if [ ! -x "$bin" ]; then
+  cat >/dev/null
+  echo '{}'
+  exit 0
+fi
+export AGENT_ROUTER_CATALOG="${AGENT_ROUTER_CATALOG:-$integ/catalog.yaml}"
+export AGENT_ROUTER_CALIBRATION="${AGENT_ROUTER_CALIBRATION:-$integ/calibration.json}"
+export AGENT_ROUTER_MODE=advisory
+export HF_HUB_DISABLE_PROGRESS_BARS=1
+exec "$bin" hook

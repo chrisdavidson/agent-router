@@ -33,19 +33,40 @@ def _how(entry: CatalogEntry) -> str:
     if entry.kind == "skill":
         return f'Invoke the Skill tool with skill="{target}".'
     if entry.kind == "agent":
-        return f'Delegate this with the Agent tool, subagent_type="{target}".'
+        return f'Delegate it with the Agent tool (subagent_type="{target}").'
     if target.startswith(PLUGIN_MCP_PREFIX):
         return f'Call tool {target} (if deferred, load it first: ToolSearch "select:{target}").'
     return f"Call tool {target}."
 
 
 def render_hint(entry: CatalogEntry, point: HookPoint, prob: float) -> str:
-    """Advisory hint. ``point`` and ``prob`` are accepted for future templates; unused."""
-    return _cap(
+    """Advisory hint. ``point`` and ``prob`` are accepted for future templates; unused.
+
+    Over ``MAX_HINT``, the description is shortened first so the call instruction survives.
+
+    An ``agent`` entry gets a scope statement without the description or the "optional"
+    clause: measured live (Claude Code 2.1.283, Opus 5.5), the generic template made the main
+    session answer inline, using the description as a recipe, on 3 of 3 prompts it delegated
+    without any hint; this wording delegated 4 of 4
+    (``integrations/first-principles/README.md``).
+    """
+    if entry.kind == "agent":
+        target = _clean(entry.target)
+        return _cap(
+            f"[agent-router] Routing check: this request is in scope for the {target} agent "
+            f"({_clean(entry.name)}, {_clean(entry.project)}, MIT). Delegate it with the Agent "
+            f'tool (subagent_type="{target}") instead of answering inline.'
+        )
+    head = (
         "[agent-router] An MIT-licensed alternative may fit this step: "
-        f"{_clean(entry.name)} ({_clean(entry.project)}, MIT) — {_clean(entry.what)} "
-        f"{_how(entry)} Optional: ignore it if your current approach is better."
+        f"{_clean(entry.name)} ({_clean(entry.project)}, MIT) — "
     )
+    tail = f" {_how(entry)} Optional: ignore it if your current approach is better."
+    what = _clean(entry.what)
+    room = MAX_HINT - len(head) - len(tail)
+    if len(what) > room > 20:
+        what = what[: room - 1].rstrip() + "…"
+    return _cap(head + what + tail)
 
 
 def render_deny(entry: CatalogEntry, tool_name: str) -> str:

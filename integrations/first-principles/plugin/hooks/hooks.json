@@ -1,0 +1,11 @@
+{
+  "description": "agent-router checkpoints (advisory, fail open). See integrations/first-principles/README.md.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/hook", "timeout": 15}]}
+    ],
+    "PreToolUse": [
+      {"matcher": "Agent", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/hook", "timeout": 15}]}
+    ]
+  }
+}

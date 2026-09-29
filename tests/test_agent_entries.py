@@ -80,7 +80,7 @@ def test_unscoped_entry_applies_everywhere():
 
 def test_agent_hint_says_how_to_delegate():
     hint = render_hint(DELEGATE, HookPoint.PROMPT, 0.9)
-    assert f'Delegate this with the Agent tool, subagent_type="{FP_AGENT}".' in hint
+    assert f'Delegate it with the Agent tool (subagent_type="{FP_AGENT}")' in hint
 
 
 def test_plugin_tool_hint_says_how_to_load_deferred_tool():
