@@ -3,12 +3,14 @@
 Rules (in order):
 1. disabled, or hook point not enabled                    -> SKIPPED
 2. pending call already targets the catalog (loop guard)  -> SKIPPED
-3. no catalog entry eligible at this point / tool         -> SKIPPED
+   tool/skill input matches ``config.skip_input``          -> SKIPPED
+3. no catalog entry eligible at this point / tool / agent -> SKIPPED
 4. build the decider state from the event
 5. ask the decider; any exception                         -> NATIVE (fail open)
 6. choice outside the offered options                     -> NATIVE, recorded as ``none``
 7. ``none`` or p(choice) < threshold                      -> NATIVE
 8. enforce mode at TOOL -> ENFORCE (deny) every time; marks the entry as suggested
+   (never for an ``agent`` entry: denying the Agent call would drop the delegation)
 9. entry already suggested this (session, turn) -> SKIPPED; else SUGGEST (hint)
 Every call writes exactly one audit record.
 """
@@ -18,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import threading
 from dataclasses import replace
 
@@ -40,6 +43,8 @@ from agent_router.deciders.base import Decider
 log = logging.getLogger(__name__)
 
 OWN_TOOL_PREFIX = "mcp__agent_router__"
+OWN_PLUGIN_TOOL = re.compile(r"^mcp__plugin_.+_agent_router__")
+"""The same tools served by a Claude Code plugin (``mcp__plugin_<plugin>_agent_router__x``)."""
 NONE_OPTION = OptionSpec("the agent's own tools are enough")
 MAX_TOOL_INPUT = 500
 MAX_RECENT = 3
@@ -131,12 +136,24 @@ class Router:
         tool_name = event.tool_name
         tool_input = event.tool_input if isinstance(event.tool_input, dict) else {}
         skill = tool_input.get("skill")
-        if self.catalog.owns_target(tool_name, skill=skill if isinstance(skill, str) else None) or (
-            tool_name is not None and tool_name.startswith(OWN_TOOL_PREFIX)
+        subagent = tool_input.get("subagent_type")
+        if self.catalog.owns_target(
+            tool_name,
+            skill=skill if isinstance(skill, str) else None,
+            subagent=subagent if isinstance(subagent, str) else None,
+        ) or (
+            tool_name is not None
+            and (tool_name.startswith(OWN_TOOL_PREFIX) or OWN_PLUGIN_TOOL.match(tool_name))
         ):
             return Decision(Action.SKIPPED, "own tool")
+        if cfg.skip_input and event.point in (HookPoint.TOOL, HookPoint.SKILL):
+            try:
+                if re.search(cfg.skip_input, build_state(replace(event, text="", recent=()))):
+                    return Decision(Action.SKIPPED, "skip pattern")
+            except re.error:  # a bad pattern disables the skip rule, never the hook
+                log.warning("invalid skip_input pattern %r", cfg.skip_input)
         # 3. structural eligibility
-        eligible = self.catalog.eligible(event.point, tool_name)
+        eligible = self.catalog.eligible(event.point, tool_name, event.agent_type)
         if not eligible:
             return Decision(Action.SKIPPED, "no eligible entries")
         options = {e.id: e.option() for e in eligible} | {NONE_ID: NONE_OPTION}
@@ -173,7 +190,7 @@ class Router:
         assert entry is not None  # eligible entries come from the catalog
         key = (event.session_id, event.turn_id, entry.id)
         # 8. enforce at TOOL denies every matching call; it marks but never consults the set
-        if cfg.mode == "enforce" and event.point == HookPoint.TOOL:
+        if cfg.mode == "enforce" and event.point == HookPoint.TOOL and entry.kind != "agent":
             with self._lock:
                 self._suggested.add(key)
             return Decision(

@@ -42,6 +42,7 @@ KEYS = {
     "turn",
     "point",
     "tool_name",
+    "agent_type",
     "state_sha256",
     "text",
     "options",

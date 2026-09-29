@@ -24,10 +24,19 @@ def _cap(text: str) -> str:
     return text if len(text) <= MAX_HINT else text[: MAX_HINT - 1] + "…"
 
 
+PLUGIN_MCP_PREFIX = "mcp__plugin_"
+"""Tools a Claude Code plugin serves; the host defers them until loaded via ToolSearch."""
+
+
 def _how(entry: CatalogEntry) -> str:
+    target = _clean(entry.target)
     if entry.kind == "skill":
-        return f'Invoke the Skill tool with skill="{_clean(entry.target)}".'
-    return f"Call tool {_clean(entry.target)}."
+        return f'Invoke the Skill tool with skill="{target}".'
+    if entry.kind == "agent":
+        return f'Delegate this with the Agent tool, subagent_type="{target}".'
+    if target.startswith(PLUGIN_MCP_PREFIX):
+        return f'Call tool {target} (if deferred, load it first: ToolSearch "select:{target}").'
+    return f"Call tool {target}."
 
 
 def render_hint(entry: CatalogEntry, point: HookPoint, prob: float) -> str:

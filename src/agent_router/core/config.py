@@ -21,6 +21,9 @@ class RouterConfig:
     enabled: bool = True
     audit_path: Path | None = None
     points: tuple[HookPoint, ...] = tuple(HookPoint)
+    skip_input: str | None = None
+    """Regex over the pending tool/skill call (``pending <tool>: <json input>``); a match
+    is SKIPPED before the decider. For calls a host agent must always make natively."""
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -30,7 +33,8 @@ class RouterConfig:
 
     @classmethod
     def from_env(cls, recommended_threshold: float | None = None) -> RouterConfig:
-        """Read ``AGENT_ROUTER_MODE``, ``_THRESHOLD``, ``_DISABLED`` and ``_AUDIT``.
+        """Read ``AGENT_ROUTER_MODE``, ``_THRESHOLD``, ``_DISABLED``, ``_AUDIT`` and
+        ``_SKIP_INPUT``.
 
         The threshold is ``AGENT_ROUTER_THRESHOLD`` when set, else ``recommended_threshold``
         (the decider's calibrated one) when given, else the default.
@@ -49,4 +53,5 @@ class RouterConfig:
             threshold=threshold,
             enabled=env.get("AGENT_ROUTER_DISABLED", "").strip().lower() not in _TRUTHY,
             audit_path=Path(audit) if audit else None,
+            skip_input=env.get("AGENT_ROUTER_SKIP_INPUT", "").strip() or None,
         )

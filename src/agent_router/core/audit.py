@@ -75,6 +75,7 @@ class AuditLog:
             "turn": event.turn_id,
             "point": str(event.point),
             "tool_name": event.tool_name,
+            "agent_type": event.agent_type,
             "state_sha256": hashlib.sha256(hashed.encode("utf-8")).hexdigest(),
             "text": _trunc(event.text),
             "options": list(decision.options),

@@ -71,6 +71,8 @@ class RouterEvent:
     tool_name: str | None = None
     tool_input: dict[str, Any] | None = None
     recent: tuple[str, ...] = ()
+    agent_type: str | None = None
+    """The subagent making the call (host-reported), or None on the main thread."""
 
 
 @dataclass(frozen=True)
