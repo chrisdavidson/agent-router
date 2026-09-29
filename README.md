@@ -154,6 +154,8 @@ We measured the gatekeeper on 64 test steps it had never seen:
   accuracy, the catalog format, modes, configuration, security, and command-line reference.
 - **[Architecture](docs/architecture.md)**: diagrams of the components and of one decision.
 - **[Other agent harnesses](docs/adapters.md)**: how to connect Codex CLI and Gemini CLI.
+- **[With the first-principles plugin](integrations/first-principles/README.md)**: a Claude Code
+  plugin that nudges delegation to the first-principles agent and gives it an exact calculator.
 - **[Research](docs/research.md)**: the papers and projects this design builds on, including TypeSafe's
   Jev and Tenjin.
 

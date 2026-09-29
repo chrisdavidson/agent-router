@@ -34,8 +34,8 @@ def _how(entry: CatalogEntry) -> str:
         return f'Invoke the Skill tool with skill="{target}".'
     if entry.kind == "agent":
         return f'Delegate it with the Agent tool (subagent_type="{target}").'
-    if target.startswith(PLUGIN_MCP_PREFIX):
-        return f'Call tool {target} (if deferred, load it first: ToolSearch "select:{target}").'
+    if target.startswith(PLUGIN_MCP_PREFIX):  # named once: plugin tool names are long
+        return f'Load it with ToolSearch "select:{target}" if deferred, then call it.'
     return f"Call tool {target}."
 
 

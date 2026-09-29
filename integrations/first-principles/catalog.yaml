@@ -1,14 +1,15 @@
 # agent-router catalog for use next to the first-principles plugin
 # (https://github.com/chrisdavidson/first-principles-skill, MIT).
 #
-# agent-router only decides WHETHER the main session should delegate to the
-# first-principles agent. Everything inside the analysis (Step 0 technique selection, the
+# Two checkpoints: at the main session, WHETHER to delegate to the first-principles agent;
+# inside that agent, an exact calculator when it reaches for python/bc to compute a figure
+# (Phase 4 estimates, the Phase 5 "recompute every computed figure" step). Everything inside the analysis (Step 0 technique selection, the
 # slash-only skills, the Self-Audit Gate) stays with first-principles, so no entry here
 # routes to an individual technique.
 #
 # Examples and native_examples are written independently of first-principles' routing
 # catalogs, which are used as the holdout in eval_set.yaml.
-version: "fp-2026-09-28.1"
+version: "fp-2026-09-28.2"
 
 entries:
   - id: first-principles-agent
@@ -21,6 +22,7 @@ entries:
     points: [prompt, tool]
     replaces: [Agent]
     agents: [main]
+    threshold: 0.55  # calibrate.py, main-thread cal cases
     what: >
       Rebuild a claim, decision or design from verified fundamentals: challenge its
       assumptions, establish ground truths and reason upward, not by analogy or convention.
@@ -41,6 +43,33 @@ entries:
       - strip this decision down to its fundamentals, should we rewrite the billing service
       - what are the irreducible facts behind the belief that breakfast is the most important meal
       - challenge the conventional wisdom that you need a college degree to get a good job
+
+  - id: exact-calc
+    kind: tool
+    name: Exact calculator
+    project: agent-router (own code)
+    license: MIT
+    url: https://github.com/usathyan/agent-router
+    target: mcp__plugin_agent-router-fp_agent_router__calc
+    points: [tool]
+    replaces: [Bash]
+    agents: ["first-principles:first-principles"]
+    threshold: 0.8  # calibrate.py, first-principles-agent cal cases
+    what: >
+      Exact arithmetic (fractions, powers, percentages) with no floating point error.
+    not_for:
+      - writing, appending to or reading a file
+      - counting words or lines in a file
+      - running a program or a test suite
+    examples:
+      - python3 -c "print(0.17 * 2340)"
+      - python3 -c "print(10000 * 1.05 ** 7)"
+      - echo "scale=6; 1/3 + 2/7" | bc -l
+      - python -c "import math; print(math.sqrt(2) * 400)"
+      - node -e "console.log(3.5e6 / 12 / 30)"
+      - awk 'BEGIN { print 1500 * 0.07 * 12 }'
+      - python3 -c "print(sum([120, 85.5, 40.25]) / 3)"
+      - expr 365 \* 24 \* 60
 
 # Steps where the main session's own tools are enough (compete as the `none` option).
 native_examples:
@@ -64,3 +93,8 @@ native_examples:
   - what are the symptoms of vitamin D deficiency
   - who invented the printing press
   - search the codebase for where the auth token is refreshed
+  - date -u +%Y%m%dT%H%M%SZ
+  - git log --oneline -5
+  - ls -la
+  - cat README.md
+  - grep -rn "TODO" src

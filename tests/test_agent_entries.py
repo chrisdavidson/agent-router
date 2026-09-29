@@ -85,7 +85,7 @@ def test_agent_hint_says_how_to_delegate():
 
 def test_plugin_tool_hint_says_how_to_load_deferred_tool():
     hint = render_hint(CALC, HookPoint.TOOL, 0.9)
-    assert f'ToolSearch "select:{CALC.target}"' in hint
+    assert f'Load it with ToolSearch "select:{CALC.target}" if deferred, then call it.' in hint
 
 
 def test_prompt_suggests_delegation():
@@ -152,3 +152,31 @@ entries:
     )
     (entry,) = load_catalog(path).entries
     assert entry.kind == "agent" and entry.agents == ("main",)
+
+
+def test_entry_threshold_overrides_the_router_threshold():
+    strict = replace(DELEGATE, threshold=0.95)
+    router = Router(Catalog(version="t", entries=(strict, CALC)), Always("fp-agent"))
+    d = router.route(ev())
+    assert d.action == Action.NATIVE and "below threshold 0.950" in d.reason
+    loose = replace(DELEGATE, threshold=0.1)
+    router = Router(
+        Catalog(version="t", entries=(loose, CALC)),
+        Always("fp-agent"),
+        RouterConfig(threshold=0.99),
+    )
+    assert router.route(ev()).action == Action.SUGGEST
+
+
+def test_catalog_threshold_is_validated(tmp_path):
+    import pytest
+
+    from agent_router.core.catalog import CatalogError
+
+    path = tmp_path / "c.yaml"
+    path.write_text(
+        "version: t\nentries:\n  - {id: a, kind: agent, name: n, project: p, license: MIT,"
+        " url: u, what: w, target: t, points: [prompt], threshold: 1.5}\n"
+    )
+    with pytest.raises(CatalogError, match="threshold"):
+        load_catalog(path)

@@ -36,6 +36,7 @@ class CatalogEntry:
     not_for: tuple[str, ...] = ()
     examples: tuple[str, ...] = ()
     agents: tuple[str, ...] = ()  # agent contexts (``main``, subagent types); () = all
+    threshold: float | None = None  # own acceptance bar; None = the router's threshold
 
     def applies_to(self, agent_type: str | None) -> bool:
         return not self.agents or (agent_type or MAIN_AGENT) in self.agents
@@ -101,6 +102,11 @@ def load_catalog(path: str | Path = DEFAULT_CATALOG) -> Catalog:
             )
         if raw["kind"] not in KINDS:
             raise CatalogError(f"entry {raw['id']}: kind must be one of {', '.join(KINDS)}")
+        threshold = raw.get("threshold")
+        if threshold is not None and not (
+            isinstance(threshold, int | float) and 0.0 <= threshold <= 1.0
+        ):
+            raise CatalogError(f"entry {raw['id']}: threshold must be a number in [0, 1]")
         seen.add(raw["id"])
         entries.append(
             CatalogEntry(
@@ -117,6 +123,7 @@ def load_catalog(path: str | Path = DEFAULT_CATALOG) -> Catalog:
                 not_for=tuple(raw.get("not_for", ())),
                 examples=tuple(raw.get("examples", ())),
                 agents=tuple(raw.get("agents", ())),
+                threshold=float(threshold) if threshold is not None else None,
             )
         )
     return Catalog(

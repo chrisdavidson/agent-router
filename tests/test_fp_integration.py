@@ -87,3 +87,57 @@ def test_holdout_meets_first_principles_thresholds(monkeypatch):
     p_ok = sum(got[c.id] == c.expected for c in cases if c.expected != "none")
     n_ok = sum(got[c.id] == "none" for c in cases if c.expected == "none")
     assert p_ok >= 11 and n_ok >= 18
+
+
+def _hook(payload, tmp_path):
+    import subprocess
+
+    env = {
+        **os.environ,
+        "AGENT_ROUTER_STATE_DIR": str(tmp_path),
+        "AGENT_ROUTER_EMBEDDER": "hashing",  # offline: no model download
+    }
+    out = subprocess.run(
+        [str(INTEG / "plugin" / "bin" / "hook")],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=True,
+    )
+    return json.loads(out.stdout)
+
+
+def test_plugin_serves_only_the_calculator():
+    mcp = json.loads((INTEG / "plugin" / ".mcp.json").read_text())["mcpServers"]
+    assert list(mcp) == ["agent_router"]
+    script = (INTEG / "plugin" / "bin" / "mcp").read_text()
+    assert "mcp --tools calc" in script
+    target = load_catalog(INTEG / "catalog.yaml").get("exact-calc").target
+    assert target == "mcp__plugin_agent-router-fp_agent_router__calc"
+
+
+def test_hook_fast_path_for_main_thread_bash(tmp_path):
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "session_id": "s",
+        "tool_name": "Bash",
+        "tool_input": {"command": "python3 -c 'print(2**64)'"},
+    }
+    assert _hook(payload, tmp_path) == {}
+    assert not (tmp_path / "audit").exists()  # answered by the shell, not the router
+
+
+def test_hook_skips_the_agents_report_writes(tmp_path):
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "session_id": "s",
+        "prompt_id": "p",
+        "agent_type": FP,
+        "tool_name": "Bash",
+        "tool_input": {"command": "cat >> \".first-principles/a.md\" <<'X'\n12 x 1500 = 18000\nX"},
+    }
+    assert _hook(payload, tmp_path) == {}
+    (line,) = (tmp_path / "audit" / "s.jsonl").read_text().splitlines()
+    assert json.loads(line)["reason"] == "skip pattern"

@@ -9,6 +9,7 @@ Rules (in order):
 5. ask the decider; any exception                         -> NATIVE (fail open)
 6. choice outside the offered options                     -> NATIVE, recorded as ``none``
 7. ``none`` or p(choice) < threshold                      -> NATIVE
+   (the entry's own ``threshold`` when the catalog sets one, else the config's)
 8. enforce mode at TOOL -> ENFORCE (deny) every time; marks the entry as suggested
    (never for an ``agent`` entry: denying the Agent call would drop the delegation)
 9. entry already suggested this (session, turn) -> SKIPPED; else SUGGEST (hint)
@@ -186,17 +187,18 @@ class Router:
         # 7. abstain / threshold
         if choice == NONE_ID:
             return Decision(Action.NATIVE, "decider chose none", result=result, options=option_ids)
+        entry = self.catalog.get(choice)
+        assert entry is not None  # eligible entries come from the catalog
+        threshold = entry.threshold if entry.threshold is not None else cfg.threshold
         prob = float(result.probabilities.get(choice, 0.0))
-        if prob < cfg.threshold:
+        if prob < threshold:
             return Decision(
                 Action.NATIVE,
-                f"p={prob:.3f} below threshold {cfg.threshold:.3f}",
+                f"p={prob:.3f} below threshold {threshold:.3f}",
                 entry_id=choice,
                 result=result,
                 options=option_ids,
             )
-        entry = self.catalog.get(choice)
-        assert entry is not None  # eligible entries come from the catalog
         key = (event.session_id, event.turn_id, entry.id)
         # 8. enforce at TOOL denies every matching call; it marks but never consults the set
         if cfg.mode == "enforce" and event.point == HookPoint.TOOL and entry.kind != "agent":
@@ -204,7 +206,7 @@ class Router:
                 self._suggested.add(key)
             return Decision(
                 Action.ENFORCE,
-                f"p={prob:.3f} >= {cfg.threshold:.3f}, enforce mode",
+                f"p={prob:.3f} >= {threshold:.3f}, enforce mode",
                 entry_id=entry.id,
                 hint=render_deny(entry, tool_name or ""),
                 result=result,
@@ -223,7 +225,7 @@ class Router:
             self._suggested.add(key)
         return Decision(
             Action.SUGGEST,
-            f"p={prob:.3f} >= {cfg.threshold:.3f}",
+            f"p={prob:.3f} >= {threshold:.3f}",
             entry_id=entry.id,
             hint=render_hint(entry, event.point, prob),
             result=result,

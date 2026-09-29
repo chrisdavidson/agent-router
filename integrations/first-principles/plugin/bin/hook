@@ -10,8 +10,20 @@ if [ ! -x "$bin" ]; then
   echo '{}'
   exit 0
 fi
+payload="$(cat)"
+# Fast path: a main-thread Bash call has no eligible entry (exact-calc is scoped to the
+# first-principles agent), so answer without starting Python.
+# (A false match only means the full path runs; routing itself decides.)
+bash_re='"tool_name"[[:space:]]*:[[:space:]]*"Bash"'
+agent_re='"agent_type"[[:space:]]*:'
+if [[ $payload =~ $bash_re ]] && ! [[ $payload =~ $agent_re ]]; then
+  echo '{}'
+  exit 0
+fi
 export AGENT_ROUTER_CATALOG="${AGENT_ROUTER_CATALOG:-$integ/catalog.yaml}"
 export AGENT_ROUTER_CALIBRATION="${AGENT_ROUTER_CALIBRATION:-$integ/calibration.json}"
 export AGENT_ROUTER_MODE=advisory
+# the agent's own report writes (.first-principles/analysis-*.md) are never routed
+export AGENT_ROUTER_SKIP_INPUT="${AGENT_ROUTER_SKIP_INPUT:-\.first-principles/}"
 export HF_HUB_DISABLE_PROGRESS_BARS=1
-exec "$bin" hook
+printf '%s' "$payload" | exec "$bin" hook

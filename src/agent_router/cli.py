@@ -209,6 +209,10 @@ def cmd_eval(args: argparse.Namespace) -> int:
 
     cases = load_cases(args.cases or DEFAULT_EVAL_SET, split=args.split)
     router = _router(args)
+    if args.skip_input:
+        from dataclasses import replace
+
+        router.config = replace(router.config, skip_input=args.skip_input)
     report = run_eval(lambda: router, cases)
     stats = routing_stats(report)
     stage = getattr(router.decider, "primary", router.decider)
@@ -479,6 +483,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cases", help="eval set YAML (default: evals/eval_set.yaml)")
     p.add_argument("--json", action="store_true", help="print JSON")
     p.add_argument("-v", "--verbose", action="store_true", help="list every case")
+    p.add_argument(
+        "--skip-input", help="skip pattern to apply, as the deployed AGENT_ROUTER_SKIP_INPUT"
+    )
     _add_backend(p)
     _add_catalog(p)
     p.set_defaults(func=cmd_eval)

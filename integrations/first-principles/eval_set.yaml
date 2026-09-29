@@ -4,7 +4,7 @@
 # split test: the holdout. fp-P* / fp-N* are the 13 DELEGATE and 20 NO-DELEGATE prompts of
 #             first-principles-skill tests/routing-catalog.md (MIT, copied verbatim), the
 #             battery that plugin's own description-based routing is measured on.
-version: "fp-2026-09-28.1"
+version: "fp-2026-09-28.2"
 
 cases:
   # ------------------------------------------------------------ cal: prompt, delegate
@@ -107,6 +107,36 @@ cases:
      tool_input: {subagent_type: general-purpose, description: "Implement validation",
                   prompt: "Add email and password validation to the signup form component."}}
 
+  # ------------------------------------------------------------ cal: Bash inside the first-principles agent
+  - {id: x-c1, split: cal, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"print(48 * 52 * 0.6)\""}}
+  - {id: x-c2, split: cal, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"print((1 + 0.07) ** 30)\""}}
+  - {id: x-c3, split: cal, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "echo \"scale=8; 22/7 - 355/113\" | bc -l"}}
+  - {id: x-c4, split: cal, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python -c \"print(7.5e9 * 0.03 / 365)\""}}
+  - {id: x-c5, split: cal, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "awk \"BEGIN { print 4200 / 1.2 / 8 }\""}}
+  - {id: x-c6, split: cal, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "node -e \"console.log(2 ** 53 + 1)\""}}
+  - {id: x-n1, split: cal, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "grep -rn \"retry\" src/"}}
+  - {id: x-n2, split: cal, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "git log --oneline -10"}}
+  - {id: x-n3, split: cal, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -m pytest -q tests/"}}
+  - {id: x-n4, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "wc -l README.md docs/*.md"}}
+  - {id: x-n5, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 scripts/analyze_costs.py --year 2025"}}
+  - {id: x-n6, split: cal, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "cat docs/architecture.md"}}
+  - {id: x-n7, split: cal, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "pip install numpy"}}
+  - {id: x-n8, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"import yaml; print(yaml.__version__)\""}}
+
   # ------------------------------------------------------------ test: first-principles P rows
   - {id: fp-P1, split: test, point: prompt, expected: first-principles-agent,
      text: "Analyze from first principles why most New Year's resolutions fail by February. What are the fundamental drivers, not the surface symptoms?"}
@@ -186,3 +216,22 @@ cases:
      tool_name: Agent,
      tool_input: {subagent_type: Explore, description: "Find logging calls",
                   prompt: "Locate every call to the legacy logger module."}}
+  # ------------------------------------------------------------ test: Bash inside the first-principles agent
+  - {id: x-t1, split: test, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"print(0.35 * 18000 * 12)\""}}
+  - {id: x-t2, split: test, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "echo \"2500*(1+0.042)^12\" | bc -l"}}
+  - {id: x-t3, split: test, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"import math; print(math.factorial(20) / math.factorial(17))\""}}
+  - {id: x-t4, split: test, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"print(1.6e-19 * 6.022e23)\""}}
+  - {id: x-t5, split: test, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "ls -la"}}
+  - {id: x-t6, split: test, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "find . -name \"*.py\" -newer setup.py"}}
+  - {id: x-t7, split: test, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"import json,sys; print(json.load(open('data.json'))['total'])\""}}
+  - {id: x-t8, split: test, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "cat >> \".first-principles/analysis-20260928T120000Z.md\" <<'FP_EOF'\n## Derivation Chains\nC1: GT-1 (12 units) x GT-2 ($1,500) = $18,000\nFP_EOF"}}
+  - {id: x-t9, split: test, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "grep -c '^#' \".first-principles/analysis-20260928T120000Z.md\""}}
