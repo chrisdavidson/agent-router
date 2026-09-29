@@ -198,6 +198,7 @@ class Router:
                 entry_id=choice,
                 result=result,
                 options=option_ids,
+                threshold=threshold,
             )
         key = (event.session_id, event.turn_id, entry.id)
         # 8. enforce at TOOL denies every matching call; it marks but never consults the set
@@ -206,11 +207,12 @@ class Router:
                 self._suggested.add(key)
             return Decision(
                 Action.ENFORCE,
-                f"p={prob:.3f} >= {threshold:.3f}, enforce mode",
+                f"p={prob:.3f} at or above threshold {threshold:.3f}, enforce mode",
                 entry_id=entry.id,
                 hint=render_deny(entry, tool_name or ""),
                 result=result,
                 options=option_ids,
+                threshold=threshold,
             )
         # 9. advisory hints: once per (session, turn, entry)
         with self._lock:
@@ -221,13 +223,15 @@ class Router:
                     entry_id=entry.id,
                     result=result,
                     options=option_ids,
+                    threshold=threshold,
                 )
             self._suggested.add(key)
         return Decision(
             Action.SUGGEST,
-            f"p={prob:.3f} >= {threshold:.3f}",
+            f"p={prob:.3f} at or above threshold {threshold:.3f}",
             entry_id=entry.id,
             hint=render_hint(entry, event.point, prob),
             result=result,
             options=option_ids,
+            threshold=threshold,
         )

@@ -161,6 +161,7 @@ def cmd_route(args: argparse.Namespace) -> int:
         "latency_ms": res.latency_ms if res else None,
         "stages": list(res.stages) if res else [],
         "threshold": router.config.threshold,
+        "applied_threshold": d.threshold,
     }
     if args.json:
         _print_json(out)

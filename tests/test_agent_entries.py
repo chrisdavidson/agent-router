@@ -159,13 +159,16 @@ def test_entry_threshold_overrides_the_router_threshold():
     router = Router(Catalog(version="t", entries=(strict, CALC)), Always("fp-agent"))
     d = router.route(ev())
     assert d.action == Action.NATIVE and "below threshold 0.950" in d.reason
+    assert d.threshold == 0.95  # the entry's bar, not the router's, travels with the decision
     loose = replace(DELEGATE, threshold=0.1)
     router = Router(
         Catalog(version="t", entries=(loose, CALC)),
         Always("fp-agent"),
         RouterConfig(threshold=0.99),
     )
-    assert router.route(ev()).action == Action.SUGGEST
+    d = router.route(ev())
+    assert d.action == Action.SUGGEST and d.threshold == 0.1
+    assert "at or above threshold 0.100" in d.reason
 
 
 def test_catalog_threshold_is_validated(tmp_path):

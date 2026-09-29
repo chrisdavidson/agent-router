@@ -87,7 +87,12 @@ function toCheckpoint(src) {
     : Object.keys(probabilities);
   if (!optionIds.includes("none") && Object.keys(probabilities).length) optionIds.push("none");
   optionIds = [...optionIds.filter((i) => i !== "none"), ...(optionIds.includes("none") ? ["none"] : [])];
-  const thr = src.threshold ?? (src.thresholds && src.thresholds.threshold) ?? state.threshold;
+  // The bar the chosen entry was held to: per-entry thresholds differ from the router's.
+  // Records written before `applied_threshold` existed still name it in their reason.
+  const reasonThr = /threshold (\d*\.\d+)/.exec(d.reason || "");
+  const entryThr = d.entry_id && state.entries.get(d.entry_id) ? state.entries.get(d.entry_id).threshold : null;
+  const thr = d.applied_threshold ?? (reasonThr ? Number(reasonThr[1]) : null) ?? entryThr
+    ?? src.threshold ?? (src.thresholds && src.thresholds.threshold) ?? state.threshold;
   return {
     point: src.point || (src.event && src.event.point) || "prompt",
     tool: src.tool_name || null,
@@ -125,13 +130,22 @@ function verdict(cp) {
   const name = cp.entryId ? optionMeta(cp.entryId).name : null;
   const p = cp.entryId ? cp.probabilities[cp.entryId] : null;
   switch (t) {
-    case "suggest": return { title: `Points to ${name}`, pill: "Hint injected" };
-    case "enforce": return { title: `Blocks ${cp.tool || "the call"}, points to ${name}`, pill: "Call denied" };
-    case "gated": return { title: `Leans to ${name}, not enough`, pill: `${pct(p)} is under ${pct(cp.threshold)}` };
+    case "suggest": return { title: `Points to ${name}`, pill: `Hint injected: ${vsThreshold(p, cp.threshold)}` };
+    case "enforce": return { title: `Blocks ${cp.tool || "the call"}, points to ${name}`, pill: `Call denied: ${vsThreshold(p, cp.threshold)}` };
+    case "gated": return { title: `Leans to ${name}, not enough`, pill: vsThreshold(p, cp.threshold) };
     case "error": return { title: "Classifier failed, agent continues", pill: "Fail open" };
     case "skipped": return { title: skipTitle(cp.reason), pill: "Skipped" };
     default: return { title: "None fits, agent's own tools", pill: "Native path" };
   }
+}
+
+/** "69.6% is below the 80.0% threshold": which side of the bar the chosen option landed on. */
+function vsThreshold(p, thr) {
+  if (p == null || thr == null) return "";
+  const side = p > thr ? "above" : p < thr ? "below" : "at";
+  // one more decimal when rounding would print the same figure on both sides
+  const fmt = (x) => (side !== "at" && pct(p) === pct(thr) ? `${(x * 100).toFixed(2)}%` : pct(x));
+  return `${fmt(p)} is ${side} the ${fmt(thr)} threshold`;
 }
 
 function skipTitle(reason) {
@@ -164,7 +178,7 @@ function renderBars(cp, t, showThr = true) {
     bars.append(
       el("span"),
       el("div", { class: "thr-head", "aria-hidden": "true" },
-        el("span", { class: `thr-tag ${edge}`, style: `left:${thr * 100}%`, text: `threshold ${thr.toFixed(2)}` })),
+        el("span", { class: `thr-tag ${edge}`, style: `left:${thr * 100}%`, text: `threshold ${pct(thr)}` })),
       el("span"),
     );
   }
@@ -178,7 +192,7 @@ function renderBars(cp, t, showThr = true) {
     const row = el("div", {
       class: `bar-row${chosen ? ` chosen ${t}` : ""}${isNone ? " is-none" : ""}`,
       role: "listitem",
-      "aria-label": `${meta.name}: ${pct(p)}${chosen ? ", chosen" : ""}`,
+      "aria-label": `${meta.name}: ${pct(p)}${chosen ? ", chosen" : ""}${chosen && showThr && !isNone ? `, ${vsThreshold(p, thr).replace(/^\S+ is /, "")}` : ""}`,
     },
       el("div", { class: "bar-label", title: meta.what || "" },
         el("span", { class: "nm", text: isNone ? "none" : meta.name }),
@@ -238,7 +252,7 @@ function renderSees(cp, t) {
     if (cp.hintRestored) box.append(el("p", { class: "note", text: "The audit log keeps 300 characters; the rest is re-rendered from the same catalog template." }));
   } else {
     const why = t === "gated"
-      ? "Nothing. The top option is below the threshold, so the hook returns {} and the agent carries on unchanged."
+      ? `Nothing. ${cp.entryId ? optionMeta(cp.entryId).name : "The top option"} is at ${vsThreshold(cp.probabilities[cp.entryId], cp.threshold).replace(/ is /, ", ")}, so the hook returns {} and the agent carries on unchanged.`
       : t === "error"
         ? `Nothing. ${cp.reason || "The classifier raised"}; the router fails open.`
         : "Nothing. The hook returns {} and the agent carries on unchanged.";
@@ -508,7 +522,7 @@ async function startLive(e) {
       li = tlInsert(before, kind, "cp skipped", el("span", { class: "muted", text: `Skipped: ${why}.` }));
     } else {
       const card = el("article", { class: "checkpoint" });
-      const cp = renderCheckpoint(card, { ...d, threshold: state.threshold, mode }, { compact: true });
+      const cp = renderCheckpoint(card, { ...d, threshold: d.applied_threshold ?? state.threshold, mode }, { compact: true });
       const t = tone(cp);
       if (cp.hint) card.append(el("pre", { class: `hint-text ${t}`, text: cp.hint }));
       li = tlInsert(before, kind, `cp ${t}`, card);

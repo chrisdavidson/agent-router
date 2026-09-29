@@ -52,6 +52,7 @@ KEYS = {
     "action",
     "reason",
     "entry_id",
+    "applied_threshold",
     "hint",
     "backend",
     "latency_ms",

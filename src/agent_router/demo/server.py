@@ -370,6 +370,7 @@ def create_app(
                 "action": str(decision.action),
                 "reason": _public_reason(decision.reason),
                 "entry_id": decision.entry_id,
+                "applied_threshold": decision.threshold,
             },
             "result": None
             if res is None

@@ -85,6 +85,7 @@ class AuditLog:
             "action": str(decision.action),
             "reason": decision.reason,
             "entry_id": decision.entry_id,
+            "applied_threshold": decision.threshold,
             "hint": _trunc(decision.hint),
             "backend": res.backend if res else None,
             "latency_ms": float(res.latency_ms) if res else None,

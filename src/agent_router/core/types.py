@@ -83,6 +83,8 @@ class Decision:
     hint: str | None = None
     result: ChoiceResult | None = None
     options: tuple[str, ...] = field(default_factory=tuple)
+    threshold: float | None = None
+    """The bar the chosen entry was held to (its own, else the router's); None when none chosen."""
 
 
 PRIVATE_STAGE_KEYS = frozenset({"error"})
