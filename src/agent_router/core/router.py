@@ -22,6 +22,7 @@ import logging
 import math
 import re
 import threading
+from collections.abc import Iterable
 from dataclasses import replace
 
 from agent_router.core.audit import AuditLog
@@ -107,13 +108,21 @@ class Router:
         decider: Decider,
         config: RouterConfig | None = None,
         audit: AuditLog | None = None,
+        suggested: Iterable[tuple[str, int, str]] = (),
     ) -> None:
+        """``suggested`` seeds the once-per-(session, turn, entry) hint set, for hosts that
+        run each hook in a fresh process (see ``adapters.claude_code``)."""
         self.catalog = catalog
         self.decider = decider
         self.config = config if config is not None else RouterConfig()
         self.audit = audit if audit is not None else AuditLog(self.config.audit_path)
-        self._suggested: set[tuple[str, int, str]] = set()
+        self._suggested: set[tuple[str, int, str]] = set(suggested)
         self._lock = threading.Lock()
+
+    def suggested(self) -> set[tuple[str, int, str]]:
+        """The (session, turn, entry) keys already hinted or enforced."""
+        with self._lock:
+            return set(self._suggested)
 
     def route(self, event: RouterEvent) -> Decision:
         cfg = self.config
