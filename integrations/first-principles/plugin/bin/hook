@@ -23,7 +23,8 @@ fi
 export AGENT_ROUTER_CATALOG="${AGENT_ROUTER_CATALOG:-$integ/catalog.yaml}"
 export AGENT_ROUTER_CALIBRATION="${AGENT_ROUTER_CALIBRATION:-$integ/calibration.json}"
 export AGENT_ROUTER_MODE=advisory
-# the agent's own report writes (.first-principles/analysis-*.md) are never routed
-export AGENT_ROUTER_SKIP_INPUT="${AGENT_ROUTER_SKIP_INPUT:-\.first-principles/}"
+# the agent's own report commands (.first-principles/analysis-*.md) are never routed: appends
+# name the file, in-place revisions often `cd` into the directory first, so match the name alone
+export AGENT_ROUTER_SKIP_INPUT="${AGENT_ROUTER_SKIP_INPUT:-\.first-principles\b}"
 export HF_HUB_DISABLE_PROGRESS_BARS=1
 printf '%s' "$payload" | exec "$bin" hook
