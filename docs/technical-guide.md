@@ -104,12 +104,16 @@ default model is `claude-haiku-4-5`:
 `--workspace` is the agent's working directory (default: the current one); `demo_workspace/` holds
 the sample files and the `commit-writer` skill.
 
-The demo has three tabs:
+The demo has four tabs:
 
 - **Playground** routes one step with any backend and shows the probability bars. For the cascade it
   shows both stages.
 - **Live agent** streams a real SDK run: hooks, decisions, tool calls and the answer.
 - **Replay** steps through an audit session. `audit/sample-session.jsonl` is included.
+- **Trace** shows an integration's decision trace for a session: a summary (conclusion, gate
+  bands, delegation and calculator notes), a timeline of what the agent did with the router's notes
+  placed where they fired, and the decisions parsed from its report. It reads `--trace-dir`
+  (default: `trace/` next to `--audit-dir`). See `integrations/first-principles/README.md`.
 
 | Live agent | Replay |
 |---|---|

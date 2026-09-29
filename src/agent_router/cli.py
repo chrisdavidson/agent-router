@@ -352,8 +352,13 @@ def cmd_demo(args: argparse.Namespace) -> int:
         return 1
     catalog = _catalog(args) if (args.catalog or os.environ.get("AGENT_ROUTER_CATALOG")) else None
     audit_dir = Path(args.audit_dir) if args.audit_dir else None
+    trace_dir = Path(args.trace_dir) if args.trace_dir else None
     server.main(  # loopback only
-        port=args.port, allow_shell=args.allow_shell, catalog=catalog, audit_dir=audit_dir
+        port=args.port,
+        allow_shell=args.allow_shell,
+        catalog=catalog,
+        audit_dir=audit_dir,
+        trace_dir=trace_dir,
     )
     return 0
 
@@ -525,6 +530,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--audit-dir", help="audit JSONL folder to replay (default: .agent-router/audit)"
+    )
+    p.add_argument(
+        "--trace-dir",
+        help="decision-trace JSONL folder for the Trace tab (default: trace/ beside --audit-dir)",
     )
     _add_catalog(p)
     p.set_defaults(func=cmd_demo)

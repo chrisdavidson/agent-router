@@ -211,7 +211,13 @@ def test_demo_has_allow_shell_and_no_host(monkeypatch):
     seen = {}
     monkeypatch.setattr(server, "main", lambda **kw: seen.update(kw))
     assert cli.main(["demo", "--port", "8799"]) == 0
-    assert seen == {"port": 8799, "allow_shell": False, "catalog": None, "audit_dir": None}
+    assert seen == {
+        "port": 8799,
+        "allow_shell": False,
+        "catalog": None,
+        "audit_dir": None,
+        "trace_dir": None,
+    }
     assert cli.main(["demo", "--allow-shell"]) == 0
     assert seen["allow_shell"] is True
     with pytest.raises(SystemExit):

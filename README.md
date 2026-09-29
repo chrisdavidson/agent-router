@@ -64,13 +64,14 @@ make run                              # open http://127.0.0.1:8765
 
 No API key? Everything still works, using a free classifier that runs on your machine.
 
-The page has three tabs:
+The page has four tabs:
 
 | Tab | What it is | Costs |
 |---|---|---|
 | **Playground** | Test the gatekeeper on one step. You describe the step, it shows its decision. No agent runs. | Free (a fraction of a cent if Jev is asked) |
 | **Live agent** | Give a real Claude agent a task and watch every checkpoint happen, step by step. | A few cents per run |
 | **Replay** | Step back through any earlier run, one checkpoint at a time. | Free |
+| **Trace** | What an integrated agent did and decided in a run (for now, the first-principles agent): sections written, references opened, calculator use against the router's notes, the parsed conclusion, assumptions and Self-Audit Gate. | Free |
 
 ### How to read a decision
 
