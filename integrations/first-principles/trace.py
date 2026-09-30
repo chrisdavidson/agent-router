@@ -28,6 +28,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -46,6 +47,7 @@ APPEND = re.compile(r">>\s*\S*\.first-principles/|>>\s*\"?\$")
 HEADING = re.compile(r"^(#{1,3}) (.+)$", re.M)
 RESTART = re.compile(r"""(?:^|[;&\n])\s*:\s*>\s*["']?[$\w./]""")  # `: > "$F"` empties the report
 REVISE = re.compile(r"\bsed -i|\bperl -\w*i|\.write\(|write_text\(|open\([^)]*['\"][wa]")
+HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n\2[ \t]*$", re.S | re.M)
 MATH = re.compile(r"\bpython3?\b|\bbc\b|\bawk\b|\bnode -e\b|\bexpr\b|\bdc\b")
 
 # What reading each reference file tells us (agent definition, first-principles 9.13.0).
@@ -276,6 +278,7 @@ def _tool_record(payload: dict[str, Any]) -> dict[str, Any] | None:
             path = REPORT_PATH.search(cmd)
             if APPEND.search(cmd) and "<<" in cmd:
                 heads = [h for _, h in HEADING.findall(cmd)]
+                body = "".join(m.group(3) + "\n" for m in HEREDOC.finditer(cmd))
                 return {
                     "kind": "section_written",
                     "path": path.group(0) if path else None,
@@ -283,6 +286,7 @@ def _tool_record(payload: dict[str, Any]) -> dict[str, Any] | None:
                     "revises": bool(REVISE.search(cmd)),  # e.g. sed -i on earlier text, then append
                     "restarts": bool(RESTART.search(cmd)),  # empties the report and writes it again
                     "chars": len(cmd),
+                    "text": body,  # what was appended, so the report can be rebuilt offline
                 }
             return {
                 "kind": "report_op",
@@ -315,6 +319,46 @@ def _analysis_path(records: list[dict[str, Any]], cwd: str) -> Path | None:
         Path(cwd or ".").glob(".first-principles/analysis-*.md"), key=lambda f: f.stat().st_mtime
     )
     return found[-1] if found else None
+
+
+def _from_appends(records: list[dict[str, Any]]) -> tuple[str, bool]:
+    """The report rebuilt from its appended sections, and whether that is exact (no in-place
+    revision touched it). An emptied report (``: > "$F"`` or a second create) starts again."""
+    text, exact = "", True
+    for rec in records:
+        if rec.get("op") == "create" or rec.get("restarts"):
+            text, exact = "", True
+        if rec.get("op") == "revise" or rec.get("revises"):
+            exact = False
+        if rec.get("kind") == "section_written":
+            text += str(rec.get("text") or "")
+    return text, exact
+
+
+def _analysis(
+    run: list[dict[str, Any]], cwd: str, payload: dict[str, Any]
+) -> tuple[Path | None, str | None, str | None, bool]:
+    """(path, text, source, exact) of the finished report. Source: ``file`` on disk, else
+    ``capture`` (a full copy a replay found in the session), else ``appends`` (rebuilt from the
+    trace's own section records; exact only when nothing was revised in place)."""
+    path = _analysis_path(run, cwd)
+    if path:
+        try:
+            return path, path.read_text(encoding="utf-8"), "file", True
+        except OSError:
+            pass
+    copies = (
+        payload.get("analysis_texts") if isinstance(payload.get("analysis_texts"), dict) else {}
+    )
+    for rec in reversed(run):
+        raw = str(rec.get("path") or "")
+        for key in (raw, str(Path(cwd or ".") / raw)):
+            if raw and isinstance(copies.get(key), str) and copies[key].strip():
+                return path, copies[key], "capture", True
+    text, exact = _from_appends(run)
+    if text.strip():
+        return path, text, "appends", exact
+    return path, None, None, False
 
 
 def _routing(
@@ -399,11 +443,8 @@ def handle(
         run = [r for r in _read_jsonl(trace) if r.get("agent_id") == agent_id]
         start = next((_when(r["ts"]) for r in run if r.get("kind") == "run_start"), None)
         end = _when(now) if now else datetime.now(UTC)
-        path = _analysis_path(run, str(payload.get("cwd") or ""))
-        try:
-            decisions = parse_analysis(path.read_text(encoding="utf-8")) if path else None
-        except OSError:
-            decisions = None
+        path, text, source, exact = _analysis(run, str(payload.get("cwd") or ""), payload)
+        decisions = parse_analysis(text) if text else None
         audit_env = os.environ.get("AGENT_ROUTER_AUDIT", "").strip()
         audit = _read_jsonl(Path(audit_env) if audit_env else root / "audit" / f"{session}.jsonl")
         rec = {
@@ -411,6 +452,10 @@ def handle(
             "duration_s": round((end - start).total_seconds(), 1) if start and end else None,
             "final_message": _trunc(payload.get("last_assistant_message")),
             "analysis": str(path) if path else None,
+            "analysis_source": source,
+            "analysis_exact": exact if text else None,
+            "analysis_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest() if text else None,
+            "analysis_text": text,  # the finished report itself, so the trace outlives the file
             "sections_written": sum(1 for r in run if r.get("kind") == "section_written"),
             "report_restarts": sum(1 for r in run if r.get("restarts"))
             + max(0, sum(1 for r in run if r.get("op") == "create") - 1),
@@ -441,6 +486,45 @@ def handle(
 # --- offline replay of a capture -------------------------------------------------------------
 
 
+_READ_LINE = re.compile(r"^\s*\d+\t", re.M)
+
+
+def _captured_reports(events: list[dict[str, Any]]) -> dict[str, str]:
+    """Full copies of analysis files the main session read (``Read`` without offset/limit, or a
+    ``cat``) in a capture, by path: the exact report even when the file is gone."""
+    uses: dict[str, tuple[str, str]] = {}
+    out: dict[str, str] = {}
+    for e in events:
+        content = (e.get("message") or {}).get("content")
+        if e.get("parent_tool_use_id") or not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if e.get("type") == "assistant" and b.get("type") == "tool_use":
+                inp = b.get("input") or {}
+                if b.get("name") == "Read" and not ({"offset", "limit", "pages"} & set(inp)):
+                    uses[b["id"]] = ("read", str(inp.get("file_path") or ""))
+                elif b.get("name") == "Bash":
+                    m = re.fullmatch(r"\s*cat\s+(\S+\.md)\s*", str(inp.get("command") or ""))
+                    if m:
+                        uses[b["id"]] = ("cat", m.group(1).strip("'\""))
+            elif b.get("type") == "tool_result" and b.get("tool_use_id") in uses:
+                how, path = uses.pop(b["tool_use_id"])
+                text = _text_of(b.get("content"))
+                if (
+                    not REPORT_PATH.search(path)
+                    or b.get("is_error")
+                    or "<persisted-output>" in text
+                ):
+                    continue
+                if how == "read":
+                    text = _READ_LINE.sub("", text)
+                if len(text) > len(out.get(path, "")):
+                    out[path] = text
+    return out
+
+
 def replay_payloads(capture: Path) -> list[tuple[dict[str, Any], str | None]]:
     """The hook payloads a ``claude -p`` capture implies, in order, with their timestamps.
 
@@ -451,6 +535,7 @@ def replay_payloads(capture: Path) -> list[tuple[dict[str, Any], str | None]]:
     session = next((e.get("session_id") for e in events if e.get("session_id")), "")
     cwd = next((e.get("cwd") for e in events if e.get("type") == "system" and e.get("cwd")), "")
     base = {"session_id": session, "cwd": cwd, "agent_type": AGENT}
+    reports = _captured_reports(events)
     agents: dict[str, str] = {}  # Agent tool_use id -> synthetic agent_id
     calls: dict[str, dict[str, Any]] = {}
     out: list[tuple[dict[str, Any], str | None]] = []
@@ -522,6 +607,7 @@ def replay_payloads(capture: Path) -> list[tuple[dict[str, Any], str | None]]:
                             {
                                 **base,
                                 "hook_event_name": "SubagentStop",
+                                "analysis_texts": reports,
                                 "agent_id": agents.pop(tid),
                                 "last_assistant_message": _text_of(body),
                             },
@@ -535,6 +621,7 @@ def replay_payloads(capture: Path) -> list[tuple[dict[str, Any], str | None]]:
                     {
                         **base,
                         "hook_event_name": "SubagentStop",
+                        "analysis_texts": reports,
                         "agent_id": agents.pop(e["tool_use_id"]),
                         "last_assistant_message": e.get("summary"),
                     },

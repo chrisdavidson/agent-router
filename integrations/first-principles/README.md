@@ -64,11 +64,11 @@ the agent is answered by the shell script in about 5 ms; a traced call takes abo
 |---|---|---|
 | `run_start` | the agent starts | `agent_id` |
 | `reference_read` | it reads a first-principles reference | the file and what reading it means, e.g. `trade-off.md` = two or more options survived (Phase 4), `pre-mortem.md` / `inversion.md` = Phase 5 on a plan / a claim, `validation-rubric.md` = gate scoring starts |
-| `section_written` | a `cat >> .first-principles/analysis-*.md` append | the headings written; `revises` / `restarts` when the same command edits earlier text or empties the file first |
+| `section_written` | a `cat >> .first-principles/analysis-*.md` append | the headings and the `text` appended; `revises` / `restarts` when the same command edits earlier text or empties the file first |
 | `report_op` | any other report command | `op`: `create`, `revise` (rewrites part in place) or `check` |
 | `calc` / `shell` | a calculator or other Bash call | the expression and result; `math` when a shell call computes |
 | `tool_failed` | a call fails | tool, what it was, the error (e.g. a source that could not be fetched) |
-| `run_end` | the agent stops | duration, final message, report revisions and restarts, the analysis file parsed into `decisions`, and `routing`: the delegation decision before the run, calculator notes during it, calculator calls after the first note, `calc_note_followed` |
+| `run_end` | the agent stops | duration, final message, report revisions and restarts, the finished report (`analysis_text`, `analysis_sha256`) parsed into `decisions`, and `routing`: the delegation decision before the run, calculator notes during it, calculator calls after the first note, `calc_note_followed` |
 
 `decisions` holds: the sections, the run mode if stated, every assumption with its type and
 verdict, the ground truths and which are `?` (not read at source), each chain with its
@@ -84,6 +84,16 @@ its last gate pass, so `--report` also counts a Fix/Repeat the agent disclosed.
 
 `--report` prints one row per finished run. `--replay` rebuilds the hook payloads from a
 `claude -p` stream-json capture, to trace a past run offline.
+
+The trace keeps the report itself, so it still reads after the analysis file is gone.
+`analysis_source` says where `decisions` came from:
+- `file`: the report on disk.
+- `capture`: a replay found the main session's full read of it.
+- `appends`: rebuilt from the `section_written` texts. This is exact only when nothing was revised in
+  place (`analysis_exact`).
+
+Replaying the 28 example captures with their reports removed gives decisions for all 28:
+22 match the real report exactly, and the other 6 are marked inexact.
 
 **In the demo.** The **Trace** tab shows each run: a summary card, a timeline of what the agent
 did with the router's notes placed where they fired, and the decisions parsed from its report.

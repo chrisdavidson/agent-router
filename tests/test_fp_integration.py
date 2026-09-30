@@ -569,3 +569,117 @@ def test_trace_flags_revisions_and_restarts_of_the_report():
     assert bash("cd /w/.first-principles && grep -c '^#' analysis-1.md")["op"] == "check"
     assert tr.parse_analysis("- **Re-entry edges fired:** none.")["re_entry"]["fired"] is False
     assert tr.parse_analysis("no disclosure")["re_entry"] is None
+
+
+def _replay_capture(tmp_path, agent_calls, main_calls=()):
+    """A minimal ``claude -p`` capture: one first-principles run with the given tool calls
+    (``(name, input, result)``) inside it, then the given main-session calls after it."""
+    events = [
+        {"type": "system", "subtype": "init", "session_id": "s", "cwd": str(tmp_path / "gone")},
+        {
+            "type": "assistant",
+            "timestamp": "2026-09-29T10:00:00Z",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "ag",
+                        "name": "Agent",
+                        "input": {"subagent_type": FP},
+                    }
+                ]
+            },
+        },
+    ]
+    for i, (name, inp, out) in enumerate(agent_calls):
+        use = {"type": "tool_use", "id": f"a{i}", "name": name, "input": inp}
+        res = {"type": "tool_result", "tool_use_id": f"a{i}", "content": out}
+        events += [
+            {"type": "assistant", "parent_tool_use_id": "ag", "message": {"content": [use]}},
+            {"type": "user", "parent_tool_use_id": "ag", "message": {"content": [res]}},
+        ]
+    done = {"type": "tool_result", "tool_use_id": "ag", "content": "done"}
+    events.append(
+        {"type": "user", "timestamp": "2026-09-29T10:05:00Z", "message": {"content": [done]}}
+    )
+    for i, (name, inp, out) in enumerate(main_calls):
+        use = {"type": "tool_use", "id": f"m{i}", "name": name, "input": inp}
+        res = {"type": "tool_result", "tool_use_id": f"m{i}", "content": out}
+        events += [
+            {"type": "assistant", "message": {"content": [use]}},
+            {"type": "user", "message": {"content": [res]}},
+        ]
+    path = tmp_path / "run.jsonl"
+    path.write_text("".join(json.dumps(e) + "\n" for e in events))
+    tr = _trace()
+    for payload, ts in tr.replay_payloads(path):
+        tr.handle(payload, tmp_path / "state", now=ts)
+    return [
+        json.loads(x) for x in (tmp_path / "state" / "trace" / "s.jsonl").read_text().splitlines()
+    ]
+
+
+REPORT = ".first-principles/analysis-1.md"
+
+
+def _append(text):
+    return ("Bash", {"command": f"cat >> {REPORT} <<'FP_EOF'\n{text}\nFP_EOF"}, "")
+
+
+def test_trace_rebuilds_the_report_from_its_appends_when_the_file_is_gone(tmp_path):
+    half = ANALYSIS.index("## 4.")
+    recs = _replay_capture(
+        tmp_path,
+        [
+            ("Bash", {"command": f"mkdir -p .first-principles && : > {REPORT}"}, ""),
+            _append(ANALYSIS[:half][:-1]),  # a heredoc adds back one newline per append
+            _append(ANALYSIS[half:].removesuffix("\n")),
+        ],
+    )
+    sections = [r for r in recs if r["kind"] == "section_written"]
+    assert sections[0]["text"].startswith("# First-Principles Analysis")
+    end = recs[-1]
+    assert end["analysis_source"] == "appends" and end["analysis_exact"] is True
+    assert end["decisions"] == _trace().parse_analysis(ANALYSIS)
+    assert end["analysis_text"] == ANALYSIS.removesuffix("\n") + "\n"
+    assert len(end["analysis_sha256"]) == 64
+
+
+def test_trace_marks_a_rebuilt_report_inexact_after_an_in_place_revision(tmp_path):
+    recs = _replay_capture(
+        tmp_path,
+        [_append(ANALYSIS), ("Bash", {"command": f"sed -i 's/HIGH/LOW/' {REPORT}"}, "")],
+    )
+    assert recs[-1]["analysis_source"] == "appends" and recs[-1]["analysis_exact"] is False
+
+
+def test_trace_restart_discards_what_was_appended_before(tmp_path):
+    recs = _replay_capture(
+        tmp_path,
+        [
+            _append("# stale draft"),
+            (
+                "Bash",
+                {"command": f": > {REPORT} && cat >> {REPORT} <<'FP_EOF'\n{ANALYSIS}\nFP_EOF"},
+                "",
+            ),
+        ],
+    )
+    assert "stale draft" not in recs[-1]["analysis_text"]
+    assert recs[-1]["decisions"]["sections"] == _trace().parse_analysis(ANALYSIS)["sections"]
+
+
+def test_trace_replay_prefers_the_main_sessions_full_read_of_the_report(tmp_path):
+    full = str(tmp_path / "gone" / REPORT)
+    numbered = "".join(f"{i}\t{line}\n" for i, line in enumerate(ANALYSIS.splitlines(), 1))
+    recs = _replay_capture(
+        tmp_path,
+        [_append("# only a draft"), ("Bash", {"command": f"sed -i 's/a/b/' {REPORT}"}, "")],
+        main_calls=[
+            ("Read", {"file_path": full}, numbered),
+            ("Read", {"file_path": full, "offset": 1, "limit": 2}, "1\t# partial"),
+        ],
+    )
+    end = recs[-1]
+    assert end["analysis_source"] == "capture" and end["analysis_exact"] is True
+    assert end["decisions"] == _trace().parse_analysis(ANALYSIS)
