@@ -10,8 +10,8 @@ it untouched. It adds two checkpoints that plugin does not have:
 2. **Exact recompute.** Inside the first-principles agent, when it reaches for `python3 -c`,
    `bc` or similar to compute a figure (Phase 4 estimates, Phase 5 "recompute every computed
    figure"), it gets a note pointing at an exact calculator this plugin serves
-   (`mcp__plugin_agent-router-fp_agent_router__calc`, exact fractions and big integers, and a list of expressions in one call). The note
-   is offered only when the call is one expression the calculator can run (`fits:
+   (`mcp__plugin_agent-router-fp_agent_router__calc`: exact fractions and big integers, and a
+   list of expressions in one call). The note is offered only when the call is one expression the calculator can run (`fits:
    calc_expression`). Scripts with variables, loops or `math.log` are skipped as `does not fit`
    without reaching the classifier. In the 28 example runs, all 16 notes had fired on such
    scripts or on text commands.
@@ -188,6 +188,13 @@ reference (second-order thinking, Phase 2 inversion).
   the agent's decisions with the examples'. On 2026-09-29, 4 of the 28 runs did this.
 
 ## Known gaps
+
+- Whether the agent uses the calculator now depends on the main session's delegating prompt.
+  Under first-principles 9.13.0 the agent loaded it unprompted in 13 of 15 runs whose prompt
+  did not name it. Under 9.14.0 it did so in 0 of 5, and in all 3 runs whose prompt named it.
+  The calculator note is not the lever: its fit check found no call in these runs that the
+  calculator could run (the agent computes in multi-line scripts), so it stays silent. The
+  trace records the prompt (`delegation_prompt_names_calc`) and the load (`calc_loaded_at`).
 
 - A quantitative decision phrased as "From first principles: is it cheaper to…" scored
   `none` for the delegation nudge (the examples are qualitative), and first-principles' own
