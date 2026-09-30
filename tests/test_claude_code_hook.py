@@ -202,7 +202,7 @@ def test_mcp_server_serves_chosen_tools(tmp_path):
     [
         ("calc", {"expression": "1/0"}, "division by zero"),
         ("calc", {"expression": "log(2)"}, "unknown function 'log'"),
-        ("calc", {"expression": "[1, 2]"}, "unsupported syntax: List"),
+        ("calc", {"expression": "[1, [2]]"}, "unsupported syntax: List"),
         ("json_query", {"expression": "a", "text": "{"}, "invalid JSON"),
         ("repo_stats", {"path": "../"}, "outside the workspace"),
     ],

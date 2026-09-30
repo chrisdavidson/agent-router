@@ -75,7 +75,8 @@ def build_server(root: Path, tools: Iterable[str] = TOOLS) -> Any:
             """Exact calculator (agent-router, MIT). Evaluates arithmetic with exact fractions
             and big integers: + - * / // % **, '17% of 2340', sqrt, factorial, gcd, lcm, abs,
             round, comb, perm. Returns an integer, 'a/b (≈ decimal)', or '≈ decimal' if
-            irrational. Example expressions: '3/7 + 5/11', '2**200', '10000*(1+5/100)**7'."""
+            irrational. A list evaluates each item: '[2*3, 7/2]'. Example expressions:
+            '3/7 + 5/11', '2**200', '10000*(1+5/100)**7'."""
             return calc.evaluate(expression)
 
     if "json_query" in wanted:
