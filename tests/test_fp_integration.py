@@ -990,3 +990,24 @@ def test_run_examples_counts_a_report_returned_inline_as_complete():
     re_ = _run_examples()
     assert re_.completeness(events, []) == ("complete", [])
     assert re_.inline_report(events).startswith("# First-Principles Analysis")
+
+
+@pytest.mark.parametrize(
+    ("line", "fired"),
+    [
+        ("No re-entry edge fired in this run.", False),
+        ("No bounded re-entry edge fired.", False),
+        ("**Re-entry edges fired:** none.", False),
+        ("**Re-entry edges:** none fired.", False),
+        ("Run disclosures: no re-entry edge fired; the gate ran.", False),
+        # a "no" elsewhere in the sentence is not a denial (2026-09-30 heat-pump run)
+        (
+            "Disclosed: One bounded re-entry edge fired: the Self-Audit Gate's Fix/Repeat loop. "
+            "It was triggered because unsuffixed ground truths fed no HIGH chain.",
+            True,
+        ),
+        ("Re-entry edge fired: the Self-Audit Gate's Fix/Repeat loop, once.", True),
+    ],
+)
+def test_parse_analysis_reads_the_re_entry_disclosure(line, fired):
+    assert _trace().parse_analysis(line + "\n")["re_entry"]["fired"] is fired

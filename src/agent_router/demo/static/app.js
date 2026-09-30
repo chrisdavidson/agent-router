@@ -817,7 +817,8 @@ function renderTraceSummary(run) {
 const interp = (rec) => Boolean(rec.interpreter ?? rec.math);
 
 function traceItem(rec, t0) {
-  const at = t0 == null || rec.kind === "run_end" ? "" : ` +${clock((when(rec.ts) - t0) / 1000)}`;
+  const dt = t0 == null ? 0 : (when(rec.ts) - t0) / 1000;
+  const at = t0 == null || rec.kind === "run_end" ? "" : dt < 0 ? " (before the run)" : ` +${clock(dt)}`;
   const kind = (text, cls = "") => ({ kind: `${text}${at}`, cls });
   let meta; let body;
   switch (rec.kind) {

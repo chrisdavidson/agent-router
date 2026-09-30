@@ -171,6 +171,11 @@ def _count(values: list[str]) -> dict[str, int]:
 RUN_MODE = re.compile(
     r"\b(?:Run mode|Mode|MODE)\b\**\s*[:=]\**\s*`?\s*(?:MODE\s*=\s*)?([a-z]+(?:-[a-z]+)+)"
 )
+# "No [bounded] re-entry edge fired", "Re-entry edges fired: none", "Re-entry edges: none
+# fired". Any other "no" in the sentence ("fed no HIGH chain") is not a denial.
+NO_EDGE = re.compile(
+    r"\bno (?:bounded )?re-entry edges?\b|\bre-entry edges?(?: fired)?\**:\**\s*none\b", re.I
+)
 GATE_RESULT = re.compile(r"^\**Gate result[^:\n]*:\**\s*(.+)$", re.M)
 CRITERION = re.compile(
     r"\*\*Criterion (\d+):\s*([^*]*?)\s*\*\*.*?Band:\s*\**(" + "|".join(BANDS) + r")", re.S
@@ -257,7 +262,7 @@ def parse_analysis(text: str) -> dict[str, Any]:
         "re_entry": None
         if edge is None
         else {
-            "fired": not re.search(r"\b(no|none)\b", edge.group(0), re.I),
+            "fired": not NO_EDGE.search(edge.group(0)),
             "disclosure": _trunc(re.sub(r"\*+", "", edge.group(0)).strip(" ->"), 240),
         },
         "assumptions": {
