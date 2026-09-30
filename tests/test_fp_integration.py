@@ -700,6 +700,7 @@ def test_trace_rebuilds_the_report_from_its_appends_when_the_file_is_gone(tmp_pa
     assert sections[0]["text"].startswith("# First-Principles Analysis")
     end = recs[-1]
     assert end["analysis_source"] == "appends" and end["analysis_exact"] is True
+    assert end["decisions"]["gate"].pop("passes_written") == 2  # both passes were appended
     assert end["decisions"] == _trace().parse_analysis(ANALYSIS)
     assert end["analysis_text"] == ANALYSIS.removesuffix("\n") + "\n"
     assert len(end["analysis_sha256"]) == 64
@@ -742,6 +743,7 @@ def test_trace_replay_prefers_the_main_sessions_full_read_of_the_report(tmp_path
     )
     end = recs[-1]
     assert end["analysis_source"] == "capture" and end["analysis_exact"] is True
+    assert end["decisions"]["gate"].pop("passes_written") == 0  # the appends had no gate
     assert end["decisions"] == _trace().parse_analysis(ANALYSIS)
 
 
@@ -772,3 +774,58 @@ def test_trace_ignores_a_handoff_to_another_agent(tmp_path):
     call = {"subagent_type": "general-purpose", "prompt": "use the calculator"}
     payload = {"session_id": "s", "hook_event_name": "PreToolUse", "tool_name": "Agent"}
     assert _trace().handle({**payload, "tool_input": call}, tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    ("line", "mode"),
+    [
+        ("Run mode: `full-composer` (no trigger fired).", "full-composer"),
+        ("Mode: full-composer. No technique-specific trigger fired.", "full-composer"),
+        ("- **Mode:** `focused-five-whys` (causal mode).", "focused-five-whys"),
+        ("Run disclosures: MODE = full-composer (no trigger).", "full-composer"),
+        ("Step 0 selected `MODE = full-composer`, because no trigger fired.", "full-composer"),
+        ("The mode of failure: fatigue.", None),
+    ],
+)
+def test_parse_analysis_reads_the_run_mode_however_it_is_stated(line, mode):
+    assert _trace().parse_analysis(line + "\n")["run_mode"] == mode
+
+
+def test_parse_analysis_takes_the_last_gate_result_bold_or_not():
+    text = (
+        "**Gate result:** passes, but Criterion 3 fails, so the Fix step runs.\n"
+        "Gate result after re-score: cleared.\n"
+    )
+    assert _trace().parse_analysis(text)["gate"]["result"] == "cleared."
+
+
+def test_parse_analysis_flags_a_re_entry_disclosure_the_gate_contradicts():
+    base = "No re-entry edge fired in this run.\n"
+    blocks = "".join(
+        f"**Criterion 1: Identify Essence**\nBand: **{b}**\n" for b in ("Hand-wavy", "Rigorous")
+    )
+    d = _trace().parse_analysis(base + blocks)
+    assert d["gate"]["passes"] == 2 and d["gate"]["cleared"] is True
+    assert d["contradictions"] == [
+        "the report says no re-entry edge fired, but the gate was scored 2 times"
+    ]
+    assert _trace().parse_analysis(base + blocks[: len(blocks) // 2])["contradictions"] == []
+
+
+def test_trace_counts_gate_passes_a_rewrite_dropped(tmp_path):
+    first = "**Criterion 1: Identify Essence**\nBand: **Hand-wavy**"
+    second = "**Criterion 1: Identify Essence**\nBand: **Rigorous**"
+    recs = _replay_capture(
+        tmp_path,
+        [
+            _append("## 7. Gate\n" + first),
+            (
+                "Bash",
+                {"command": f": > {REPORT} && cat >> {REPORT} <<'FP_EOF'\n{second}\nFP_EOF"},
+                "",
+            ),
+        ],
+    )
+    gate = recs[-1]["decisions"]["gate"]
+    assert (gate["passes"], gate["passes_written"]) == (1, 2)
+    assert _trace()._fix_repeat(recs[-1]["decisions"]) == "yes (rewritten)"

@@ -91,12 +91,29 @@ A note is credited only with what changed after it. The earlier `calc_note_follo
 rerun, 8 of 10 notes arrived after the agent had loaded the calculator, and 13 of the 28
 example prompts had already told the agent to use it.
 
-`decisions` holds: the sections, the run mode if stated, every assumption with its type and
-verdict, the ground truths and which are `?` (not read at source), each chain with its
-confidence, the dead ends, the techniques not applied and why, the gate bands of the last
-scoring pass and whether Fix/Repeat fired, the agent's re-entry disclosure, and the
-recommended approach with its confidence. A report that was emptied and rewritten keeps only
-its last gate pass, so `--report` also counts a Fix/Repeat the agent disclosed.
+`decisions` holds:
+- the sections
+- the run mode, however the report states it, with the line it came from
+- every assumption with its type and verdict
+- the ground truths, and which are `?` (not read at source)
+- each chain with its confidence
+- the dead ends
+- the techniques not applied, and why
+- the gate: the bands of the last scoring pass, `cleared` (worked out from those bands, so it is
+  known even when the report has no "Gate result" line), and the result line (the last one, bold
+  or not)
+- the agent's re-entry disclosure
+- the recommended approach with its confidence
+
+A report that was emptied and rewritten keeps only its last gate pass, so `passes_written` also
+counts the passes appended during the run. `--report` reports Fix/Repeat as `yes`, `yes
+(rewritten)` or `yes (disclosed)`. `contradictions` lists places where the report's own
+disclosure disagrees with its gate, for example "no re-entry edge fired" in a report that
+re-scored.
+
+On the 28 example reports the parser finds the run mode in all 21 that state one (the old
+pattern found 2), the gate result in all 27 that have one, and all 3 Fix/Repeat re-scores.
+It flags one contradiction.
 
 ```bash
 .venv/bin/python integrations/first-principles/trace.py --report ~/.local/state/agent-router/trace

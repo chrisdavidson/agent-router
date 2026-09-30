@@ -923,6 +923,8 @@ function renderDecisions(run) {
   const out = [];
   if (d.re_entry) out.push(el("p", { class: `re-entry ${d.re_entry.fired ? "fired" : ""}` },
     chip(d.re_entry.fired ? "re-entry fired" : "no re-entry", d.re_entry.fired ? "gated" : "native"), ` ${d.re_entry.disclosure}`));
+  for (const c of d.contradictions || []) out.push(el("p", { class: "re-entry" }, chip("contradiction", "enforce"), ` ${c}`));
+  if (d.run_mode) out.push(el("p", { class: "re-entry" }, chip(`mode ${d.run_mode}`, "outline"), ` ${d.run_mode_line || ""}`));
   const a = d.assumptions || { rows: [] };
   out.push(section(`Assumptions (${a.count || 0})`, true,
     el("p", { class: "chips" }, ...Object.entries(a.by_verdict || {}).map(([v, n]) => chip(`${n} ${v}`, VERDICT_TONE[v])),

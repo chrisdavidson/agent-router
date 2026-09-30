@@ -157,6 +157,55 @@ def _count(values: list[str]) -> dict[str, int]:
     return out
 
 
+# Step 0's mode, however the report states it: "Run mode: `x`", "**Mode:** x", "MODE = x",
+# "Step 0 selected `MODE = x`". Modes are hyphenated names (full-composer, focused-five-whys).
+RUN_MODE = re.compile(
+    r"\b(?:Run mode|Mode|MODE)\b\**\s*[:=]\**\s*`?\s*(?:MODE\s*=\s*)?([a-z]+(?:-[a-z]+)+)"
+)
+GATE_RESULT = re.compile(r"^\**Gate result[^:\n]*:\**\s*(.+)$", re.M)
+CRITERION = re.compile(
+    r"\*\*Criterion (\d+):\s*([^*]*?)\s*\*\*.*?Band:\s*\**(" + "|".join(BANDS) + r")", re.S
+)
+
+
+def _gate_passes(text: str) -> tuple[list[dict[str, str]], dict[str, str]]:
+    """Gate scoring passes in ``text``: one block per criterion per pass, so a criterion scored
+    again starts a new pass (Fix/Repeat). Also criterion number -> name."""
+    passes: list[dict[str, str]] = [{}]
+    criteria: dict[str, str] = {}  # e.g. "3": "Establish Ground Truths"
+    for m in CRITERION.finditer(text):
+        if m.group(1) in passes[-1]:
+            passes.append({})
+        passes[-1][m.group(1)] = m.group(3)
+        criteria[m.group(1)] = m.group(2)
+    return passes, criteria
+
+
+RESCORE = re.compile(r"\bre-scor|\bFix step runs\b|\bsingle Fix/Repeat pass\b", re.I)
+
+
+def _contradictions(decisions: dict[str, Any], passes_written: int | None = None) -> list[str]:
+    """Places where the report's own disclosure disagrees with what its gate shows."""
+    out = []
+    gate = decisions.get("gate") or {}
+    edge = decisions.get("re_entry") or {}
+    passes = max(gate.get("passes") or 0, passes_written or 0)
+    rescored = passes > 1 or bool(RESCORE.search(str(gate.get("result") or "")))
+    if edge and edge.get("fired") is False and rescored:
+        why = f"the gate was scored {passes} times" if passes > 1 else "its gate result re-scores"
+        out.append(f"the report says no re-entry edge fired, but {why}")
+    return out
+
+
+def _add_history(decisions: dict[str, Any], run: list[dict[str, Any]]) -> None:
+    """What the final file cannot show: gate passes written during the run, including ones a
+    later rewrite dropped (all appended text, restarts included)."""
+    written = "".join(str(r.get("text") or "") for r in run if r.get("kind") == "section_written")
+    passes_written = len([p for p in _gate_passes(written)[0] if p])
+    decisions["gate"]["passes_written"] = passes_written
+    decisions["contradictions"] = _contradictions(decisions, passes_written)
+
+
 def parse_analysis(text: str) -> dict[str, Any]:
     """The decisions a finished analysis records, from its fixed template markers."""
     assumptions = _assumptions(_section(text, 2))
@@ -183,28 +232,19 @@ def parse_analysis(text: str) -> dict[str, Any]:
         {"technique": m.group(1), "phase": int(m.group(2)), "reason": _trunc(m.group(3), 200)}
         for m in re.finditer(r"^- ([\w-]+) \(Phase (\d)\) — not applicable — (.+)$", text, re.M)
     ]
-    # gate: one block per criterion per scoring pass; a criterion scored again = Fix/Repeat
-    passes: list[dict[str, str]] = [{}]
-    criteria: dict[str, str] = {}  # number -> name, e.g. "3": "Establish Ground Truths"
-    for m in re.finditer(
-        r"\*\*Criterion (\d+):\s*([^*]*?)\s*\*\*.*?Band:\s*\**(" + "|".join(BANDS) + r")",
-        text,
-        re.S,
-    ):
-        if m.group(1) in passes[-1]:
-            passes.append({})
-        passes[-1][m.group(1)] = m.group(3)
-        criteria[m.group(1)] = m.group(2)
-    result = re.search(r"^Gate result:\s*(.+)$", text, re.M)
+    passes, criteria = _gate_passes(text)
+    # the last result line wins ("Gate result after re-score: ..."); bold or not
+    results = GATE_RESULT.findall(text)
     conclusion = _section(text, 6)
     rec = re.search(r"\*\*Recommended approach:\*\*\s*(.+)", conclusion)
     conf = re.search(r"\*\*Confidence:\*\*\s*(HIGH|MEDIUM|LOW)", conclusion)
-    mode = re.search(r"Run mode:\s*`([^`]+)`", text)
+    mode = RUN_MODE.search(text)
     # the agent must disclose any re-entry edge (Fix/Repeat, Criterion 1 return, ...) that fired
     edge = re.search(r"[^.\n]*\bre-entry\b[^.\n]*(?:\.[^.\n]*)?", text, re.I)
-    return {
+    out: dict[str, Any] = {
         "sections": [h for level, h in HEADING.findall(text) if level == "##"],
         "run_mode": mode.group(1) if mode else None,
+        "run_mode_line": _trunc(mode.group(0), 160) if mode else None,
         "re_entry": None
         if edge is None
         else {
@@ -229,13 +269,20 @@ def parse_analysis(text: str) -> dict[str, Any]:
             "criteria": criteria,
             "passes": len([p for p in passes if p]),
             "fix_repeat": len([p for p in passes if p]) > 1,
-            "result": _trunc(result.group(1), 200) if result else None,
+            "result": _trunc(results[-1], 200) if results else None,
+            # from the final bands, so the outcome is known when the result line is missing
+            "cleared": None
+            if not passes[-1]
+            else not ({"Absent", "Hand-wavy"} & set(passes[-1].values())),
         },
+        "contradictions": [],  # filled below, from the gate and the disclosure
         "conclusion": {
             "recommended": _trunc(rec.group(1), 400) if rec else None,
             "confidence": conf.group(1) if conf else None,
         },
     }
+    out["contradictions"] = _contradictions(out)
+    return out
 
 
 # --- one hook event -> one record -----------------------------------------------------------
@@ -519,6 +566,8 @@ def handle(
         end = _when(now) if now else datetime.now(UTC)
         path, text, source, exact = _analysis(run, str(payload.get("cwd") or ""), payload)
         decisions = parse_analysis(text) if text else None
+        if decisions:
+            _add_history(decisions, run)
         audit_env = os.environ.get("AGENT_ROUTER_AUDIT", "").strip()
         audit = _read_jsonl(Path(audit_env) if audit_env else root / "audit" / f"{session}.jsonl")
         rec = {
@@ -722,10 +771,13 @@ def replay_payloads(capture: Path) -> list[tuple[dict[str, Any], str | None]]:
 
 
 def _fix_repeat(decisions: dict[str, Any]) -> str:
-    """Did the gate re-score? A rewritten report can drop the first pass, so also read the
-    agent's re-entry disclosure."""
-    if (decisions.get("gate") or {}).get("fix_repeat"):
+    """Did the gate re-score? A rewritten report can drop the first pass, so also count the
+    passes written during the run, and read the agent's re-entry disclosure."""
+    gate = decisions.get("gate") or {}
+    if gate.get("fix_repeat"):
         return "yes"
+    if (gate.get("passes_written") or 0) > (gate.get("passes") or 0):
+        return "yes (rewritten)"
     edge = decisions.get("re_entry") or {}
     if edge.get("fired") and "fix/repeat" in str(edge.get("disclosure")).lower():
         return "yes (disclosed)"
@@ -776,7 +828,7 @@ def report(trace_dir: Path) -> str:
                 str(len(d.get("dead_ends") or [])),
                 ", ".join(t["technique"] for t in d.get("techniques_not_applied") or []) or "-",
                 "".join(b[0] for b in (gate.get("bands") or {}).values()) or "-",
-                _fix_repeat(d),
+                _fix_repeat(d) + (" (contradicts disclosure)" if d.get("contradictions") else ""),
                 f"{end.get('report_restarts', 0)} / {end.get('report_revisions', 0)}",
                 ", ".join(f"{k} {v}" for k, v in verdicts.items()) or "-",
                 str((d.get("conclusion") or {}).get("confidence")),
