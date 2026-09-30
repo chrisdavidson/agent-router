@@ -937,3 +937,19 @@ def test_trace_records_source_checks_and_the_hosts_that_failed(tmp_path):
         "failed": 1,
         "failed_hosts": {"atb.nrel.gov": 1},
     }
+
+
+@pytest.mark.parametrize(
+    ("call", "own"),
+    [
+        (("Read", {"file_path": "/fp/agents/references/examples/estimate-fermi.md"}), True),
+        (("Bash", {"command": "head -60 /fp/agents/references/examples/estimate-fermi.md"}), True),
+        (("Read", {"file_path": "/fp/agents/references/examples/estimate-fermi-2.md"}), False),
+        (("Read", {"file_path": "/fp/agents/references/examples/product-business.md"}), False),
+    ],
+)
+def test_run_examples_flags_a_run_that_read_its_own_answer_key(call, own):
+    name, inp = call
+    use = {"type": "tool_use", "id": "x", "name": name, "input": inp}
+    events = [{"type": "assistant", "parent_tool_use_id": "ag", "message": {"content": [use]}}]
+    assert _run_examples().read_own_example(events, "estimate-fermi") is own

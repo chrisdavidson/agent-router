@@ -181,6 +181,10 @@ reference (second-order thinking, Phase 2 inversion).
   The status lists what is missing, so a run cut short by a spend limit or a timeout is not
   counted as done.
 
+  A run whose agent opened the worked example it was redoing (its answer key: the examples are
+  listed in the agent's own definition) is marked `†`, and should be left out when comparing
+  the agent's decisions with the examples'. On 2026-09-29, 4 of the 28 runs did this.
+
 ## Known gaps
 
 - A quantitative decision phrased as "From first principles: is it cheaper to…" scored

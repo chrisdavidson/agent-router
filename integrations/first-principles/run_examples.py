@@ -159,6 +159,23 @@ def completeness(events: list[dict], files: list[Path]) -> tuple[str, list[str]]
     return ("partial" if ran else "failed"), problems
 
 
+def read_own_example(events: list[dict], name: str) -> bool:
+    """Whether the agent opened the worked example it was asked to redo: its answer key. The
+    examples are listed in the agent's own definition; 4 of the 28 runs on 2026-09-29 read
+    theirs, so their decisions are not an independent test of the method."""
+    target = f"/references/examples/{name}.md"
+    return any(
+        b.get("type") == "tool_use"
+        and (
+            str((b.get("input") or {}).get("file_path") or "").endswith(target)
+            or target in str((b.get("input") or {}).get("command") or "")
+        )
+        for e in events
+        if e.get("type") == "assistant" and e.get("parent_tool_use_id")
+        for b in (e.get("message") or {}).get("content") or []
+    )
+
+
 def summarize(name: str, workdir: Path, capture: Path, state: Path) -> dict:
     events = []
     for line in capture.read_text(errors="replace").splitlines():
@@ -193,6 +210,7 @@ def summarize(name: str, workdir: Path, capture: Path, state: Path) -> dict:
         "example": name,
         "status": status,
         "problems": problems,
+        "read_own_example": read_own_example(events, name),
         "session": session,
         "delegated": delegated,
         "analysis_files": [str(f) for f in files],
@@ -271,7 +289,8 @@ def write_summary(out: Path, rows: list[dict]) -> None:
     ]
     for r in rows:
         lines.append(
-            f"| {r['example']} | {r['status']} | {'yes' if r['delegated'] else 'NO'} "
+            f"| {r['example']}{' †' if r['read_own_example'] else ''} | {r['status']} "
+            f"| {'yes' if r['delegated'] else 'NO'} "
             f"| {r['analysis_words']} "
             f"| {'yes' if r['delegation_note'] else '-'} | {r['calc_notes']} | {r['calc_calls']} "
             f"| {r['report_writes_skipped']} | {r['cost_usd'] or 0:.2f} | {r['turns']} "
@@ -280,6 +299,13 @@ def write_summary(out: Path, rows: list[dict]) -> None:
     total = sum(r["cost_usd"] or 0 for r in rows)
     done = sum(r["status"] == "complete" for r in rows)
     lines += ["", f"{done}/{len(rows)} examples complete; total cost ${total:.2f}."]
+    keyed = [r["example"] for r in rows if r["read_own_example"]]
+    if keyed:
+        lines.append(
+            f"† {len(keyed)} run(s) read their own worked example (the answer key): "
+            + ", ".join(keyed)
+            + ". Leave them out when comparing the agent's decisions with the examples'."
+        )
     for r in rows:
         if r["problems"]:
             lines.append(f"- {r['example']} ({r['status']}): {'; '.join(r['problems'])}")
