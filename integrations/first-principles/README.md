@@ -48,6 +48,7 @@ cannot run, it prints `{}` and the session carries on unchanged (fail open).
 | `AGENT_ROUTER_DISABLED` | unset | `1` turns every checkpoint off |
 | `AGENT_ROUTER_STATE_DIR` | `$XDG_STATE_HOME/agent-router` | per-session state and audit log |
 | `AGENT_ROUTER_SKIP_INPUT` | `\.first-principles\b` | tool calls matching this are never routed |
+| `AGENT_ROUTER_SKIP_PROMPT` | `^\s*/first-principles:` | prompts matching this get no delegation note: they already launch the agent |
 
 Hook cost: about 0.45 s per routed call (prompt, `Agent`, and `Bash` inside the agent). A
 `Bash` call on the main thread is answered by the shell script in milliseconds, without Python.

@@ -4,6 +4,7 @@ Rules (in order):
 1. disabled, or hook point not enabled                    -> SKIPPED
 2. pending call already targets the catalog (loop guard)  -> SKIPPED
    tool/skill input matches ``config.skip_input``          -> SKIPPED
+   prompt text matches ``config.skip_prompt``              -> SKIPPED
 3. no catalog entry eligible at this point / tool / agent -> SKIPPED
    entries whose fit check (``fits``) says they cannot run the pending call are dropped
    here, before the decider, so a call they cannot do never spends their once-per-turn hint;
@@ -166,6 +167,12 @@ class Router:
                     return Decision(Action.SKIPPED, "skip pattern")
             except re.error:  # a bad pattern disables the skip rule, never the hook
                 log.warning("invalid skip_input pattern %r", cfg.skip_input)
+        if cfg.skip_prompt and event.point == HookPoint.PROMPT:
+            try:
+                if re.search(cfg.skip_prompt, event.text or ""):
+                    return Decision(Action.SKIPPED, "skip pattern")
+            except re.error:
+                log.warning("invalid skip_prompt pattern %r", cfg.skip_prompt)
         # 3. structural eligibility
         eligible = self.catalog.eligible(event.point, tool_name, event.agent_type)
         if not eligible:

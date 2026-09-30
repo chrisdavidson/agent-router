@@ -517,3 +517,22 @@ def test_fit_check_leaves_other_entries_eligible():
     d = router.route(ev(HookPoint.TOOL, tool_name="Bash", tool_input=SCRIPT))
     assert d.entry_id == "other"
     assert list(decider.calls[0][1]) == ["other", NONE_ID]
+
+
+def test_skip_prompt_skips_matching_prompts_only():
+    router, decider, _ = make(result("exact-calc"), skip_prompt=r"^\s*/first-principles:")
+    d = router.route(ev(text="/first-principles:first-principles-analysis is X true?"))
+    assert (d.action, d.reason) == (Action.SKIPPED, "skip pattern")
+    assert decider.calls == []
+    assert router.route(ev(text="is X true, from first principles?")).action == Action.SUGGEST
+
+
+def test_skip_prompt_does_not_apply_to_tool_calls():
+    router, _, _ = make(result("exact-calc"), skip_prompt=".*")
+    d = router.route(ev(HookPoint.TOOL, tool_name="Bash", tool_input={"command": "bc"}))
+    assert d.action == Action.SUGGEST
+
+
+def test_bad_skip_prompt_pattern_never_breaks_routing():
+    router, _, _ = make(result("exact-calc"), skip_prompt="(")
+    assert router.route(ev()).action == Action.SUGGEST

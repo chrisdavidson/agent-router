@@ -26,5 +26,8 @@ export AGENT_ROUTER_MODE=advisory
 # the agent's own report commands (.first-principles/analysis-*.md) are never routed: appends
 # name the file, in-place revisions often `cd` into the directory first, so match the name alone
 export AGENT_ROUTER_SKIP_INPUT="${AGENT_ROUTER_SKIP_INPUT:-\.first-principles\b}"
+# a prompt that already launches first-principles (/first-principles:...) needs no delegation
+# note: in the 28 example runs the note fired on 10 such prompts and could change nothing
+export AGENT_ROUTER_SKIP_PROMPT="${AGENT_ROUTER_SKIP_PROMPT:-^\s*/first-principles:}"
 export HF_HUB_DISABLE_PROGRESS_BARS=1
 printf '%s' "$payload" | exec "$bin" hook

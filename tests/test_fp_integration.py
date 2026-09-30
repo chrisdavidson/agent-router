@@ -880,3 +880,18 @@ def test_run_examples_marks_a_killed_run_failed(tmp_path):
         "the agent did not hand back",
         "no analysis file",
     ]
+
+
+def test_hook_skips_prompts_that_already_launch_first_principles(tmp_path):
+    """The launcher already delegates; a note there can change nothing (10 of 28 runs)."""
+    out = _hook(
+        {
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": "s",
+            "prompt": "/first-principles:first-principles-analysis Is a four-day week better?",
+        },
+        tmp_path,
+    )
+    assert out == {}
+    (rec,) = [json.loads(x) for x in (tmp_path / "audit" / "s.jsonl").read_text().splitlines()]
+    assert (rec["action"], rec["reason"]) == ("skipped", "skip pattern")

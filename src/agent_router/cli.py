@@ -210,10 +210,14 @@ def cmd_eval(args: argparse.Namespace) -> int:
 
     cases = load_cases(args.cases or DEFAULT_EVAL_SET, split=args.split)
     router = _router(args)
-    if args.skip_input:
+    if args.skip_input or args.skip_prompt:
         from dataclasses import replace
 
-        router.config = replace(router.config, skip_input=args.skip_input)
+        router.config = replace(
+            router.config,
+            skip_input=args.skip_input or router.config.skip_input,
+            skip_prompt=args.skip_prompt or router.config.skip_prompt,
+        )
     report = run_eval(lambda: router, cases)
     stats = routing_stats(report)
     stage = getattr(router.decider, "primary", router.decider)
@@ -495,6 +499,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-v", "--verbose", action="store_true", help="list every case")
     p.add_argument(
         "--skip-input", help="skip pattern to apply, as the deployed AGENT_ROUTER_SKIP_INPUT"
+    )
+    p.add_argument(
+        "--skip-prompt", help="prompt skip pattern, as the deployed AGENT_ROUTER_SKIP_PROMPT"
     )
     _add_backend(p)
     _add_catalog(p)
