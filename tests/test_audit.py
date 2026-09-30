@@ -43,6 +43,8 @@ KEYS = {
     "point",
     "tool_name",
     "agent_type",
+    "tool_use_id",
+    "agent_id",
     "state_sha256",
     "text",
     "options",

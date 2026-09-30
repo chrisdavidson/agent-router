@@ -516,6 +516,7 @@ def test_trace_replays_a_capture(tmp_path):
         json.loads(x) for x in (tmp_path / "state" / "trace" / "s.jsonl").read_text().splitlines()
     ]
     assert [r["kind"] for r in recs] == ["run_start", "reference_read", "run_end"]
+    assert recs[1]["tool_use_id"] == "r1"  # joins the record to the router's audit
     assert recs[-1]["duration_s"] == 300.0
     assert recs[-1]["analysis"].endswith("analysis-1.md")  # found in cwd: no append recorded
 

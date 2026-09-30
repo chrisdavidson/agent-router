@@ -477,6 +477,8 @@ def handle(
     }
     if "tool_name" not in rec and payload.get("tool_name"):
         rec["tool_name"] = payload.get("tool_name")
+    if payload.get("tool_use_id"):  # the same id the router's audit record carries
+        rec["tool_use_id"] = payload.get("tool_use_id")
     trace.parent.mkdir(parents=True, exist_ok=True)
     with trace.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec) + "\n")
@@ -582,6 +584,7 @@ def replay_payloads(capture: Path) -> list[tuple[dict[str, Any], str | None]]:
                     p = {
                         **base,
                         "agent_id": c["agent_id"],
+                        "tool_use_id": tid,
                         "tool_name": c["name"],
                         "tool_input": c["input"],
                     }

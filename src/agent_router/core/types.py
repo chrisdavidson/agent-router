@@ -73,6 +73,10 @@ class RouterEvent:
     recent: tuple[str, ...] = ()
     agent_type: str | None = None
     """The subagent making the call (host-reported), or None on the main thread."""
+    tool_use_id: str | None = None
+    """The host's id for the pending call: joins a decision to what the call did."""
+    agent_id: str | None = None
+    """The host's id for the subagent run making the call (None on the main thread)."""
 
 
 @dataclass(frozen=True)

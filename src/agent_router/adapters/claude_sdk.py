@@ -173,6 +173,7 @@ class ClaudeRouterHooks:
                 tool_name=tool_name,
                 tool_input=tool_in,
                 recent=tuple(prior)[:-1],  # the last prompt is already ``text``
+                tool_use_id=tool_use_id,
             )
             return await self._route(event, "PreToolUse")
         except Exception:

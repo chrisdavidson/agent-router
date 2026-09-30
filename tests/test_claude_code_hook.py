@@ -220,3 +220,14 @@ def test_mcp_tool_schemas_keep_their_parameters(tmp_path):
     tools = {t.name: t for t in asyncio.run(build_server(tmp_path).list_tools())}
     assert list(tools["calc"].input_schema["properties"]) == ["expression"]
     assert set(tools["json_query"].input_schema["properties"]) == {"expression", "path", "text"}
+
+
+def test_audit_carries_the_hosts_call_and_run_ids(tmp_path, factory):
+    claude_code.handle(prompt(), factory, tmp_path)
+    call = tool("Bash", {"command": "python3 -c 'print(2**10)'"}, FP)
+    claude_code.handle({**call, "tool_use_id": "toolu_9", "agent_id": "a1"}, factory, tmp_path)
+    first, last = [
+        json.loads(x) for x in (tmp_path / "audit" / "s_1.jsonl").read_text().splitlines()
+    ]
+    assert (first["tool_use_id"], first["agent_id"]) == (None, None)  # the prompt
+    assert (last["tool_use_id"], last["agent_id"]) == ("toolu_9", "a1")

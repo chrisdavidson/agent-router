@@ -81,6 +81,10 @@ def save_state(path: Path, data: dict[str, Any]) -> None:
         log.exception("cannot save hook state %s", path)
 
 
+def _str_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
 def turn_id(payload: dict[str, Any], prompt_count: int) -> int:
     prompt_id = payload.get("prompt_id")
     if isinstance(prompt_id, str) and prompt_id:
@@ -122,6 +126,8 @@ def to_event(payload: dict[str, Any], state: dict[str, Any]) -> RouterEvent | No
         tool_input=tool_input if isinstance(tool_input, dict) else {},
         recent=tuple(prompts[:-1][-MAX_RECENT:]) if main else (),
         agent_type=agent_type,
+        tool_use_id=_str_or_none(payload.get("tool_use_id")),
+        agent_id=_str_or_none(payload.get("agent_id")),
     )
 
 

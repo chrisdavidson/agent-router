@@ -131,6 +131,7 @@ Writes are locked and fail open.
 | `ts` | ISO-8601 UTC | |
 | `session`, `turn` | str, int | the adapter bumps `turn` on each `UserPromptSubmit` |
 | `point`, `tool_name`, `agent_type` | str, str or null, str or null | `prompt` / `tool` / `skill`; `agent_type` is the host-reported subagent (null on the main thread) |
+| `tool_use_id`, `agent_id` | str or null | the host's ids for the pending call and for the subagent run making it; they join a decision to what the call did (the command itself is only hashed, in `state_sha256`) |
 | `state_sha256` | hex | hash of the full decider state (prompt, pending call, recent prompts) |
 | `text` | str | prompt text, first 300 characters |
 | `options` | list[str] | the offered ids, `none` last; empty when a gate stopped the call before the decider |
