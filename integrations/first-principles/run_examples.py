@@ -12,7 +12,8 @@ For each example, in ``<out>/<name>/``:
   run.jsonl          the ``claude -p`` stream-json capture
   prompt.txt         the exact prompt sent
   .first-principles/ the agent's analysis file (the agent writes it into its cwd)
-and ``<out>/summary.md`` / ``summary.json``: delegated?, analysis file and size, calculator
+and ``<out>/summary.md`` / ``summary.json``: status (complete / partial / failed, with what is
+missing), delegated?, analysis file and size, calculator
 notes and calls, cost, turns, duration. ``<out>/state/audit/`` holds every checkpoint;
 ``<out>/decisions.md`` / ``decisions.json`` tabulate them per example.
 Replay them in the demo UI with ``agent-router demo --catalog
@@ -91,6 +92,73 @@ def build_prompt(setup: str, entry: str) -> str:
     return f"{LAUNCHER} {ask}" if entry == "launcher" else ask
 
 
+def _trace_module():
+    """trace.py, next to this script (standard library only): its report parser."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("fp_trace", HERE / "trace.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+REQUIRED_SECTIONS = tuple(range(1, 7))  # the report's ## 1. to ## 6.
+
+
+def completeness(events: list[dict], files: list[Path]) -> tuple[str, list[str]]:
+    """``complete``, ``partial`` (the run ended but its analysis is unfinished) or ``failed``,
+    with what is missing. A run cut short (a spend limit, a timeout) can still exit with a
+    report on disk: in the 2026-09-29 rerun one agent stopped after 9 of its sections."""
+    problems: list[str] = []
+    result = next((e for e in reversed(events) if e.get("type") == "result"), None)
+    if result is None:
+        problems.append("no result (killed or timed out)")
+    elif result.get("is_error"):
+        problems.append("error: " + " ".join(str(result.get("result") or "").split())[:100])
+    calls = {  # the main session's Agent calls to the first-principles agent
+        b.get("id")
+        for e in events
+        if e.get("type") == "assistant" and not e.get("parent_tool_use_id")
+        for b in (e.get("message") or {}).get("content") or []
+        if b.get("type") == "tool_use"
+        and b.get("name") in ("Agent", "Task")
+        and FP_AGENT in json.dumps(b.get("input", {}))
+    }
+    returned = {  # its result, or a backgrounded agent's completion notification
+        b.get("tool_use_id")
+        for e in events
+        if e.get("type") == "user" and not e.get("parent_tool_use_id")
+        for b in (e.get("message") or {}).get("content") or []
+        if isinstance(b, dict)
+        and b.get("type") == "tool_result"
+        and "async_launched" not in json.dumps(b.get("content"), default=str)
+    } | {
+        e.get("tool_use_id")
+        for e in events
+        if e.get("subtype") == "task_notification" and e.get("status") == "completed"
+    }
+    started = bool(calls)
+    handed_back = bool(calls & returned)
+    if started and not handed_back:
+        problems.append("the agent did not hand back")
+    if not files:
+        problems.append("no analysis file")
+    else:
+        text = max((f.read_text(errors="replace") for f in files), key=len)
+        d = _trace_module().parse_analysis(text)
+        have = {int(m) for m in re.findall(r"^## (\d)\.", text, re.M)}
+        missing = [n for n in REQUIRED_SECTIONS if n not in have]
+        if missing:
+            problems.append("analysis missing sections " + ", ".join(map(str, missing)))
+        if not d["gate"]["bands"]:
+            problems.append("no Self-Audit Gate")
+    if not problems:
+        return "complete", []
+    ran = files and not any(p.startswith(("no analysis", "no result")) for p in problems)
+    return ("partial" if ran else "failed"), problems
+
+
 def summarize(name: str, workdir: Path, capture: Path, state: Path) -> dict:
     events = []
     for line in capture.read_text(errors="replace").splitlines():
@@ -120,8 +188,11 @@ def summarize(name: str, workdir: Path, capture: Path, state: Path) -> dict:
     )
     files = sorted((workdir / ".first-principles").glob("analysis-*.md"))
     words = sum(len(f.read_text(errors="replace").split()) for f in files)
+    status, problems = completeness(events, files)
     return {
         "example": name,
+        "status": status,
+        "problems": problems,
         "session": session,
         "delegated": delegated,
         "analysis_files": [str(f) for f in files],
@@ -184,7 +255,8 @@ def run_example(name: str, prompt: str, out: Path, args) -> dict:
     print(
         f"[done]  {name}: delegated={row['delegated']} words={row['analysis_words']} "
         f"calc notes/calls={row['calc_notes']}/{row['calc_calls']} "
-        f"cost=${row['cost_usd'] or 0:.2f} ({time.monotonic() - start:.0f}s)",
+        f"cost=${row['cost_usd'] or 0:.2f} ({time.monotonic() - start:.0f}s) {row['status']}"
+        + (f": {'; '.join(row['problems'])}" if row["problems"] else ""),
         flush=True,
     )
     return row
@@ -193,20 +265,24 @@ def run_example(name: str, prompt: str, out: Path, args) -> dict:
 def write_summary(out: Path, rows: list[dict]) -> None:
     (out / "summary.json").write_text(json.dumps(rows, indent=2))
     lines = [
-        "| example | delegated | analysis words | delegation note | calc notes | calc calls "
-        "| report writes skipped | cost $ | turns | s |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| example | status | delegated | analysis words | delegation note | calc notes "
+        "| calc calls | report writes skipped | cost $ | turns | s |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         lines.append(
-            f"| {r['example']} | {'yes' if r['delegated'] else 'NO'} | {r['analysis_words']} "
+            f"| {r['example']} | {r['status']} | {'yes' if r['delegated'] else 'NO'} "
+            f"| {r['analysis_words']} "
             f"| {'yes' if r['delegation_note'] else '-'} | {r['calc_notes']} | {r['calc_calls']} "
             f"| {r['report_writes_skipped']} | {r['cost_usd'] or 0:.2f} | {r['turns']} "
             f"| {r['duration_s']} |"
         )
     total = sum(r["cost_usd"] or 0 for r in rows)
-    ran = sum(bool(r["analysis_words"]) for r in rows)
-    lines += ["", f"{ran}/{len(rows)} examples produced an analysis file; total cost ${total:.2f}."]
+    done = sum(r["status"] == "complete" for r in rows)
+    lines += ["", f"{done}/{len(rows)} examples complete; total cost ${total:.2f}."]
+    for r in rows:
+        if r["problems"]:
+            lines.append(f"- {r['example']} ({r['status']}): {'; '.join(r['problems'])}")
     (out / "summary.md").write_text("\n".join(lines) + "\n")
     print("\n" + "\n".join(lines))
 

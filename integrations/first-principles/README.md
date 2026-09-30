@@ -170,7 +170,13 @@ reference (second-order thinking, Phase 2 inversion).
   delegated session is stopped at the delegation.
 - **Worked examples:** `.venv/bin/python integrations/first-principles/run_examples.py` runs
   first-principles' 14 worked examples through the agent and writes a per-example summary
-  and a table of every router decision to a local output folder.
+  and a table of every router decision to a local output folder. Each run gets a status:
+  - `complete`
+  - `partial`: it ended, but its report lacks a section 1–6 or the gate
+  - `failed`: no result, or no report
+
+  The status lists what is missing, so a run cut short by a spend limit or a timeout is not
+  counted as done.
 
 ## Known gaps
 

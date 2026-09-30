@@ -829,3 +829,54 @@ def test_trace_counts_gate_passes_a_rewrite_dropped(tmp_path):
     gate = recs[-1]["decisions"]["gate"]
     assert (gate["passes"], gate["passes_written"]) == (1, 2)
     assert _trace()._fix_repeat(recs[-1]["decisions"]) == "yes (rewritten)"
+
+
+def _run_examples():
+    spec = importlib.util.spec_from_file_location("fp_run_examples", INTEG / "run_examples.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _events(*, result=None, returned=True):
+    agent = {"type": "tool_use", "id": "ag", "name": "Agent", "input": {"subagent_type": FP}}
+    out = [{"type": "assistant", "message": {"content": [agent]}}]
+    if returned:
+        done = {"type": "tool_result", "tool_use_id": "ag", "content": "done"}
+        out.append({"type": "user", "message": {"content": [done]}})
+    if result is not None:
+        out.append({"type": "result", **result})
+    return out
+
+
+def _report(tmp_path, text):
+    path = tmp_path / "analysis-1.md"
+    path.write_text(text)
+    return [path]
+
+
+def test_run_examples_marks_a_finished_run_complete(tmp_path):
+    ok = _events(result={"is_error": False, "result": "done"})
+    assert _run_examples().completeness(ok, _report(tmp_path, ANALYSIS)) == ("complete", [])
+
+
+def test_run_examples_marks_a_run_cut_short_partial(tmp_path):
+    """The 2026-09-29 rerun: the spend limit stopped one agent after sections 1-3."""
+    limit = {"is_error": True, "result": "You've hit your monthly spend limit"}
+    head = ANALYSIS[: ANALYSIS.index("## 4.")]
+    status, problems = _run_examples().completeness(_events(result=limit), _report(tmp_path, head))
+    assert status == "partial"
+    assert problems == [
+        "error: You've hit your monthly spend limit",
+        "analysis missing sections 4, 5, 6",  # its gate blocks come first, so they survive
+    ]
+
+
+def test_run_examples_marks_a_killed_run_failed(tmp_path):
+    status, problems = _run_examples().completeness(_events(returned=False), [])
+    assert status == "failed"
+    assert problems == [
+        "no result (killed or timed out)",
+        "the agent did not hand back",
+        "no analysis file",
+    ]
