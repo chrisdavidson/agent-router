@@ -5,7 +5,8 @@
       {"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/hook", "timeout": 15}]}
     ],
     "PreToolUse": [
-      {"matcher": "Agent|Bash", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/hook", "timeout": 15}]}
+      {"matcher": "Agent|Bash", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/hook", "timeout": 15}]},
+      {"matcher": "Agent", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
     ],
     "SubagentStart": [
       {"matcher": "first-principles:first-principles", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
@@ -14,7 +15,7 @@
       {"matcher": "first-principles:first-principles", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
     ],
     "PostToolUse": [
-      {"matcher": "Bash|Read|mcp__plugin_agent-router-fp_agent_router__calc", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
+      {"matcher": "Bash|Read|ToolSearch|mcp__plugin_agent-router-fp_agent_router__calc", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
     ],
     "PostToolUseFailure": [
       {"matcher": "Bash|Read|WebFetch|WebSearch|mcp__plugin_agent-router-fp_agent_router__calc", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}

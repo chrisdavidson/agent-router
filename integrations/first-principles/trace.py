@@ -48,7 +48,10 @@ HEADING = re.compile(r"^(#{1,3}) (.+)$", re.M)
 RESTART = re.compile(r"""(?:^|[;&\n])\s*:\s*>\s*["']?[$\w./]""")  # `: > "$F"` empties the report
 REVISE = re.compile(r"\bsed -i|\bperl -\w*i|\.write\(|write_text\(|open\([^)]*['\"][wa]")
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n\2[ \t]*$", re.S | re.M)
-MATH = re.compile(r"\bpython3?\b|\bbc\b|\bawk\b|\bnode -e\b|\bexpr\b|\bdc\b")
+# a shell call that runs an interpreter or calculator (python, bc, awk, ...). It says nothing
+# about whether the exact calculator could run it: the router's fit check decides that, and the
+# run's routing block reads it from the audit (``interpreter_calls_calc_could_run``).
+INTERPRETER = re.compile(r"\bpython3?\b|\bbc\b|\bawk\b|\bnode -e\b|\bexpr\b|\bdc\b")
 
 # What reading each reference file tells us (agent definition, first-principles 9.13.0).
 REFERENCES = {
@@ -294,7 +297,14 @@ def _tool_record(payload: dict[str, Any]) -> dict[str, Any] | None:
                 "path": path.group(0) if path else None,
                 "command": _trunc(cmd, 160),
             }
-        return {"kind": "shell", "math": bool(MATH.search(cmd)), "command": _trunc(cmd, 200)}
+        return {
+            "kind": "shell",
+            "interpreter": bool(INTERPRETER.search(cmd)),
+            "command": _trunc(cmd, 200),
+        }
+    if tool == "ToolSearch":  # the agent loads deferred tools, the calculator among them
+        query = str(inp.get("query") or "")
+        return {"kind": "tool_loaded", "query": _trunc(query, 200), "calc": CALC_TOOL in query}
     return None
 
 
@@ -361,13 +371,24 @@ def _analysis(
     return path, None, None, False
 
 
+def _interpreter(rec: dict[str, Any]) -> bool:
+    return bool(rec.get("interpreter", rec.get("math")))  # traces before 2026-09-30: ``math``
+
+
 def _routing(
     audit: list[dict[str, Any]],
     run: list[dict[str, Any]],
+    delegation: dict[str, Any] | None,
     start: datetime | None,
     end: datetime | None,
 ) -> dict[str, Any]:
-    """The router's decisions that belong to this run, from its audit log."""
+    """The router's decisions that belong to this run, from its audit log.
+
+    A note is credited only with what follows it: calculator calls before and after the first
+    note, whether the agent had already loaded the calculator, and whether the delegating
+    prompt itself told the agent to use it. A call that drew a note is found by its
+    ``tool_use_id`` in the trace; the audit keeps only a hash of the command.
+    """
 
     def inside(rec: dict[str, Any]) -> bool:
         t = _when(rec.get("ts"))
@@ -379,21 +400,28 @@ def _routing(
         if r.get("point") == "prompt" and (start is None or (_when(r.get("ts")) or start) <= start)
     ]
     prompt = before[-1] if before else None
+    in_agent = [r for r in audit if inside(r) and r.get("agent_type") == AGENT]
     notes = [
-        r
-        for r in audit
-        if inside(r)
-        and r.get("agent_type") == AGENT
-        and r.get("action") == "suggest"
-        and r.get("entry_id") == "exact-calc"
+        r for r in in_agent if r.get("action") == "suggest" and r.get("entry_id") == "exact-calc"
     ]
     first = _when(notes[0]["ts"]) if notes else None
     calcs = [r for r in run if r.get("kind") == "calc" or r.get("was") == "calc"]
-    maths = [r for r in run if r.get("kind") == "shell" and r.get("math")]
+    shells = [r for r in run if r.get("kind") == "shell" and _interpreter(r)]
+    loads = [r for r in run if r.get("kind") == "tool_loaded" and r.get("calc")]
+    loaded = _when(loads[0]["ts"]) if loads else None
+    by_call = {r["tool_use_id"]: r for r in run if r.get("tool_use_id")}
 
-    def after(recs: list[dict[str, Any]]) -> int:
-        return sum(1 for r in recs if first and (_when(r.get("ts")) or first) >= first)
+    def count(recs: list[dict[str, Any]], after: bool) -> int:
+        assert first is not None
+        return sum(1 for r in recs if ((_when(r.get("ts")) or first) >= first) == after)
 
+    # the router offered exact-calc to its decider only for a call the calculator can run
+    judged = {r.get("tool_use_id"): r for r in in_agent if r.get("tool_use_id")}
+    could_run = [
+        "exact-calc" in (judged[r["tool_use_id"]].get("options") or [])
+        for r in shells
+        if r.get("tool_use_id") in judged
+    ]
     return {
         "delegation": None
         if prompt is None
@@ -403,13 +431,49 @@ def _routing(
             "p": (prompt.get("probabilities") or {}).get("first-principles-agent"),
             "applied_threshold": prompt.get("applied_threshold"),
         },
+        "delegation_prompt_names_calc": None
+        if delegation is None
+        else delegation.get("prompt_names_calc"),
+        "calc_loaded_at": loads[0]["ts"] if loads else None,
+        "calc_loaded_before_first_note": (loaded is not None and loaded <= first)
+        if first
+        else None,
         "calc_notes": len(notes),
+        "note_calls": [
+            {
+                "ts": r.get("ts"),
+                "tool_use_id": r.get("tool_use_id"),
+                "command": (by_call.get(r.get("tool_use_id")) or {}).get("command"),
+            }
+            for r in notes
+        ],
         "calc_calls": len(calcs),
         "calc_failures": sum(1 for r in calcs if r.get("kind") == "tool_failed"),
-        "shell_math_calls": len(maths),
-        "calc_calls_after_note": after(calcs) if notes else None,
-        "shell_math_after_note": after(maths) if notes else None,
-        "calc_note_followed": (after(calcs) > 0) if notes else None,
+        "calc_calls_before_note": count(calcs, after=False) if first else None,
+        "calc_calls_after_note": count(calcs, after=True) if first else None,
+        "interpreter_calls": len(shells),
+        "interpreter_calls_calc_could_run": sum(could_run)
+        if len(could_run) == len(shells)
+        else None,
+    }
+
+
+def _delegation(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """The main session's Agent call that starts a first-principles run: whether its prompt
+    already tells the agent to use the calculator (it does in half the example runs, which
+    would otherwise be credited to the router's note)."""
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if payload.get("agent_type") or payload.get("tool_name") not in ("Agent", "Task"):
+        return None
+    if inp.get("subagent_type") != AGENT:
+        return None
+    prompt = str(inp.get("prompt") or "")
+    return {
+        "kind": "delegation",
+        "prompt_chars": len(prompt),
+        "prompt_names_calc": bool(
+            re.search(r"\bcalc(?:ulator)?\b|" + re.escape(CALC_TOOL), prompt, re.I)
+        ),
     }
 
 
@@ -417,14 +481,17 @@ def handle(
     payload: dict[str, Any], root: Path | None = None, now: str | None = None
 ) -> dict[str, Any] | None:
     """Append the record for one hook payload; returns it (None when nothing is recorded)."""
-    if payload.get("agent_type") != AGENT:
+    event = str(payload.get("hook_event_name") or "")
+    delegation = _delegation(payload) if event == "PreToolUse" else None
+    if payload.get("agent_type") != AGENT and delegation is None:
         return None
     root = root if root is not None else state_root()
     session = _safe(str(payload.get("session_id") or ""))
     trace = root / "trace" / f"{session}.jsonl"
-    event = str(payload.get("hook_event_name") or "")
     rec: dict[str, Any] | None
-    if event == "SubagentStart":
+    if delegation is not None:
+        rec = delegation
+    elif event == "SubagentStart":
         rec = {"kind": "run_start"}
     elif event == "PostToolUse":
         rec = _tool_record(payload)
@@ -440,8 +507,15 @@ def handle(
         rec.pop("result", None)
     elif event == "SubagentStop":
         agent_id = payload.get("agent_id")
-        run = [r for r in _read_jsonl(trace) if r.get("agent_id") == agent_id]
+        recs = _read_jsonl(trace)
+        run = [r for r in recs if r.get("agent_id") == agent_id]
         start = next((_when(r["ts"]) for r in run if r.get("kind") == "run_start"), None)
+        handoffs = [
+            r
+            for r in recs
+            if r.get("kind") == "delegation"
+            and (start is None or (_when(r.get("ts")) or start) <= start)
+        ]
         end = _when(now) if now else datetime.now(UTC)
         path, text, source, exact = _analysis(run, str(payload.get("cwd") or ""), payload)
         decisions = parse_analysis(text) if text else None
@@ -463,7 +537,7 @@ def handle(
             "references_read": [r["file"] for r in run if r.get("kind") == "reference_read"],
             "tool_failures": sum(1 for r in run if r.get("kind") == "tool_failed"),
             "decisions": decisions,
-            "routing": _routing(audit, run, start, end),
+            "routing": _routing(audit, run, handoffs[-1] if handoffs else None, start, end),
         }
     else:
         return None
@@ -557,6 +631,19 @@ def replay_payloads(capture: Path) -> list[tuple[dict[str, Any], str | None]]:
                     and AGENT in json.dumps(b.get("input", {}))
                 ):
                     agents[b["id"]] = f"replay-{len(agents) + 1}"
+                    main = {k: v for k, v in base.items() if k != "agent_type"}
+                    out.append(
+                        (
+                            {
+                                **main,
+                                "hook_event_name": "PreToolUse",
+                                "tool_name": b["name"],
+                                "tool_use_id": b["id"],
+                                "tool_input": b.get("input", {}),
+                            },
+                            ts,
+                        )
+                    )
                     out.append(
                         (
                             {
@@ -645,11 +732,24 @@ def _fix_repeat(decisions: dict[str, Any]) -> str:
     return "no"
 
 
+def _calc_cell(rt: dict[str, Any]) -> str:
+    """Calculator notes and calls; for a note, the calls before / after it and whether the agent
+    had loaded the calculator before it (``calc_note_followed`` in traces before 2026-09-30)."""
+    cell = f"{rt.get('calc_notes')} / {rt.get('calc_calls')}"
+    if rt.get("calc_calls_before_note") is not None:
+        cell += f" ({rt['calc_calls_before_note']} / {rt['calc_calls_after_note']})"
+        cell += f" / {'yes' if rt.get('calc_loaded_before_first_note') else 'no'}"
+    elif rt.get("calc_note_followed") is not None:
+        cell += f" / followed {rt['calc_note_followed']}"
+    return cell
+
+
 def report(trace_dir: Path) -> str:
     """One Markdown row per finished run in ``trace_dir``: what the agent decided."""
     lines = [
         "| session | run | s | sections | references read | delegation | calc notes / calls "
-        "/ followed | GT (unverified) | chains (confidence) | dead ends | not applied "
+        "(before / after note) / loaded first | GT (unverified) | chains (confidence) "
+        "| dead ends | not applied "
         "| gate | Fix/Repeat | report restarts / revisions | assumptions | confidence |",
         "|---" * 16 + "|",
     ]
@@ -669,8 +769,7 @@ def report(trace_dir: Path) -> str:
                 str(end.get("sections_written")),
                 ", ".join(f.removesuffix(".md") for f in end.get("references_read") or []),
                 "note" if deleg == "suggest" else deleg,
-                f"{rt.get('calc_notes')} / {rt.get('calc_calls')} / "
-                f"{'-' if rt.get('calc_note_followed') is None else rt['calc_note_followed']}",
+                _calc_cell(rt),
                 f"{(d.get('ground_truths') or {}).get('count')} "
                 f"({len((d.get('ground_truths') or {}).get('unverified') or [])})",
                 f"{len(chains)} (" + ", ".join(f"{k} {v}" for k, v in conf.items()) + ")",

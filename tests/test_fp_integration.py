@@ -295,16 +295,46 @@ def test_trace_records_a_run_and_links_the_routers_decisions(tmp_path):
             "probabilities": {"first-principles-agent": 0.8},
         },
         {
+            "ts": "2026-09-29T10:01:15+00:00",
+            "point": "tool",
+            "agent_type": FP,
+            "tool_use_id": "t-script",
+            "action": "skipped",
+            "reason": "does not fit: exact-calc",
+            "options": [],
+        },
+        {
             "ts": "2026-09-29T10:02:00+00:00",
             "point": "tool",
             "agent_type": FP,
+            "tool_use_id": "t-note",
             "action": "suggest",
             "entry_id": "exact-calc",
+            "options": ["exact-calc", "none"],
         },
     )
     base = {"session_id": "s", "agent_type": FP, "agent_id": "a1", "cwd": str(work)}
+    handoff = {
+        "session_id": "s",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Agent",
+        "tool_input": {
+            "subagent_type": FP,
+            "prompt": "Recompute every figure with the calculator.",
+        },
+    }
+    tr.handle(handoff, state, now="2026-09-29T10:00:30Z")
     steps = [
         ("2026-09-29T10:01:00Z", {"hook_event_name": "SubagentStart"}),
+        (
+            "2026-09-29T10:01:05Z",
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "ToolSearch",
+                "tool_input": {"query": f"select:{tr.CALC_TOOL}"},
+                "tool_response": "loaded",
+            },
+        ),
         (
             "2026-09-29T10:01:10Z",
             {
@@ -318,8 +348,19 @@ def test_trace_records_a_run_and_links_the_routers_decisions(tmp_path):
             {
                 "hook_event_name": "PostToolUse",
                 "tool_name": "Bash",
-                "tool_input": {"command": "python3 -c 'print(1/3)'"},
+                "tool_use_id": "t-script",
+                "tool_input": {"command": "python3 -c 'x=3\nprint(1/x)'"},
                 "tool_response": {"stdout": "0.333"},
+            },
+        ),
+        (
+            "2026-09-29T10:02:05Z",
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Bash",
+                "tool_use_id": "t-note",
+                "tool_input": {"command": "python3 -c 'print(2/3)'"},
+                "tool_response": {"stdout": "0.667"},
             },
         ),
         (
@@ -374,8 +415,11 @@ def test_trace_records_a_run_and_links_the_routers_decisions(tmp_path):
         tr.handle({**base, **extra}, state, now=ts)
     recs = [json.loads(x) for x in (state / "trace" / "s.jsonl").read_text().splitlines()]
     assert [r["kind"] for r in recs] == [
+        "delegation",
         "run_start",
+        "tool_loaded",
         "reference_read",
+        "shell",
         "shell",
         "calc",
         "tool_failed",
@@ -383,8 +427,11 @@ def test_trace_records_a_run_and_links_the_routers_decisions(tmp_path):
         "report_op",
         "run_end",
     ]
-    assert recs[1]["meaning"] == "adversarial pass on a plan (Phase 5)"
-    assert recs[2]["math"] is True
+    recs = recs[2:]  # the handoff and run_start, checked below
+    assert recs[0]["calc"] is True
+    recs = recs[1:]
+    assert recs[0]["meaning"] == "adversarial pass on a plan (Phase 5)"
+    assert recs[1]["interpreter"] is True and recs[1]["tool_use_id"] == "t-script"
     assert recs[3] == {**recs[3], "expression": "1/3", "result": "1/3"}
     assert recs[4]["was"] == "calc" and recs[4]["expression"] == "1/0"
     assert recs[5]["headings"] == ["6. Conclusion", "Conclusion C1: x"]
@@ -403,13 +450,23 @@ def test_trace_records_a_run_and_links_the_routers_decisions(tmp_path):
             "p": 0.8,
             "applied_threshold": 0.55,
         },
+        "delegation_prompt_names_calc": True,
+        "calc_loaded_at": "2026-09-29T10:01:05Z",
+        "calc_loaded_before_first_note": True,
         "calc_notes": 1,
+        "note_calls": [
+            {
+                "ts": "2026-09-29T10:02:00+00:00",
+                "tool_use_id": "t-note",
+                "command": "python3 -c 'print(2/3)'",
+            }
+        ],
         "calc_calls": 2,
         "calc_failures": 1,
-        "shell_math_calls": 1,
+        "calc_calls_before_note": 0,
         "calc_calls_after_note": 2,
-        "shell_math_after_note": 0,
-        "calc_note_followed": True,
+        "interpreter_calls": 2,
+        "interpreter_calls_calc_could_run": 1,
     }
 
 
@@ -515,8 +572,10 @@ def test_trace_replays_a_capture(tmp_path):
     recs = [
         json.loads(x) for x in (tmp_path / "state" / "trace" / "s.jsonl").read_text().splitlines()
     ]
-    assert [r["kind"] for r in recs] == ["run_start", "reference_read", "run_end"]
-    assert recs[1]["tool_use_id"] == "r1"  # joins the record to the router's audit
+    assert [r["kind"] for r in recs] == ["delegation", "run_start", "reference_read", "run_end"]
+    assert recs[0]["prompt_names_calc"] is False
+    assert recs[2]["tool_use_id"] == "r1"  # joins the record to the router's audit
+    recs = recs[1:]
     assert recs[-1]["duration_s"] == 300.0
     assert recs[-1]["analysis"].endswith("analysis-1.md")  # found in cwd: no append recorded
 
@@ -684,3 +743,32 @@ def test_trace_replay_prefers_the_main_sessions_full_read_of_the_report(tmp_path
     end = recs[-1]
     assert end["analysis_source"] == "capture" and end["analysis_exact"] is True
     assert end["decisions"] == _trace().parse_analysis(ANALYSIS)
+
+
+@pytest.mark.parametrize(
+    ("prompt", "names"),
+    [
+        ("Recompute every figure with the calculator.", True),
+        ("recompute it (use the calc tool if available)", True),
+        ("use mcp__plugin_agent-router-fp_agent_router__calc", True),
+        ("Recalculate the totals from first principles.", False),
+        ("Analyse this from first principles.", False),
+    ],
+)
+def test_trace_records_whether_the_handoff_names_the_calculator(tmp_path, prompt, names):
+    rec = _trace().handle(
+        {
+            "session_id": "s",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Agent",
+            "tool_input": {"subagent_type": FP, "prompt": prompt},
+        },
+        tmp_path,
+    )
+    assert rec["kind"] == "delegation" and rec["prompt_names_calc"] is names
+
+
+def test_trace_ignores_a_handoff_to_another_agent(tmp_path):
+    call = {"subagent_type": "general-purpose", "prompt": "use the calculator"}
+    payload = {"session_id": "s", "hook_event_name": "PreToolUse", "tool_name": "Agent"}
+    assert _trace().handle({**payload, "tool_input": call}, tmp_path) is None

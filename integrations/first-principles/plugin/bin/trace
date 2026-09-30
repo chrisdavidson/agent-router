@@ -7,8 +7,11 @@ repo="$(dirname "$(dirname "$integ")")"
 py="${AGENT_ROUTER_PYTHON:-$repo/.venv/bin/python}"
 payload="$(cat)"
 # Fast path: only the first-principles agent is traced; everything else answers at once.
+# The main session's Agent call that starts a run is traced too (its prompt, before the run).
 agent_re='"agent_type"[[:space:]]*:[[:space:]]*"first-principles:first-principles"'
-if [ -n "$AGENT_ROUTER_DISABLED" ] || [ ! -x "$py" ] || ! [[ $payload =~ $agent_re ]]; then
+handoff_re='"subagent_type"[[:space:]]*:[[:space:]]*"first-principles:first-principles"'
+if [ -n "$AGENT_ROUTER_DISABLED" ] || [ ! -x "$py" ] \
+  || ! [[ $payload =~ $agent_re || $payload =~ $handoff_re ]]; then
   echo '{}'
   exit 0
 fi

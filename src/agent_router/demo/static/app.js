@@ -698,9 +698,11 @@ async function loadTrace(session) {
   const data = await api(`/api/trace/${encodeURIComponent(session)}`);
   trace.data = data;
   const byRun = new Map();
+  let handoff = []; // the main session's Agent call(s) that start the next run
   for (const r of data.records) {
+    if (r.kind === "delegation" && !r.agent_id) { handoff.push(r); continue; }
     const key = r.agent_id || "run";
-    if (!byRun.has(key)) byRun.set(key, []);
+    if (!byRun.has(key)) { byRun.set(key, handoff); handoff = []; }
     byRun.get(key).push(r);
   }
   trace.runs = [...byRun.entries()].map(([id, recs]) => ({
@@ -745,6 +747,23 @@ function showRun(i) {
   renderDecisions(run);
 }
 
+/** Calculator notes and calls, with what came before the note so it is not credited for it. */
+function calcSummary(rt) {
+  const plural = (n, w) => `${n ?? 0} ${w}${n === 1 ? "" : "s"}`;
+  const parts = [plural(rt.calc_notes, "note"), plural(rt.calc_calls, "call")];
+  if (rt.calc_calls_before_note != null) {
+    parts.push(`${rt.calc_calls_before_note} before the note, ${rt.calc_calls_after_note} after`);
+    if (rt.calc_loaded_before_first_note) parts.push("already loaded before the note");
+  } else if (rt.calc_note_followed != null) {
+    parts.push(rt.calc_note_followed ? "note followed" : "note not followed"); // older traces
+  }
+  if (rt.delegation_prompt_names_calc) parts.push("the delegating prompt named it");
+  if (rt.interpreter_calls_calc_could_run != null) {
+    parts.push(`${rt.interpreter_calls_calc_could_run} of ${plural(rt.interpreter_calls, "interpreter call")} it could run`);
+  }
+  return parts.join(", ");
+}
+
 function renderTraceSummary(run) {
   const box = $("#trace-summary");
   const end = run.end || {};
@@ -758,7 +777,6 @@ function renderTraceSummary(run) {
   const deleg = rt.delegation || null;
   const delegText = !deleg ? "–" : deleg.action === "suggest"
     ? `note sent (${vsThreshold(deleg.p, deleg.applied_threshold)})` : `no note (p ${deleg.p == null ? "–" : pct(deleg.p)})`;
-  const followed = rt.calc_note_followed;
   const gate = d.gate || {};
   const bands = Object.entries(gate.bands || {});
   const criteria = gate.criteria || {};
@@ -773,7 +791,7 @@ function renderTraceSummary(run) {
     ["References opened", el("span", { class: "chips" }, ...(end.references_read || run.recs.filter((r) => r.kind === "reference_read").map((r) => r.file))
       .map((f) => chip(f.replace(/\.md$/, ""), "native")))],
     ["Delegation", delegText],
-    ["Calculator", `${rt.calc_notes ?? 0} note${rt.calc_notes === 1 ? "" : "s"}, ${rt.calc_calls ?? 0} call${rt.calc_calls === 1 ? "" : "s"}${followed == null ? "" : followed ? ", note followed" : ", note not followed"}`],
+    ["Calculator", calcSummary(rt)],
     ["Self-Audit Gate", bands.length ? el("span", { class: "chips" }, ...bands.map(([n, b]) =>
       chip(`${n} ${b}`, BAND_TONE[b], criteria[n] ? `Criterion ${n}: ${criteria[n]}` : `Criterion ${n}`))) : "–"],
     ["Fix/Repeat", run.end ? fixRepeat(d) : "–"],
@@ -793,6 +811,9 @@ function renderTraceSummary(run) {
     : null;
   box.replaceChildren(head, grid, foot, links);
 }
+
+/** A shell call that runs an interpreter (``math`` in traces before 2026-09-30). */
+const interp = (rec) => Boolean(rec.interpreter ?? rec.math);
 
 function traceItem(rec, t0) {
   const at = t0 == null || rec.kind === "run_end" ? "" : ` +${clock((when(rec.ts) - t0) / 1000)}`;
@@ -824,8 +845,16 @@ function traceItem(rec, t0) {
       body = el("code", { text: `${rec.expression} = ${calcResult(rec.result)}` });
       break;
     case "shell":
-      meta = kind(rec.math ? "Computes in the shell" : "Shell command", rec.math ? "math" : "");
+      meta = kind(interp(rec) ? "Runs an interpreter" : "Shell command", interp(rec) ? "math" : "");
       body = el("details", {}, el("summary", { text: oneLine(rec.command) }), el("pre", { text: rec.command }));
+      break;
+    case "delegation":
+      meta = kind("Main session delegates", "prompt");
+      body = el("span", { text: `prompt of ${rec.prompt_chars} characters${rec.prompt_names_calc ? ", tells the agent to use the calculator" : ""}` });
+      break;
+    case "tool_loaded":
+      meta = kind("Loads tools", rec.calc ? "calc" : "");
+      body = el("code", { text: rec.query });
       break;
     case "tool_failed":
       meta = kind(`${rec.tool_name ? rec.tool_name.replace(/^mcp__.*__/, "") : "Call"} failed`, "err");
@@ -866,7 +895,7 @@ function groupItem(recs, t0) {
 
 function renderTraceTimeline(run) {
   const t0 = run.start ? when(run.start.ts) : null;
-  const foldable = (r) => r.kind === "calc" || (r.kind === "shell" && !r.math);
+  const foldable = (r) => r.kind === "calc" || (r.kind === "shell" && !interp(r));
   const items = [];
   for (const r of run.recs) {
     const last = items[items.length - 1];

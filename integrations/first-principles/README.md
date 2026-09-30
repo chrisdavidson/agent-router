@@ -54,25 +54,42 @@ Hook cost: about 0.45 s per routed call (prompt, `Agent`, and `Bash` inside the 
 Notes are once per turn per entry, so an analysis gets at most one calculator note.
 
 Every checkpoint is logged to `<state dir>/audit/<session>.jsonl` (same format as the rest of
-agent-router, plus `agent_type`).
+agent-router, plus `agent_type`, `agent_id` and `tool_use_id`).
 
 ## Decision trace
 
-`bin/trace` runs on `SubagentStart` / `SubagentStop` for `first-principles:first-principles` and
-on `PostToolUse` / `PostToolUseFailure` for `Bash`, `Read` and the calculator. Anything outside
+`bin/trace` runs on `SubagentStart` / `SubagentStop` for `first-principles:first-principles`,
+on `PostToolUse` / `PostToolUseFailure` for `Bash`, `Read`, `ToolSearch` and the calculator, and on
+the main session's `Agent` call that starts a run. Anything outside
 the agent is answered by the shell script in about 5 ms; a traced call takes about 35 ms
 (`trace.py` is standard library only), about 1 s over a whole analysis. Each run appends to
 `<state dir>/trace/<session>.jsonl`:
 
 | Record | When | What |
 |---|---|---|
+| `delegation` | the main session calls the agent | the prompt's length and `prompt_names_calc`: whether it already tells the agent to use the calculator |
 | `run_start` | the agent starts | `agent_id` |
 | `reference_read` | it reads a first-principles reference | the file and what reading it means, e.g. `trade-off.md` = two or more options survived (Phase 4), `pre-mortem.md` / `inversion.md` = Phase 5 on a plan / a claim, `validation-rubric.md` = gate scoring starts |
 | `section_written` | a `cat >> .first-principles/analysis-*.md` append | the headings and the `text` appended; `revises` / `restarts` when the same command edits earlier text or empties the file first |
 | `report_op` | any other report command | `op`: `create`, `revise` (rewrites part in place) or `check` |
-| `calc` / `shell` | a calculator or other Bash call | the expression and result; `math` when a shell call computes |
+| `calc` / `shell` | a calculator or other Bash call | the expression and result; `interpreter` when a shell call runs python, bc, awk and the like (whether the calculator could run it is the router's fit check, below) |
+| `tool_loaded` | the agent loads deferred tools (`ToolSearch`) | the query; `calc` when it loads the calculator |
 | `tool_failed` | a call fails | tool, what it was, the error (e.g. a source that could not be fetched) |
-| `run_end` | the agent stops | duration, final message, report revisions and restarts, the finished report (`analysis_text`, `analysis_sha256`) parsed into `decisions`, and `routing`: the delegation decision before the run, calculator notes during it, calculator calls after the first note, `calc_note_followed` |
+| `run_end` | the agent stops | duration, final message, report revisions and restarts, the finished report (`analysis_text`, `analysis_sha256`) parsed into `decisions`, and `routing` (below) |
+
+`routing` joins the run to the router's audit log, by `tool_use_id` where the audit has it. It
+holds:
+- the delegation decision before the run, and `delegation_prompt_names_calc`
+- the calculator notes and the call that drew each one (`note_calls`)
+- calculator calls before and after the first note, and whether the agent had loaded the
+  calculator before it (`calc_loaded_before_first_note`)
+- `interpreter_calls` and `interpreter_calls_calc_could_run`, the calls the router's fit check
+  passed
+
+A note is credited only with what changed after it. The earlier `calc_note_followed`
+(any calculator call after the note) credited notes for use that had already started. In the
+rerun, 8 of 10 notes arrived after the agent had loaded the calculator, and 13 of the 28
+example prompts had already told the agent to use it.
 
 `decisions` holds: the sections, the run mode if stated, every assumption with its type and
 verdict, the ground truths and which are `?` (not read at source), each chain with its
