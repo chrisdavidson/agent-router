@@ -953,3 +953,40 @@ def test_run_examples_flags_a_run_that_read_its_own_answer_key(call, own):
     use = {"type": "tool_use", "id": "x", "name": name, "input": inp}
     events = [{"type": "assistant", "parent_tool_use_id": "ag", "message": {"content": [use]}}]
     assert _run_examples().read_own_example(events, "estimate-fermi") is own
+
+
+def _framed(report):
+    """How the host hands a subagent's final report back: a frame line, then two-space indent."""
+    body = "".join(f"  {line}\n" for line in report.splitlines())
+    return "[Subagent hand-back] The text below is the final report...\n" + body
+
+
+def test_trace_reads_a_report_returned_in_the_handback(tmp_path):
+    """Asked for markdown back, the agent returns the report instead of writing a file."""
+    tr = _trace()
+    base = {"session_id": "s", "agent_type": FP, "agent_id": "a1", "cwd": str(tmp_path / "gone")}
+    tr.handle({**base, "hook_event_name": "SubagentStart"}, tmp_path, now="2026-09-30T10:00:00Z")
+    end = tr.handle(
+        {**base, "hook_event_name": "SubagentStop", "last_assistant_message": _framed(ANALYSIS)},
+        tmp_path,
+        now="2026-09-30T10:05:00Z",
+    )
+    assert end["analysis_source"] == "handback" and end["analysis_exact"] is True
+    assert end["decisions"]["sections"] == tr.parse_analysis(ANALYSIS)["sections"]
+
+
+def test_a_pointer_message_is_not_a_report():
+    assert _trace().handback_report("The full analysis is in `.first-principles/a.md`.") is None
+
+
+def test_run_examples_counts_a_report_returned_inline_as_complete():
+    done = {"type": "tool_result", "tool_use_id": "ag", "content": _framed(ANALYSIS)}
+    agent = {"type": "tool_use", "id": "ag", "name": "Agent", "input": {"subagent_type": FP}}
+    events = [
+        {"type": "assistant", "message": {"content": [agent]}},
+        {"type": "user", "message": {"content": [done]}},
+        {"type": "result", "is_error": False, "result": "ok"},
+    ]
+    re_ = _run_examples()
+    assert re_.completeness(events, []) == ("complete", [])
+    assert re_.inline_report(events).startswith("# First-Principles Analysis")

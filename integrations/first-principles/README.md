@@ -130,6 +130,8 @@ The trace keeps the report itself, so it still reads after the analysis file is 
 `analysis_source` says where `decisions` came from:
 - `file`: the report on disk.
 - `capture`: a replay found the main session's full read of it.
+- `handback`: the agent returned the report in its final message instead of writing a file. It
+  does this when the delegating prompt asks for markdown back, as one nudge-mode run did.
 - `appends`: rebuilt from the `section_written` texts. This is exact only when nothing was revised in
   place (`analysis_exact`).
 

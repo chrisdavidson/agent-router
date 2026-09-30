@@ -106,6 +106,23 @@ def _trace_module():
 REQUIRED_SECTIONS = tuple(range(1, 7))  # the report's ## 1. to ## 6.
 
 
+def inline_report(events: list[dict]) -> str | None:
+    """The analysis the agent returned in its hand-back instead of a file (it does when the
+    delegating prompt asks for markdown back, as the main session did in a nudge-mode run)."""
+    for e in events:
+        if e.get("type") != "user" or e.get("parent_tool_use_id"):
+            continue
+        for b in (e.get("message") or {}).get("content") or []:
+            if isinstance(b, dict) and b.get("type") == "tool_result":
+                body = b.get("content")
+                if isinstance(body, list):
+                    body = "".join(x.get("text", "") for x in body if isinstance(x, dict))
+                report = _trace_module().handback_report(str(body or ""))
+                if report:
+                    return report
+    return None
+
+
 def completeness(events: list[dict], files: list[Path]) -> tuple[str, list[str]]:
     """``complete``, ``partial`` (the run ended but its analysis is unfinished) or ``failed``,
     with what is missing. A run cut short (a spend limit, a timeout) can still exit with a
@@ -142,10 +159,12 @@ def completeness(events: list[dict], files: list[Path]) -> tuple[str, list[str]]
     handed_back = bool(calls & returned)
     if started and not handed_back:
         problems.append("the agent did not hand back")
-    if not files:
+    inline = inline_report(events)
+    if not files and not inline:
         problems.append("no analysis file")
     else:
-        text = max((f.read_text(errors="replace") for f in files), key=len)
+        texts = [f.read_text(errors="replace") for f in files] or [inline or ""]
+        text = max(texts, key=len)
         d = _trace_module().parse_analysis(text)
         have = {int(m) for m in re.findall(r"^## (\d)\.", text, re.M)}
         missing = [n for n in REQUIRED_SECTIONS if n not in have]
@@ -205,12 +224,16 @@ def summarize(name: str, workdir: Path, capture: Path, state: Path) -> dict:
     )
     files = sorted((workdir / ".first-principles").glob("analysis-*.md"))
     words = sum(len(f.read_text(errors="replace").split()) for f in files)
+    inline = None if files else inline_report(events)
+    if inline:
+        words = len(inline.split())
     status, problems = completeness(events, files)
     return {
         "example": name,
         "status": status,
         "problems": problems,
         "read_own_example": read_own_example(events, name),
+        "analysis_inline": bool(inline),  # returned in the hand-back, not written to a file
         "session": session,
         "delegated": delegated,
         "analysis_files": [str(f) for f in files],

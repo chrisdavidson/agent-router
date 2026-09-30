@@ -416,8 +416,10 @@ def _analysis(
     run: list[dict[str, Any]], cwd: str, payload: dict[str, Any]
 ) -> tuple[Path | None, str | None, str | None, bool]:
     """(path, text, source, exact) of the finished report. Source: ``file`` on disk, else
-    ``capture`` (a full copy a replay found in the session), else ``appends`` (rebuilt from the
-    trace's own section records; exact only when nothing was revised in place)."""
+    ``capture`` (a full copy a replay found in the session), else ``handback`` (the agent
+    returned the report in its final message instead of a file, as it does when the delegating
+    prompt asks for markdown back), else ``appends`` (rebuilt from the trace's own section
+    records; exact only when nothing was revised in place)."""
     path = _analysis_path(run, cwd)
     if path:
         try:
@@ -432,10 +434,27 @@ def _analysis(
         for key in (raw, str(Path(cwd or ".") / raw)):
             if raw and isinstance(copies.get(key), str) and copies[key].strip():
                 return path, copies[key], "capture", True
+    back = handback_report(str(payload.get("last_assistant_message") or ""))
+    if back and not any(r.get("kind") == "section_written" for r in run):
+        return path, back, "handback", True
     text, exact = _from_appends(run)
     if text.strip():
         return path, text, "appends", exact
     return path, None, None, False
+
+
+_HANDBACK_FRAME = re.compile(r"\A\[Subagent hand-back\][^\n]*\n")
+_NUMBERED_SECTION = re.compile(r"^## [1-6]\.", re.M)
+
+
+def handback_report(message: str) -> str | None:
+    """The report in an agent's final message, when it holds the analysis itself (at least
+    three of the numbered sections) rather than a pointer to a file. The host's hand-back frame
+    and its two-space indent are removed."""
+    text = _HANDBACK_FRAME.sub("", message)
+    if text.startswith("  "):
+        text = re.sub(r"^  ", "", text, flags=re.M)
+    return text if len(_NUMBERED_SECTION.findall(text)) >= 3 else None
 
 
 def _sources(run: list[dict[str, Any]]) -> dict[str, Any]:
