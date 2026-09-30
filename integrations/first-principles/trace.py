@@ -36,6 +36,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 AGENT = "first-principles:first-principles"
 CALC_TOOL = "mcp__plugin_agent-router-fp_agent_router__calc"
@@ -47,6 +48,14 @@ APPEND = re.compile(r">>\s*\S*\.first-principles/|>>\s*\"?\$")
 HEADING = re.compile(r"^(#{1,3}) (.+)$", re.M)
 RESTART = re.compile(r"""(?:^|[;&\n])\s*:\s*>\s*["']?[$\w./]""")  # `: > "$F"` empties the report
 REVISE = re.compile(r"\bsed -i|\bperl -\w*i|\.write\(|write_text\(|open\([^)]*['\"][wa]")
+# a fetch that worked but whose reply says the page did not have it (the fetch tool answers
+# with a model's reading of the page): 33 of 90 fetches in the example runs, against 8 errors
+MISSING = re.compile(
+    r"\bI (?:cannot|can't|could not|couldn't|don't see|do not see)\b|\bunable to\b"
+    r"|\bnot (?:found|available|present)\b|\bdoes(?:n't| not) (?:contain|include|appear)\b"
+    r"|\b(?:403|404)\b|\baccess denied\b|\bcaptcha\b",
+    re.I,
+)
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n\2[ \t]*$", re.S | re.M)
 # a shell call that runs an interpreter or calculator (python, bc, awk, ...). It says nothing
 # about whether the exact calculator could run it: the router's fit check decides that, and the
@@ -349,6 +358,17 @@ def _tool_record(payload: dict[str, Any]) -> dict[str, Any] | None:
             "interpreter": bool(INTERPRETER.search(cmd)),
             "command": _trunc(cmd, 200),
         }
+    if tool in ("WebFetch", "WebSearch"):  # Phase 3: checking a ground truth at its source
+        text = _text_of(payload.get("tool_response"))
+        url = str(inp.get("url") or "")
+        return {
+            "kind": "source",
+            "tool": tool,
+            "host": (urlparse(url).hostname or "") if url else None,
+            "target": _trunc(url or inp.get("query"), 200),
+            "chars": len(text),
+            "outcome": "reported_missing" if MISSING.search(text[:600]) else "ok",
+        }
     if tool == "ToolSearch":  # the agent loads deferred tools, the calculator among them
         query = str(inp.get("query") or "")
         return {"kind": "tool_loaded", "query": _trunc(query, 200), "calc": CALC_TOOL in query}
@@ -416,6 +436,24 @@ def _analysis(
     if text.strip():
         return path, text, "appends", exact
     return path, None, None, False
+
+
+def _sources(run: list[dict[str, Any]]) -> dict[str, Any]:
+    """Source checks in the run: how many worked, came back without the content, or failed,
+    and the hosts that did not answer (e.g. a renamed site's old domain)."""
+    recs = [r for r in run if r.get("kind") == "source" or r.get("was") == "source"]
+    failed = [r for r in recs if r.get("kind") == "tool_failed"]
+    hosts: dict[str, int] = {}
+    for r in failed:
+        if r.get("host"):
+            hosts[r["host"]] = hosts.get(r["host"], 0) + 1
+    return {
+        "checks": len(recs),
+        "ok": sum(1 for r in recs if r.get("outcome") == "ok"),
+        "reported_missing": sum(1 for r in recs if r.get("outcome") == "reported_missing"),
+        "failed": len(failed),
+        "failed_hosts": hosts,
+    }
 
 
 def _interpreter(rec: dict[str, Any]) -> bool:
@@ -551,7 +589,8 @@ def handle(
             "was": base.get("kind"),
             "error": _trunc(payload.get("error"), 200),
         }
-        rec.pop("result", None)
+        for key in ("result", "outcome", "chars"):  # a failed call has no output to judge
+            rec.pop(key, None)
     elif event == "SubagentStop":
         agent_id = payload.get("agent_id")
         recs = _read_jsonl(trace)
@@ -585,6 +624,7 @@ def handle(
             "report_revisions": sum(1 for r in run if r.get("op") == "revise" or r.get("revises")),
             "references_read": [r["file"] for r in run if r.get("kind") == "reference_read"],
             "tool_failures": sum(1 for r in run if r.get("kind") == "tool_failed"),
+            "sources": _sources(run),
             "decisions": decisions,
             "routing": _routing(audit, run, handoffs[-1] if handoffs else None, start, end),
         }

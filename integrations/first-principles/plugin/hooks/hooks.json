@@ -15,7 +15,7 @@
       {"matcher": "first-principles:first-principles", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
     ],
     "PostToolUse": [
-      {"matcher": "Bash|Read|ToolSearch|mcp__plugin_agent-router-fp_agent_router__calc", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
+      {"matcher": "Bash|Read|ToolSearch|WebFetch|WebSearch|mcp__plugin_agent-router-fp_agent_router__calc", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
     ],
     "PostToolUseFailure": [
       {"matcher": "Bash|Read|WebFetch|WebSearch|mcp__plugin_agent-router-fp_agent_router__calc", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}

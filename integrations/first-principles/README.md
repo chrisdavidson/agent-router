@@ -60,7 +60,8 @@ agent-router, plus `agent_type`, `agent_id` and `tool_use_id`).
 ## Decision trace
 
 `bin/trace` runs on `SubagentStart` / `SubagentStop` for `first-principles:first-principles`,
-on `PostToolUse` / `PostToolUseFailure` for `Bash`, `Read`, `ToolSearch` and the calculator, and on
+on `PostToolUse` / `PostToolUseFailure` for `Bash`, `Read`, `ToolSearch`, `WebFetch`, `WebSearch`
+and the calculator, and on
 the main session's `Agent` call that starts a run. Anything outside
 the agent is answered by the shell script in about 5 ms; a traced call takes about 35 ms
 (`trace.py` is standard library only), about 1 s over a whole analysis. Each run appends to
@@ -74,9 +75,10 @@ the agent is answered by the shell script in about 5 ms; a traced call takes abo
 | `section_written` | a `cat >> .first-principles/analysis-*.md` append | the headings and the `text` appended; `revises` / `restarts` when the same command edits earlier text or empties the file first |
 | `report_op` | any other report command | `op`: `create`, `revise` (rewrites part in place) or `check` |
 | `calc` / `shell` | a calculator or other Bash call | the expression and result; `interpreter` when a shell call runs python, bc, awk and the like (whether the calculator could run it is the router's fit check, below) |
+| `source` | a `WebFetch` or `WebSearch` inside the agent (checking a ground truth) | the host or query, the reply's size, and `outcome`: `ok`, or `reported_missing` when the reply says the page did not have it |
 | `tool_loaded` | the agent loads deferred tools (`ToolSearch`) | the query; `calc` when it loads the calculator |
 | `tool_failed` | a call fails | tool, what it was, the error (e.g. a source that could not be fetched) |
-| `run_end` | the agent stops | duration, final message, report revisions and restarts, the finished report (`analysis_text`, `analysis_sha256`) parsed into `decisions`, and `routing` (below) |
+| `run_end` | the agent stops | duration, final message, report revisions and restarts, the finished report (`analysis_text`, `analysis_sha256`) parsed into `decisions`, `sources` (source checks: ok, reported missing, failed, and the hosts that failed), and `routing` (below) |
 
 `routing` joins the run to the router's audit log, by `tool_use_id` where the audit has it. It
 holds:

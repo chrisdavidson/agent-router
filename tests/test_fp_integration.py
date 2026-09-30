@@ -895,3 +895,45 @@ def test_hook_skips_prompts_that_already_launch_first_principles(tmp_path):
     assert out == {}
     (rec,) = [json.loads(x) for x in (tmp_path / "audit" / "s.jsonl").read_text().splitlines()]
     assert (rec["action"], rec["reason"]) == ("skipped", "skip pattern")
+
+
+def test_trace_records_source_checks_and_the_hosts_that_failed(tmp_path):
+    fetch = "WebFetch"
+    recs = _replay_capture(
+        tmp_path,
+        [
+            (fetch, {"url": "https://www.nlr.gov/atb", "prompt": "q"}, "Capex is $1,200/kW."),
+            (fetch, {"url": "https://www.osti.gov/x.pdf", "prompt": "q"}, "I cannot locate it."),
+            ("WebSearch", {"query": "molten salt price"}, "Links: [...]"),
+        ],
+    )
+    sources = [r for r in recs if r["kind"] == "source"]
+    assert [(r["host"], r["outcome"]) for r in sources] == [
+        ("www.nlr.gov", "ok"),
+        ("www.osti.gov", "reported_missing"),
+        (None, "ok"),
+    ]
+    assert sources[2]["target"] == "molten salt price"
+    tr = _trace()
+    failed = tr.handle(
+        {
+            "session_id": "s",
+            "agent_type": FP,
+            "agent_id": "replay-1",
+            "hook_event_name": "PostToolUseFailure",
+            "tool_name": fetch,
+            "tool_input": {"url": "https://atb.nrel.gov/x"},
+            "error": "getaddrinfo ENOTFOUND atb.nrel.gov",
+        },
+        tmp_path / "state",
+    )
+    assert failed["was"] == "source" and failed["host"] == "atb.nrel.gov"
+    assert "outcome" not in failed
+    run = sources + [failed]
+    assert tr._sources(run) == {
+        "checks": 4,
+        "ok": 2,
+        "reported_missing": 1,
+        "failed": 1,
+        "failed_hosts": {"atb.nrel.gov": 1},
+    }

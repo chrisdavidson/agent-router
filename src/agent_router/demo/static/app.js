@@ -799,6 +799,7 @@ function renderTraceSummary(run) {
     ["Chains", chains.length ? el("span", { class: "chips" }, chip(String(chains.length), "native"),
       ...Object.entries(confCount).map(([c, n]) => chip(`${n} ${c}`, CONF_TONE[c]))) : "–"],
     ["Failed calls", end.tool_failures ?? run.recs.filter((r) => r.kind === "tool_failed").length],
+    ["Source checks", end.sources ? `${end.sources.ok} ok, ${end.sources.reported_missing} without the content, ${end.sources.failed} failed${Object.keys(end.sources.failed_hosts || {}).length ? ` (${Object.keys(end.sources.failed_hosts).join(", ")})` : ""}` : "–"],
   ];
   const grid = el("div", { class: "stats" }, ...stats.map(([k, v]) => el("div", { class: "stat" },
     el("span", { class: "stat-k", text: k }), el("span", { class: "stat-v" }, v))));
@@ -851,6 +852,11 @@ function traceItem(rec, t0) {
     case "delegation":
       meta = kind("Main session delegates", "prompt");
       body = el("span", { text: `prompt of ${rec.prompt_chars} characters${rec.prompt_names_calc ? ", tells the agent to use the calculator" : ""}` });
+      break;
+    case "source":
+      meta = kind(rec.tool === "WebSearch" ? "Searches for a source" : "Checks a source", rec.outcome === "ok" ? "" : "gated");
+      body = el("span", {}, el("code", { text: rec.host || rec.target || "" }),
+        rec.outcome === "reported_missing" ? chip("page did not have it", "gated") : null);
       break;
     case "tool_loaded":
       meta = kind("Loads tools", rec.calc ? "calc" : "");
