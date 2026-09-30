@@ -8,6 +8,7 @@ from typing import Literal
 
 import yaml
 
+from agent_router.core.fit import FITS
 from agent_router.core.types import NONE_ID, HookPoint, OptionSpec
 
 ALLOWED_LICENSE = "MIT"
@@ -37,6 +38,7 @@ class CatalogEntry:
     examples: tuple[str, ...] = ()
     agents: tuple[str, ...] = ()  # agent contexts (``main``, subagent types); () = all
     threshold: float | None = None  # own acceptance bar; None = the router's threshold
+    fits: str | None = None  # named check (core.fit.FITS) that the entry can run the call
 
     def applies_to(self, agent_type: str | None) -> bool:
         return not self.agents or (agent_type or MAIN_AGENT) in self.agents
@@ -107,6 +109,11 @@ def load_catalog(path: str | Path = DEFAULT_CATALOG) -> Catalog:
             isinstance(threshold, int | float) and 0.0 <= threshold <= 1.0
         ):
             raise CatalogError(f"entry {raw['id']}: threshold must be a number in [0, 1]")
+        fits = raw.get("fits")
+        if fits is not None and fits not in FITS:
+            raise CatalogError(
+                f"entry {raw['id']}: unknown fit check {fits!r}; known: {', '.join(sorted(FITS))}"
+            )
         seen.add(raw["id"])
         entries.append(
             CatalogEntry(
@@ -124,6 +131,7 @@ def load_catalog(path: str | Path = DEFAULT_CATALOG) -> Catalog:
                 examples=tuple(raw.get("examples", ())),
                 agents=tuple(raw.get("agents", ())),
                 threshold=float(threshold) if threshold is not None else None,
+                fits=fits,
             )
         )
     return Catalog(

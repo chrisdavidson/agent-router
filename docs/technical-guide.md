@@ -45,7 +45,11 @@ flowchart LR
    classifiers score only the current step; Jev also sees the recent prompts.
 2. `Router.route` (`core/router.py`) applies its gates in this order. It skips the step when routing is
    disabled. It skips calls to the router's own tools and to catalog targets (loop guard). It skips when
-   no catalog entry is eligible for this point and tool.
+   no catalog entry is eligible for this point and tool. An entry can name a fit check (`fits:`, from
+   the fixed list in `core/fit.py`) that asks whether the entry could actually run the pending call.
+   For example, `calc_expression` passes only one arithmetic expression the calculator evaluates.
+   An entry that fails its check is dropped before the decider, so it does not use up its one hint
+   for the turn.
 3. The decider answers a Jev `choice` question over the eligible entries plus `none`. It returns a
    choice, a probability for each option, and a confidence.
 4. `none`, or a probability below the threshold, means the agent carries on unchanged. Otherwise the

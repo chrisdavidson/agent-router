@@ -10,7 +10,11 @@ it untouched. It adds two checkpoints that plugin does not have:
 2. **Exact recompute.** Inside the first-principles agent, when it reaches for `python3 -c`,
    `bc` or similar to compute a figure (Phase 4 estimates, Phase 5 "recompute every computed
    figure"), it gets a note pointing at an exact calculator this plugin serves
-   (`mcp__plugin_agent-router-fp_agent_router__calc`, exact fractions and big integers).
+   (`mcp__plugin_agent-router-fp_agent_router__calc`, exact fractions and big integers). The note
+   is offered only when the call is one expression the calculator can run (`fits:
+   calc_expression`). Scripts with variables, loops or `math.log` are skipped as `does not fit`
+   without reaching the classifier. In the 28 example runs, all 16 notes had fired on such
+   scripts or on text commands.
 
 Both are advisory: the model may ignore a note, and nothing is ever blocked.
 

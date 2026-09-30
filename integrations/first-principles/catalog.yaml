@@ -55,6 +55,7 @@ entries:
     replaces: [Bash]
     agents: ["first-principles:first-principles"]
     threshold: 0.8  # calibrate.py, first-principles-agent cal cases
+    fits: calc_expression  # only a one-expression call the calculator can run (core/fit.py)
     what: >
       Exact arithmetic (fractions, powers, percentages) with no floating point error.
     not_for:

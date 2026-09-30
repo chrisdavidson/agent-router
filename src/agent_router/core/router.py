@@ -5,6 +5,9 @@ Rules (in order):
 2. pending call already targets the catalog (loop guard)  -> SKIPPED
    tool/skill input matches ``config.skip_input``          -> SKIPPED
 3. no catalog entry eligible at this point / tool / agent -> SKIPPED
+   entries whose fit check (``fits``) says they cannot run the pending call are dropped
+   here, before the decider, so a call they cannot do never spends their once-per-turn hint;
+   if that leaves none                                     -> SKIPPED ("does not fit")
 4. build the decider state from the event
 5. ask the decider; any exception                         -> NATIVE (fail open)
 6. choice outside the offered options                     -> NATIVE, recorded as ``none``
@@ -29,6 +32,7 @@ from dataclasses import replace
 from agent_router.core.audit import AuditLog
 from agent_router.core.catalog import Catalog
 from agent_router.core.config import RouterConfig
+from agent_router.core.fit import FITS
 from agent_router.core.hints import render_deny, render_hint
 from agent_router.core.types import (
     NONE_ID,
@@ -166,6 +170,10 @@ class Router:
         eligible = self.catalog.eligible(event.point, tool_name, event.agent_type)
         if not eligible:
             return Decision(Action.SKIPPED, "no eligible entries")
+        unfit = [e.id for e in eligible if e.fits and not FITS[e.fits](tool_input)]
+        eligible = [e for e in eligible if e.id not in unfit]
+        if not eligible:
+            return Decision(Action.SKIPPED, f"does not fit: {', '.join(unfit)}")
         options = {e.id: e.option() for e in eligible} | {NONE_ID: NONE_OPTION}
         option_ids = tuple(options)
         # 5. ask the decider, failing open
