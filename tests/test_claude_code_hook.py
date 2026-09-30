@@ -195,3 +195,28 @@ def test_mcp_server_serves_chosen_tools(tmp_path):
     assert "1989/5" in json.dumps(res, default=str)
     with pytest.raises(ValueError):
         build_server(tmp_path, ["rm"])
+
+
+@pytest.mark.parametrize(
+    ("tool", "args", "message"),
+    [
+        ("calc", {"expression": "1/0"}, "division by zero"),
+        ("calc", {"expression": "log(2)"}, "unknown function 'log'"),
+        ("calc", {"expression": "[1, 2]"}, "unsupported syntax: List"),
+        ("json_query", {"expression": "a", "text": "{"}, "invalid JSON"),
+        ("repo_stats", {"path": "../"}, "outside the workspace"),
+    ],
+)
+def test_mcp_tool_errors_reach_the_model(tmp_path, tool, args, message):
+    """A tool's ValueError comes back as its message, not the SDK's bare crash text."""
+    server = build_server(tmp_path)
+    with pytest.raises(Exception) as err:
+        asyncio.run(server.call_tool(tool, args))
+    assert message in str(err.value)
+    assert type(err.value).__name__ == "ToolError"  # anticipated, not UnexpectedToolError
+
+
+def test_mcp_tool_schemas_keep_their_parameters(tmp_path):
+    tools = {t.name: t for t in asyncio.run(build_server(tmp_path).list_tools())}
+    assert list(tools["calc"].input_schema["properties"]) == ["expression"]
+    assert set(tools["json_query"].input_schema["properties"]) == {"expression", "path", "text"}

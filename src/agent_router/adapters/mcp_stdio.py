@@ -9,6 +9,7 @@ Works with the ``mcp`` package 1.x (``FastMCP``) and 2.x (``MCPServer``).
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,33 @@ def _server_class() -> Callable[..., Any]:
         return FastMCP
 
 
+def _tool_error_class() -> type[Exception]:
+    try:
+        from mcp.server.mcpserver.exceptions import ToolError  # mcp >= 2
+    except ImportError:
+        from mcp.server.fastmcp.exceptions import ToolError  # type: ignore  # mcp 1.x
+    return ToolError
+
+
+def _expected(fn: Callable[..., str]) -> Callable[..., str]:
+    """Report a tool's ``ValueError`` as the SDK's ``ToolError``, so its message reaches the model.
+
+    The SDK treats any other exception as a crash and sends only ``Error executing tool <name>``:
+    measured in the first-principles runs, the agent retried 7 failed calculator calls without
+    learning why (e.g. ``log()`` is not supported).
+    """
+    tool_error = _tool_error_class()
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> str:
+        try:
+            return fn(*args, **kwargs)
+        except ValueError as e:
+            raise tool_error(str(e)) from e
+
+    return wrapper
+
+
 def build_server(root: Path, tools: Iterable[str] = TOOLS) -> Any:
     """The ``agent_router`` MCP server with the chosen tools, files confined to ``root``."""
     root = Path(root).resolve()
@@ -42,6 +70,7 @@ def build_server(root: Path, tools: Iterable[str] = TOOLS) -> Any:
     if "calc" in wanted:
 
         @server.tool(name="calc")
+        @_expected
         def calc_tool(expression: str) -> str:
             """Exact calculator (agent-router, MIT). Evaluates arithmetic with exact fractions
             and big integers: + - * / // % **, '17% of 2340', sqrt, factorial, gcd, lcm, abs,
@@ -52,6 +81,7 @@ def build_server(root: Path, tools: Iterable[str] = TOOLS) -> Any:
     if "json_query" in wanted:
 
         @server.tool(name="json_query")
+        @_expected
         def json_query_tool(
             expression: str, path: str | None = None, text: str | None = None
         ) -> str:
@@ -62,6 +92,7 @@ def build_server(root: Path, tools: Iterable[str] = TOOLS) -> Any:
     if "html_to_markdown" in wanted:
 
         @server.tool(name="html_to_markdown")
+        @_expected
         def html_to_markdown_tool(path: str | None = None, html: str | None = None) -> str:
             """Convert HTML to clean Markdown (python-markdownify, MIT), keeping headings,
             links, lists and tables. Give exactly one of `path` or `html`."""
@@ -70,6 +101,7 @@ def build_server(root: Path, tools: Iterable[str] = TOOLS) -> Any:
     if "repo_stats" in wanted:
 
         @server.tool(name="repo_stats")
+        @_expected
         def repo_stats_tool(path: str = ".") -> str:
             """Count files and lines of code per language under a workspace directory
             (agent-router, MIT), skipping .git, virtualenvs and node_modules."""
