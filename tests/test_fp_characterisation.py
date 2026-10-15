@@ -58,10 +58,22 @@ def test_parse_analysis_golden(path):
     _check(f"{path.parent.name}-{path.stem}", out)
 
 
+@pytest.mark.parametrize("path", _reports(), ids=lambda p: f"{p.parent.name}-{p.stem}")
+def test_derive_decisions_golden(path):
+    """The full reading of a report (contract status and the decisions taken from the block or
+    the prose), as the trace records it at run_end."""
+    out = trace.derive_decisions(path.read_text(encoding="utf-8"))
+    out.pop("prose")  # the unchanged parse_analysis output, frozen in its own golden
+    if out["contract"]:
+        out["contract"]["schema_path"] = "<pinned schema>"
+    _check(f"derive-{path.parent.name}-{path.stem}", out)
+
+
 def _normalise(records: list[dict], state: Path) -> list[dict]:
     """Drop what varies between machines: the temp state dir; the report text, kept as a length
     (its sha256 stays in the record)."""
     text = json.dumps(records, sort_keys=True).replace(str(state), "<state>")
+    text = text.replace(json.dumps(str(ROOT))[1:-1], "<repo>")  # the pinned schema's location
     out = json.loads(text)
     for rec in out:
         if rec.get("analysis_text") is not None:

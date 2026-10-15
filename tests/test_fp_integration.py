@@ -589,7 +589,7 @@ def test_trace_report_has_one_row_per_finished_run(tmp_path):
     for agent in ("a1", "a2"):
         tr.handle({**base, "agent_id": agent, "hook_event_name": "SubagentStart"}, tmp_path)
     tr.handle({**base, "agent_id": "a1", "hook_event_name": "SubagentStop"}, tmp_path)
-    rows = tr.report(tmp_path / "trace").splitlines()[2:]
+    rows = [r for r in tr.report(tmp_path / "trace").splitlines()[2:] if r.startswith("|")]
     assert len(rows) == 1  # a2 never finished
     assert "MEDIUM" in rows[0] and "| yes |" in rows[0]  # confidence, Fix/Repeat
 

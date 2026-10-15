@@ -351,6 +351,20 @@
     "analysis_sha256": "7fa08efc74280b440560052eaa671075973382c5ab02aafa4faeb6920255256c",
     "analysis_source": "appends",
     "analysis_text": "<48178 chars>",
+    "contract": {
+      "contract_status": "misplaced",
+      "schema_path": "<repo>/integrations/first-principles/contract/summary-schema.json",
+      "schema_source": "pinned",
+      "schema_version": null,
+      "violations": [
+        {
+          "code": "misplaced",
+          "message": "a section follows the block",
+          "path": "",
+          "severity": "error"
+        }
+      ]
+    },
     "decisions": {
       "assumptions": {
         "by_type": {
@@ -590,6 +604,8 @@
       ],
       "techniques_not_applied": []
     },
+    "decisions_source": "prose",
+    "decisions_verified": null,
     "duration_s": 554.9,
     "final_message": "The estimate comes to about **$100 per kWh of stored heat** ($99.94/kWh_th, $499,691 installed), with a range of **$48–252/kWh_th**. Spread over its cycle life, that capital is **0.99 ¢ per kWh delivered without discounting, or 2.40 ¢ at a 7% real discount rate** (range 1.13–8.81 ¢). Confidence is *",
     "kind": "run_end",
@@ -627,6 +643,8 @@
       "ok": 3,
       "reported_missing": 0
     },
+    "stop_attempt": 1,
+    "stop_hook_active": false,
     "tool_failures": 2,
     "ts": "2026-10-01T01:35:57.223Z"
   }

@@ -1,0 +1,277 @@
+{
+  "contract": {
+    "contract_status": "schema_violation",
+    "schema_path": "<pinned schema>",
+    "schema_source": "pinned",
+    "schema_version": 1,
+    "violations": [
+      {
+        "code": "required",
+        "message": "missing required key",
+        "path": "conclusion.rests_on",
+        "severity": "error"
+      }
+    ]
+  },
+  "decisions": {
+    "assumptions": {
+      "by_type": {
+        "convention": 4,
+        "current constraint": 3,
+        "untested belief": 11
+      },
+      "by_verdict": {
+        "Accept": 3,
+        "Challenge": 12,
+        "Discard": 3
+      },
+      "count": 18,
+      "rows": [
+        {
+          "assumption": "A-1: The $70K increase measures what the offer is worth",
+          "type": "convention",
+          "verdict": "Discard"
+        },
+        {
+          "assumption": "A-2: The decision belongs to the engineer alone",
+          "type": "convention",
+          "verdict": "Discard"
+        },
+        {
+          "assumption": "A-3: Moving to California raises the household's state tax burden substantially",
+          "type": "convention",
+          "verdict": "Discard"
+        },
+        {
+          "assumption": "A-4: Engineer's current total comp is $200,000; partner earns $90,000; married filing jointly; standard deduction",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-5: The equity part of the $70K is worth 85–100% of face value in expectation",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-6: Comparable housing costs $18K–$36K/yr more in SF than Portland (central $27K)",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-7: Other living costs (sales tax, transport, groceries) add $4K–$12K/yr in SF (central $7K)",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-8: The partner can be re-employed in SF at equal pay within 0–12 months (central 6)",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-9: The offer's relocation requirement is non-negotiable",
+          "type": "current constraint",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-10: The SF employer's in-office requirement stays at 3 days/week",
+          "type": "current constraint",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "A-11: 2025/2026 federal, Oregon and California rate schedules hold over the decision horizon",
+          "type": "current constraint",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "A-12: Household taxable income = wages − $32,200 (no itemizing, no pre-tax deductions)",
+          "type": "untested belief",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "A-13: As Oregon residents super-commuting, Oregon credits the California tax on CA-sourced pay, so total state tax is about Oregon-level",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-14: The locked trade-off weights reflect the household's values",
+          "type": "convention",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-15: The current full-remote role remains available if the engineer stays",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-16: Leaving the current employer forfeits no material unvested equity or benefits",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-17: Job security at the new employer is comparable to the current one (no last-in-first-out exposure)",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-18: A large SF employer adds more career capital (scope, network, future pay) than the current role",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        }
+      ]
+    },
+    "chains": [
+      {
+        "confidence": "MEDIUM",
+        "id": "C1",
+        "tag": null,
+        "title": "Relocating together raises household after-tax income by about $48,700, not $70,000, and state tax barely moves"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C2",
+        "tag": null,
+        "title": "On cash alone the relocation's steady-state household gain is about $14,700 a year, in a bracket that straddles zero"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C3",
+        "tag": null,
+        "title": "Relocating together carries a one-time cost of about $40,600 that the partner mostly bears, recovered in about 2.8 years centrally and never in the low case"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C4",
+        "tag": null,
+        "title": "The office requirement adds about 216 unpaid commuting hours a year that the status quo does not have"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C5",
+        "tag": null,
+        "title": "The composite (keep Portland, fly in three days a week) nets about $9,600 a year with the partner's career untouched, but exists only if the employer waives rel"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C6",
+        "tag": null,
+        "title": "The offer as structured (relocate together) ranks last of the four options, and no single weight change lifts it above staying"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C7",
+        "tag": null,
+        "title": "Between staying and the composite the choice turns on the employer's waiver and the engineer's own weights, so ask for the waiver before deciding and stay if it"
+      },
+      {
+        "confidence": "HIGH",
+        "id": "C8",
+        "tag": null,
+        "title": "For a household already in the 24% federal band, state income tax rates change the after-tax value of the raise by only about $490"
+      },
+      {
+        "confidence": "HIGH",
+        "id": "C9",
+        "tag": null,
+        "title": "Every way of taking the offer as written either ends the partner's current job or splits the household"
+      }
+    ],
+    "conclusion": {
+      "confidence": "MEDIUM",
+      "recommended": "Do not accept the offer as structured — taking it as written ends the partner's current job or splits the household (chain C9), relocating the household ranks last of four options and no single weight change lifts it above staying (chain C6); before declining, ask the SF company in writing whether you can stay in Portland and fly in for the three office days, choose between that and staying on you"
+    },
+    "contradictions": [],
+    "dead_ends": [
+      "Judging the offer by its $70K headline",
+      "California tax penalty",
+      "Engineer relocates alone (option C) as a way to keep both careers",
+      "\"Relocating wins once career capital is weighted properly\"",
+      "\"Relocating wins if the partner wants to move\"",
+      "Dollarising commute time at the engineer's wage"
+    ],
+    "gate": {
+      "bands": {
+        "1": "Rigorous",
+        "2": "Rigorous",
+        "3": "Rigorous",
+        "4": "Rigorous",
+        "5": "Rigorous",
+        "6": "Rigorous"
+      },
+      "cleared": true,
+      "criteria": {
+        "1": "Identify Essence",
+        "2": "Challenge Assumptions",
+        "3": "Establish Ground Truths",
+        "4": "Reason Upward",
+        "5": "Validate",
+        "6": "Conclusion-to-Ground-Truth Traceability"
+      },
+      "fix_repeat": false,
+      "passes": 1,
+      "passes_written": 0,
+      "result": "cleared · passes: 2 · Fix/Repeat fired: yes"
+    },
+    "ground_truths": {
+      "count": 23,
+      "unverified": [
+        "GT-11?",
+        "GT-12?",
+        "GT-14?",
+        "GT-15?",
+        "GT-16?",
+        "GT-17?",
+        "GT-18?",
+        "GT-19?",
+        "GT-20?",
+        "GT-21?",
+        "GT-22?",
+        "GT-23?"
+      ]
+    },
+    "re_entry": null,
+    "run_mode": null,
+    "run_mode_line": null,
+    "sections": [
+      "Answer",
+      "1. Problem Essence",
+      "2. Assumptions Table",
+      "3. Ground Truths",
+      "4. Derivation Chains",
+      "5. Abandoned Reasoning",
+      "6. Conclusion",
+      "Appendix — process output",
+      "Trade-off matrix (process output)",
+      "Assumption Audit scan (process output)",
+      "Techniques not applied (process output)",
+      "Adversarial pass (process output)",
+      "§6→§4 closure ledger (process output)",
+      "Self-audit scan (process output)",
+      "Self-Audit Gate (process output)",
+      "Structured summary (process output)"
+    ],
+    "techniques_not_applied": [
+      {
+        "phase": 1,
+        "reason": "the question turns on a household's preferences and prices, not on whether a figure is a convention or a physical bound",
+        "technique": "theoretical-limit"
+      },
+      {
+        "phase": 4,
+        "reason": "no conclusion needs a law-permitted ceiling; every quantity is a price or a tax rate",
+        "technique": "theoretical-limit"
+      },
+      {
+        "phase": 2,
+        "reason": "the assumption space was enumerable directly and through inversion; no multi-causal effect needed explaining",
+        "technique": "fishbone"
+      },
+      {
+        "phase": 5,
+        "reason": "the conclusion is a plan, so the pre-mortem was the Phase 5 technique",
+        "technique": "inversion"
+      }
+    ]
+  },
+  "decisions_source": "prose",
+  "decisions_verified": null
+}

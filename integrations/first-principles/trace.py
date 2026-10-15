@@ -18,11 +18,35 @@ router's ``audit/<session>.jsonl``:
   run_end          SubagentStop: duration, final message, the analysis file parsed into its
                    decisions, and the router's decisions linked to the run
 
+Where ``decisions`` come from (``run_end.decisions_source``). The report ends with a
+structured-summary block (the publisher's contract). ``contract`` records how far it can be
+trusted (``contract.contract_status``: valid, absent, multiple, misplaced, invalid_json,
+schema_violation, unsupported_version, schema_unavailable, schema_error; null when the reader
+could not be imported or there was no report text). When the status is ``valid`` or
+``unsupported_version`` the decisions are built FROM THE BLOCK (``decisions_source`` ``block``;
+``decisions_verified`` is false for ``unsupported_version``). The block supplies: run_mode,
+assumptions (count, by_type, by_verdict, type and verdict per row), ground_truths (count,
+unverified), each chain's id, confidence and rests_on, dead_ends, techniques_not_applied (and
+techniques_applied), the gate's passes, fix_repeat, cleared and last-pass bands, re_entry
+(fired, edges), and the conclusion's recommended text, confidence and rests_on. Prose still
+supplies what the block has no field for: ``sections``, ``run_mode_line``, each assumption's
+text, each chain's tag and title, the gate's criterion names and result line, and the re-entry
+disclosure sentence. Where block and prose disagree on a compared field, the block wins and the
+disagreement is appended to ``contradictions`` as ``block vs prose: <field>: block=<x>
+prose=<y>``. In every other case (no block, a bad block, an unusable schema) ``decisions`` is
+the unchanged prose parse (``decisions_source`` ``prose``), and with no report text at all
+both are null. ``analysis_source`` keeps its own meaning: where the report TEXT came from.
+
+A first-principles run can stop more than once (its delivery guard may refuse the stop). Every
+SubagentStop writes a run_end carrying ``stop_attempt`` (1-based count for that agent id) and
+``stop_hook_active``; consumers take the last run_end per agent id (``last_run_ends``).
+
 Usage:
     trace.py                          hook payload on stdin, prints {}
     trace.py --replay RUN.jsonl       feed a ``claude -p`` stream-json capture through the
              [--state DIR]            same handler (offline check; writes DIR/trace/)
-    trace.py --report TRACE_DIR       one Markdown row per finished run: what it decided
+    trace.py --report TRACE_DIR       one Markdown row per finished run (the last stop of each
+                                      agent): what it decided, then a contract coverage line
 """
 
 from __future__ import annotations
@@ -38,9 +62,25 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+HERE = Path(__file__).resolve().parent
+try:  # the contract reader; a checkout without an install finds it through ../../src
+    from agent_router import contracts
+except ImportError:
+    sys.path.insert(0, str(HERE.parents[1] / "src"))
+    try:
+        from agent_router import contracts
+    except ImportError:
+        contracts = None  # type: ignore[assignment]  # the trace then records contract: null
+
 AGENT = "first-principles:first-principles"
 CALC_TOOL = "mcp__plugin_agent-router-fp_agent_router__calc"
 MAX_TEXT = 300
+
+# The summary-block contract. Schema versions the reader accepts; a block of another version is
+# read but marked unverified. Pinned here until the integration manifest names them.
+SUMMARY_HEADING = "## Structured summary (process output)"
+ACCEPTED_SCHEMA_VERSIONS = {1}
+PINNED_SCHEMA = HERE / "contract" / "summary-schema.json"
 
 REPORT_DIR = re.compile(r"\.first-principles(?:/|[\s\"';&)]|$)")
 REPORT_PATH = re.compile(r"""[^\s"'<>|;&=]*\.first-principles/analysis-[^\s"'<>|;&=]+\.md""")
@@ -296,6 +336,255 @@ def parse_analysis(text: str) -> dict[str, Any]:
         },
     }
     out["contradictions"] = _contradictions(out)
+    return out
+
+
+# --- the summary-block contract -------------------------------------------------------------
+
+
+def schema_location() -> tuple[Path, str]:
+    """The field table to read the block against, and where it came from: ``env``
+    (AGENT_ROUTER_FP_SCHEMA, used as given), ``plugin_root`` ($FP_PLUGIN_ROOT/references/
+    summary-schema.json, when that file exists), else the ``pinned`` copy shipped here."""
+    env = os.environ.get("AGENT_ROUTER_FP_SCHEMA", "").strip()
+    if env:
+        return Path(env), "env"
+    root = os.environ.get("FP_PLUGIN_ROOT", "").strip()
+    if root:
+        cand = Path(root) / "references" / "summary-schema.json"
+        if cand.is_file():
+            return cand, "plugin_root"
+    return PINNED_SCHEMA, "pinned"
+
+
+def _l(v: Any) -> list[Any]:
+    return v if isinstance(v, list) else []
+
+
+def _d(v: Any) -> dict[str, Any]:
+    return v if isinstance(v, dict) else {}
+
+
+def _strs(v: Any) -> list[str]:
+    return [x for x in _l(v) if isinstance(x, str)]
+
+
+def decisions_from_block(block: dict[str, Any], prose: dict[str, Any]) -> dict[str, Any]:
+    """The decisions in ``parse_analysis``'s shape, taken from the block. Fields the block has
+    no place for (listed in the module docstring) come from ``prose``; a block field that is
+    null stays null. Tolerates a block of an unverified version: whatever is the wrong shape
+    reads as absent."""
+    rows = [a for a in _l(block.get("assumptions")) if isinstance(a, dict)]
+    prose_rows = _l(_d(prose.get("assumptions")).get("rows"))
+    texts = prose_rows if len(prose_rows) == len(rows) else []
+    out_rows = [
+        {
+            "assumption": _d(texts[i]).get("assumption") if texts else None,
+            "id": r.get("id"),
+            "type": r.get("type"),
+            "verdict": r.get("verdict"),
+        }
+        for i, r in enumerate(rows)
+    ]
+    gts = [g for g in _l(block.get("ground_truths")) if isinstance(g, dict)]
+    prose_chain = {c.get("id"): c for c in _l(prose.get("chains")) if isinstance(c, dict)}
+    chains = [
+        {
+            "id": c.get("id"),
+            "tag": _d(prose_chain.get(c.get("id"))).get("tag"),
+            "title": _d(prose_chain.get(c.get("id"))).get("title"),
+            "confidence": c.get("confidence"),
+            "rests_on": _strs(c.get("rests_on")),
+        }
+        for c in _l(block.get("chains"))
+        if isinstance(c, dict)
+    ]
+    tech = block.get("techniques")
+    gate = block.get("gate")
+    re_entry = block.get("re_entry")
+    concl = _d(block.get("conclusion"))
+    passes = [p for p in _l(_d(gate).get("passes")) if isinstance(p, dict)]
+    last_bands = _strs(passes[-1].get("bands")) if passes else []
+    prose_gate = _d(prose.get("gate"))
+    prose_edge = _d(prose.get("re_entry"))
+    return {
+        "sections": prose.get("sections"),
+        "run_mode": block.get("run_mode"),
+        "run_mode_line": prose.get("run_mode_line"),
+        "re_entry": None
+        if not isinstance(re_entry, dict)
+        else {
+            "fired": re_entry.get("fired"),
+            "disclosure": prose_edge.get("disclosure")
+            or _trunc(
+                "; ".join(_strs([_d(e).get("trigger") for e in _l(re_entry.get("edges"))])), 240
+            )
+            or None,
+            "edges": [_d(e).get("edge") for e in _l(re_entry.get("edges"))],
+        },
+        "assumptions": {
+            "count": len(rows),
+            "by_type": _count([str(r.get("type") or "unspecified") for r in rows]),
+            "by_verdict": _count([str(r.get("verdict") or "") for r in rows]),
+            "rows": out_rows,
+        },
+        "ground_truths": {
+            "count": len(gts),
+            "unverified": [f"{g.get('id')}?" for g in gts if g.get("read_at_source") is False],
+        },
+        "chains": chains,
+        "dead_ends": [_trunc(d, 160) for d in _strs(block.get("dead_ends"))],
+        "techniques_applied": None if not isinstance(tech, dict) else _strs(tech.get("applied")),
+        "techniques_not_applied": None
+        if not isinstance(tech, dict)
+        else [
+            {
+                "technique": _d(n).get("technique"),
+                "phase": _d(n).get("phase"),
+                "reason": _trunc(_d(n).get("reason"), 200),
+            }
+            for n in _l(tech.get("not_applied"))
+        ],
+        "gate": {
+            "bands": {str(i + 1): b for i, b in enumerate(last_bands)},
+            "criteria": prose_gate.get("criteria") or {},
+            "passes": len(passes) if isinstance(gate, dict) else None,
+            "fix_repeat": _d(gate).get("fix_repeat_fired") if isinstance(gate, dict) else None,
+            "result": prose_gate.get("result"),
+            "cleared": _d(gate).get("cleared") if isinstance(gate, dict) else None,
+        },
+        "contradictions": [],
+        "conclusion": {
+            "recommended": _trunc(concl["recommendation"], 400)
+            if isinstance(concl.get("recommendation"), str)
+            else None,
+            "confidence": concl.get("confidence"),
+            "rests_on": concl.get("rests_on"),
+        },
+    }
+
+
+_NOT_CLEARED = re.compile(r"\bnot cleared\b", re.I)
+_CLEARED = re.compile(r"\bcleared\b", re.I)
+
+
+def _prose_cleared(result: Any) -> bool | None:
+    """Whether the report's ``Gate result:`` line says cleared; None when it says neither."""
+    text = str(result or "")
+    if _NOT_CLEARED.search(text):
+        return False
+    return True if _CLEARED.search(text) else None
+
+
+def _show(v: Any) -> str:
+    return json.dumps(v, sort_keys=True) if isinstance(v, (dict, list)) else str(v)
+
+
+def block_vs_prose(block: dict[str, Any], prose: dict[str, Any]) -> list[str]:
+    """Disagreements between the block-built decisions and the prose parse, on a few fields.
+    A field the prose parse found nothing for is skipped (a parser miss is not a disagreement).
+    The block wins; these are recorded, not repaired."""
+    out: list[str] = []
+
+    def cmp(name: str, b: Any, p: Any) -> None:
+        if b != p:
+            out.append(f"block vs prose: {name}: block={_show(b)} prose={_show(p)}")
+
+    ba, pa = _d(block.get("assumptions")), _d(prose.get("assumptions"))
+    if pa.get("count"):
+        cmp("assumptions.count", ba.get("count"), pa.get("count"))
+        cmp("assumptions.by_verdict", ba.get("by_verdict"), pa.get("by_verdict"))
+    bg, pg = _d(block.get("ground_truths")), _d(prose.get("ground_truths"))
+    if pg.get("count"):
+        cmp(
+            "ground_truths.unverified",
+            sorted(bg.get("unverified") or []),
+            sorted(pg.get("unverified") or []),
+        )
+    pc = {c.get("id"): c.get("confidence") for c in _l(prose.get("chains")) if isinstance(c, dict)}
+    if pc:
+        bc = {
+            c.get("id"): c.get("confidence") for c in _l(block.get("chains")) if isinstance(c, dict)
+        }
+        cmp("chains.confidence", bc, pc)
+    pclear = _prose_cleared(_d(prose.get("gate")).get("result"))
+    bclear = _d(block.get("gate")).get("cleared")
+    if bclear is not None and pclear is not None:
+        cmp("gate.cleared", bclear, pclear)
+    bfired = _d(block.get("re_entry")).get("fired")
+    pfired = _d(prose.get("re_entry")).get("fired")
+    if bfired is not None and pfired is not None:
+        cmp("re_entry.fired", bfired, pfired)
+    bconf = _d(block.get("conclusion")).get("confidence")
+    pconf = _d(prose.get("conclusion")).get("confidence")
+    if bconf is not None and pconf is not None:
+        cmp("conclusion.confidence", bconf, pconf)
+    return out
+
+
+def _derive(text: str | None) -> dict[str, Any]:
+    """Read a finished report: its contract status and its decisions, from the block when the
+    block can be used, else from the prose. Returns ``decisions``, ``contract`` (the reader's
+    result without the block, plus ``schema_source``; None when the reader is unavailable or
+    there is no text), ``decisions_source`` (``block``, ``prose``, None) and
+    ``decisions_verified`` (True for a valid block, False for an unsupported version, else
+    None). ``run`` is the agent's trace records, for the gate passes written during the run.
+    Never raises."""
+    if not text:
+        return {
+            "decisions": None,
+            "contract": None,
+            "decisions_source": None,
+            "decisions_verified": None,
+        }
+    prose = parse_analysis(text)
+    contract: dict[str, Any] | None = None
+    if contracts is not None:
+        try:
+            path, source = schema_location()
+            full = contracts.read_contract(
+                text,
+                heading=SUMMARY_HEADING,
+                schema_path=path,
+                accepted_versions=ACCEPTED_SCHEMA_VERSIONS,
+            )
+            block = full.pop("block", None)
+            contract = {**full, "schema_source": source}
+        except Exception:  # fail open: the trace still records the prose reading
+            contract, block = None, None
+    status = (contract or {}).get("contract_status")
+    if status in ("valid", "unsupported_version") and isinstance(block, dict):
+        try:
+            decisions = decisions_from_block(block, prose)
+        except Exception:
+            decisions = None
+        if decisions is not None:
+            return {
+                "decisions": decisions,
+                "prose": prose,
+                "contract": contract,
+                "decisions_source": "block",
+                "decisions_verified": status == "valid",
+            }
+    return {
+        "decisions": prose,
+        "prose": prose,
+        "contract": contract,
+        "decisions_source": "prose",
+        "decisions_verified": None,
+    }
+
+
+def derive_decisions(text: str | None, run: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Read a finished report (see ``_derive``) and add what the run's own records show: gate
+    passes written, then, for decisions taken from the block, the block-vs-prose
+    disagreements. ``run`` is the agent's trace records."""
+    out = _derive(text)
+    decisions = out["decisions"]
+    if decisions:
+        _add_history(decisions, run or [])
+        if out["decisions_source"] == "block":
+            decisions["contradictions"] += block_vs_prose(decisions, out["prose"])
     return out
 
 
@@ -628,9 +917,9 @@ def handle(
         ]
         end = _when(now) if now else datetime.now(UTC)
         path, text, source, exact = _analysis(run, str(payload.get("cwd") or ""), payload)
-        decisions = parse_analysis(text) if text else None
-        if decisions:
-            _add_history(decisions, run)
+        derived = derive_decisions(text, run)
+        decisions = derived["decisions"]
+        stops = sum(1 for r in recs if r.get("kind") == "run_end" and r.get("agent_id") == agent_id)
         audit_env = os.environ.get("AGENT_ROUTER_AUDIT", "").strip()
         audit = _read_jsonl(Path(audit_env) if audit_env else root / "audit" / f"{session}.jsonl")
         rec = {
@@ -650,6 +939,11 @@ def handle(
             "tool_failures": sum(1 for r in run if r.get("kind") == "tool_failed"),
             "sources": _sources(run),
             "decisions": decisions,
+            "decisions_source": derived["decisions_source"],
+            "decisions_verified": derived["decisions_verified"],
+            "contract": derived["contract"],
+            "stop_attempt": stops + 1,
+            "stop_hook_active": bool(payload.get("stop_hook_active")),
             "routing": _routing(audit, run, handoffs[-1] if handoffs else None, start, end),
         }
     else:
@@ -860,17 +1154,61 @@ def _calc_cell(rt: dict[str, Any]) -> str:
     return cell
 
 
+def last_run_ends(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One run_end per agent id: the last one. A run whose stop the delivery guard refused
+    writes a run_end for every attempt; only the final stop describes the finished run. A
+    run_end without an agent id cannot be paired and is kept as it is."""
+    last: dict[Any, int] = {}
+    ends = [r for r in records if r.get("kind") == "run_end"]
+    for i, r in enumerate(ends):
+        last[r.get("agent_id") if r.get("agent_id") is not None else ("", i)] = i
+    return [ends[i] for i in sorted(last.values())]
+
+
+def contract_coverage(ends: list[dict[str, Any]]) -> str:
+    """The contract coverage line over finished runs (already one per agent): runs read from a
+    valid block / from prose because the block could not be used / from a block of an
+    unsupported version / the rest (no report text or no reader). The four add up to the total;
+    valid blocks whose internal checks listed a violation are counted in the first and named
+    again at the end."""
+    total = len(ends)
+    valid = unsupported = prose = other = inconsistent = 0
+    for end in ends:
+        c = end.get("contract") or {}
+        status = c.get("contract_status")
+        if status == "valid":
+            valid += 1
+            inconsistent += any(
+                str(v.get("code", "")).startswith("internal-") for v in c.get("violations") or []
+            )
+        elif status == "unsupported_version":
+            unsupported += 1
+        elif end.get("decisions_source") == "prose":
+            prose += 1
+        else:
+            other += 1
+    line = (
+        f"contract: valid {valid}/{total} · prose fallback {prose} · unsupported {unsupported}"
+        f" · other {other}"
+    )
+    return line + (f" · inconsistent {inconsistent}" if inconsistent else "")
+
+
 def report(trace_dir: Path) -> str:
-    """One Markdown row per finished run in ``trace_dir``: what the agent decided."""
+    """One Markdown row per finished run in ``trace_dir`` (its last stop): what the agent
+    decided, then the contract coverage line."""
     lines = [
-        "| session | run | s | sections | references read | delegation | calc notes / calls "
+        "| session | run | s | stops | contract | decisions from | sections | references read "
+        "| delegation | calc notes / calls "
         "(before / after note) / loaded first | GT (unverified) | chains (confidence) "
         "| dead ends | not applied "
         "| gate | Fix/Repeat | report restarts / revisions | assumptions | confidence |",
-        "|---" * 16 + "|",
+        "|---" * 19 + "|",
     ]
+    finished: list[dict[str, Any]] = []
     for path in sorted(trace_dir.glob("*.jsonl")):
-        for end in (r for r in _read_jsonl(path) if r.get("kind") == "run_end"):
+        for end in last_run_ends(_read_jsonl(path)):
+            finished.append(end)
             d = end.get("decisions") or {}
             rt = end.get("routing") or {}
             gate = d.get("gate") or {}
@@ -878,10 +1216,15 @@ def report(trace_dir: Path) -> str:
             conf = _count([c.get("confidence") or "?" for c in chains])
             verdicts = (d.get("assumptions") or {}).get("by_verdict") or {}
             deleg = (rt.get("delegation") or {}).get("action") or "-"
+            cons = d.get("contradictions") or []
+            versus = [c for c in cons if c.startswith("block vs prose:")]
             cells = [
                 str(end.get("session"))[:8],
                 str(end.get("agent_id"))[:8],
                 str(end.get("duration_s")),
+                str(end.get("stop_attempt") or 1),
+                str((end.get("contract") or {}).get("contract_status") or "-"),
+                str(end.get("decisions_source") or "-"),
                 str(end.get("sections_written")),
                 ", ".join(f.removesuffix(".md") for f in end.get("references_read") or []),
                 "note" if deleg == "suggest" else deleg,
@@ -892,12 +1235,15 @@ def report(trace_dir: Path) -> str:
                 str(len(d.get("dead_ends") or [])),
                 ", ".join(t["technique"] for t in d.get("techniques_not_applied") or []) or "-",
                 "".join(b[0] for b in (gate.get("bands") or {}).values()) or "-",
-                _fix_repeat(d) + (" (contradicts disclosure)" if d.get("contradictions") else ""),
+                _fix_repeat(d)
+                + (" (contradicts disclosure)" if [c for c in cons if c not in versus] else "")
+                + (" (block differs from prose)" if versus else ""),
                 f"{end.get('report_restarts', 0)} / {end.get('report_revisions', 0)}",
                 ", ".join(f"{k} {v}" for k, v in verdicts.items()) or "-",
                 str((d.get("conclusion") or {}).get("confidence")),
             ]
             lines.append("| " + " | ".join(cells) + " |")
+    lines += ["", contract_coverage(finished)]
     return "\n".join(lines)
 
 

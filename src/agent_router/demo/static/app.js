@@ -706,7 +706,9 @@ async function loadTrace(session) {
     byRun.get(key).push(r);
   }
   trace.runs = [...byRun.entries()].map(([id, recs]) => ({
-    id, recs, start: recs.find((r) => r.kind === "run_start"), end: recs.find((r) => r.kind === "run_end"),
+    id, recs, start: recs.find((r) => r.kind === "run_start"),
+    // a delivery guard that refuses the stop makes one run_end per attempt: the last one is the run's end
+    end: recs.filter((r) => r.kind === "run_end").at(-1),
   }));
   const pills = $("#run-pills");
   pills.hidden = trace.runs.length < 2;
@@ -764,6 +766,27 @@ function calcSummary(rt) {
   return parts.join(", ");
 }
 
+const CONTRACT_TONE = { valid: "native", unsupported_version: "gated" };
+
+/** contract_status of the report's structured-summary block, with its violations as a tooltip. */
+function contractCell(end) {
+  const c = end.contract;
+  if (!c) return end.analysis_sha256 ? "not read (no contract reader)" : "–";
+  const found = (c.violations || []).filter((v) => v.severity !== "warning");
+  const title = found.map((v) => `${v.path || "block"}: ${v.message}`).join("\n") || undefined;
+  return el("span", { class: "chips" }, chip(c.contract_status, CONTRACT_TONE[c.contract_status] || "enforce", title),
+    c.schema_version != null ? chip(`schema v${c.schema_version}`, "outline") : null);
+}
+
+/** Where the decisions came from: the block, or the prose fallback. */
+function decisionsCell(end) {
+  if (!end.decisions_source) return "–";
+  const note = end.decisions_source === "block"
+    ? (end.decisions_verified === false ? "block, version not verified" : "block")
+    : "prose (the block could not be used)";
+  return el("span", { class: "chips" }, chip(note, end.decisions_source === "block" && end.decisions_verified !== false ? "native" : "gated"));
+}
+
 function renderTraceSummary(run) {
   const box = $("#trace-summary");
   const end = run.end || {};
@@ -790,6 +813,9 @@ function renderTraceSummary(run) {
     ["Report restarts / revisions", `${end.report_restarts ?? 0} / ${end.report_revisions ?? 0}`],
     ["References opened", el("span", { class: "chips" }, ...(end.references_read || run.recs.filter((r) => r.kind === "reference_read").map((r) => r.file))
       .map((f) => chip(f.replace(/\.md$/, ""), "native")))],
+    ["Stops", end.stop_attempt ? `${end.stop_attempt}${end.stop_attempt > 1 ? " (earlier stop events)" : ""}` : "–"],
+    ["Contract", contractCell(end)],
+    ["Decisions from", decisionsCell(end)],
     ["Delegation", delegText],
     ["Calculator", calcSummary(rt)],
     ["Self-Audit Gate", bands.length ? el("span", { class: "chips" }, ...bands.map(([n, b]) =>
@@ -868,7 +894,7 @@ function traceItem(rec, t0) {
       body = el("span", { text: rec.error || "" });
       break;
     case "run_end":
-      meta = kind(`Agent stops after ${minutes(rec.duration_s)}`, "answer");
+      meta = kind(`Agent stops after ${minutes(rec.duration_s)}${rec.stop_attempt > 1 ? ` (stop ${rec.stop_attempt})` : ""}`, "answer");
       body = el("details", {}, el("summary", { text: "its final message" }), el("pre", { text: rec.final_message || "" }));
       break;
     default:

@@ -736,3 +736,47 @@ def test_replay_decider_error_reason_hides_the_provider_body(
     (audit_dir / "s-err.jsonl").write_text(json.dumps(rec) + "\n")
     body = client.get("/api/audit/s-err").json()
     assert body["records"][0]["reason"] == "decider error: DeciderError"
+
+
+def test_trace_carries_contract_fields_and_counts_a_run_once(
+    client: TestClient, audit_dir: Path
+) -> None:
+    """CONTRACT-06 / HOOK-05: a block run and a prose run, one of them stopped three times (a
+    delivery guard refused twice). The API keeps every field the Trace tab shows, and the session
+    list counts agents, not stop events."""
+    trace_dir = audit_dir.parent / "trace"
+    trace_dir.mkdir()
+    block = {"contract": {"contract_status": "valid"}, "decisions_source": "block"}
+    prose = {"contract": {"contract_status": "absent"}, "decisions_source": "prose"}
+    records = [
+        _trace("run_start", agent_id="a1"),
+        _trace("run_end", agent_id="a1", stop_attempt=1, stop_hook_active=False, **prose),
+        _trace("run_end", agent_id="a1", stop_attempt=2, stop_hook_active=True, **prose),
+        _trace("run_end", agent_id="a1", stop_attempt=3, stop_hook_active=True, **block),
+        _trace("run_start", agent_id="a2"),
+        _trace("run_end", agent_id="a2", stop_attempt=1, **prose),
+    ]
+    _write_audit(trace_dir, "s1", records)
+    (row,) = client.get("/api/trace/sessions").json()["sessions"]
+    assert row["runs"] == 2 and row["finished"] == 2  # not 4 run_end records
+    got = client.get("/api/trace/s1").json()["records"]
+    ends = [r for r in got if r["kind"] == "run_end"]
+    assert [(r["agent_id"], r["stop_attempt"]) for r in ends][-2:] == [("a1", 3), ("a2", 1)]
+    assert (
+        ends[2]["contract"]["contract_status"] == "valid" and ends[2]["decisions_source"] == "block"
+    )
+    assert (
+        ends[3]["contract"]["contract_status"] == "absent"
+        and ends[3]["decisions_source"] == "prose"
+    )
+
+
+def test_trace_tab_script_renders_contract_status_decisions_source_and_the_last_stop() -> None:
+    """The tab is a browser script this suite cannot run: pin the lines that render the new
+    fields and pick a run's last run_end, so deleting them is a red test, not a silent gap."""
+    js = (server.STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert 'filter((r) => r.kind === "run_end").at(-1)' in js
+    assert "end.contract" in js and "c.contract_status" in js
+    assert "end.decisions_source" in js and "end.stop_attempt" in js
+    assert '["Contract", contractCell(end)]' in js
+    assert '["Decisions from", decisionsCell(end)]' in js

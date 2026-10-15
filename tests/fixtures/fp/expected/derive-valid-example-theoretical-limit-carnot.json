@@ -1,0 +1,94 @@
+{
+  "contract": {
+    "contract_status": "valid",
+    "schema_path": "<pinned schema>",
+    "schema_source": "pinned",
+    "schema_version": 1,
+    "violations": []
+  },
+  "decisions": {
+    "assumptions": {
+      "by_type": {
+        "convention": 1,
+        "untested belief": 1
+      },
+      "by_verdict": {
+        "Accept": 1,
+        "Challenge": 1
+      },
+      "count": 2,
+      "rows": [
+        {
+          "assumption": "The plant rejects heat through either a wet cooling tower or an air-cooled condenser; which one is not established by GT-4?",
+          "id": "A-1",
+          "type": "convention",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "Published design-point cycle efficiency for this technology class describes what commercial plants achieve in operation",
+          "id": "A-2",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        }
+      ]
+    },
+    "chains": [
+      {
+        "confidence": "MEDIUM",
+        "id": "C1",
+        "rests_on": [
+          "GT-4?",
+          "GT-5",
+          "GT-6"
+        ],
+        "tag": null,
+        "title": "Current practice sits ~19 points below the Carnot ceiling for the cycle's actual reservoir pair, and most of that distance is not recoverable headroom"
+      }
+    ],
+    "conclusion": {
+      "confidence": "MEDIUM",
+      "recommended": "Treat the ~19-point ceiling-to-practice gap (chain C1) as mostly\nirreducible rather than as recoverable headroom, and pursue efficiency through cycle architecture and a higher source\ntemperature — supercritical pressure, which the cited source (OSTI 1088078) evaluated at 566 °C\nsalt as well as 600 °C and so is available at today's ~565 °C, and then ultra-supercritical\ncycles at 600–650 °C salt, a ",
+      "rests_on": [
+        "C1"
+      ]
+    },
+    "contradictions": [],
+    "dead_ends": [
+      "The Curzon-Ahlborn bound, tried as a tighter middle tier",
+      "The molten-salt tank pair, tried as the reservoir pair"
+    ],
+    "gate": {
+      "bands": {},
+      "cleared": null,
+      "criteria": {},
+      "fix_repeat": null,
+      "passes": null,
+      "passes_written": 0,
+      "result": null
+    },
+    "ground_truths": {
+      "count": 4,
+      "unverified": [
+        "GT-4?"
+      ]
+    },
+    "re_entry": null,
+    "run_mode": null,
+    "run_mode_line": null,
+    "sections": [
+      "Theoretical-Limit Drill",
+      "1. Problem Essence",
+      "2. Assumptions Table",
+      "3. Ground Truths",
+      "4. Derivation Chains",
+      "5. Abandoned Reasoning",
+      "6. Conclusion",
+      "Appendix — process output",
+      "Structured summary (process output)"
+    ],
+    "techniques_applied": null,
+    "techniques_not_applied": null
+  },
+  "decisions_source": "block",
+  "decisions_verified": true
+}

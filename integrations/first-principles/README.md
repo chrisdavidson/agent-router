@@ -78,7 +78,7 @@ the agent is answered by the shell script in about 5 ms; a traced call takes abo
 | `source` | a `WebFetch` or `WebSearch` inside the agent (checking a ground truth) | the host or query, the reply's size, and `outcome`: `ok`, or `reported_missing` when the reply says the page did not have it |
 | `tool_loaded` | the agent loads deferred tools (`ToolSearch`) | the query; `calc` when it loads the calculator |
 | `tool_failed` | a call fails | tool, what it was, the error (e.g. a source that could not be fetched) |
-| `run_end` | the agent stops | duration, final message, report revisions and restarts, the finished report (`analysis_text`, `analysis_sha256`) parsed into `decisions`, `sources` (source checks: ok, reported missing, failed, and the hosts that failed), and `routing` (below) |
+| `run_end` | the agent stops | duration, final message, report revisions and restarts, the finished report (`analysis_text`, `analysis_sha256`) parsed into `decisions`, `sources` (source checks: ok, reported missing, failed, and the hosts that failed), and `routing` (below). `decisions` come from the report's structured-summary block when `contract.contract_status` is `valid` or `unsupported_version` (`decisions_source: block`; `decisions_verified` is false for the latter), else from prose (`decisions_source: prose`). A run the delivery guard stops more than once writes one `run_end` per stop, each with `stop_attempt` and `stop_hook_active`; `--report`, the demo and anything else read the last one per `agent_id` |
 
 `routing` joins the run to the router's audit log, by `tool_use_id` where the audit has it. It
 holds:
