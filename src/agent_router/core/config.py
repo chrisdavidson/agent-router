@@ -28,6 +28,11 @@ class RouterConfig:
     """Regex over the prompt text at the PROMPT point; a match is SKIPPED before the decider.
     For prompts that already name their route, e.g. a slash command launching the target."""
 
+    never_block_agents: frozenset[str] = frozenset()
+    """Agent types whose tool calls are never denied: in enforce mode the router downgrades the
+    would-be deny to an advisory hint for them (``AGENT_ROUTER_NEVER_BLOCK_AGENTS``,
+    comma-separated)."""
+
     def __post_init__(self) -> None:
         if self.mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}, got {self.mode!r}")
@@ -58,4 +63,9 @@ class RouterConfig:
             audit_path=Path(audit) if audit else None,
             skip_input=env.get("AGENT_ROUTER_SKIP_INPUT", "").strip() or None,
             skip_prompt=env.get("AGENT_ROUTER_SKIP_PROMPT", "").strip() or None,
+            never_block_agents=frozenset(
+                a.strip()
+                for a in env.get("AGENT_ROUTER_NEVER_BLOCK_AGENTS", "").split(",")
+                if a.strip()
+            ),
         )

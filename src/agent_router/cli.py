@@ -144,6 +144,9 @@ def _router(
             config = replace(config, threshold=threshold)
         if audit_path is not None:
             config = replace(config, audit_path=audit_path)
+        extra = frozenset(getattr(args, "never_block", ()) or ())
+        if extra:
+            config = replace(config, never_block_agents=config.never_block_agents | extra)
     except ValueError as exc:
         raise CliError(f"invalid AGENT_ROUTER_* setting or flag: {exc}") from exc
     return Router(catalog, router.decider, config, AuditLog(config.audit_path), suggested)
@@ -447,6 +450,12 @@ def _derive_integration(args: argparse.Namespace) -> dict[str, Any] | None:
     return resolved.record()
 
 
+def _never_block(args: argparse.Namespace) -> frozenset[str]:
+    """Agent types the router must never deny: the integrated plugin's agent (from its manifest)."""
+    context = getattr(args, "integration_context", None)
+    return frozenset({context[1].agent_type}) if context and context[1].agent_type else frozenset()
+
+
 def cmd_hook(args: argparse.Namespace) -> int:
     """One Claude Code command hook: hook JSON on stdin, hook JSON on stdout, always exit 0.
 
@@ -464,12 +473,14 @@ def cmd_hook(args: argparse.Namespace) -> int:
         recorded = _derive_integration(args)
         if not args.backend:
             args.backend = os.environ.get("AGENT_ROUTER_BACKEND", "").strip() or "local"
+        args.never_block = _never_block(args)
         payload = json.load(sys.stdin)
         if isinstance(payload, dict):
             out = handle(
                 payload,
                 lambda audit, seed: _router(args, env=True, audit_path=audit, suggested=seed),
                 integration=recorded,
+                never_block=args.never_block,
             )
     except Exception as exc:  # a hook must never break the host session
         print(f"agent-router hook: failing open: {type(exc).__name__}: {exc}", file=sys.stderr)

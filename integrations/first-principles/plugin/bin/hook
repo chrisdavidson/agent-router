@@ -10,6 +10,8 @@ if [ ! -x "$bin" ]; then
   echo '{}'
   exit 0
 fi
+# shellcheck source=_failopen.sh
+. "$here/_failopen.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
 payload="$(cat)"
 # Fast path: a main-thread Bash call has no eligible entry (the calculator is scoped to the
 # integrated plugin's agent), so answer without starting Python.
@@ -29,4 +31,7 @@ export AGENT_ROUTER_MODE=advisory
 # AGENT_ROUTER_SKIP_INPUT / AGENT_ROUTER_SKIP_PROMPT still wins. See ../../MANIFEST.md.
 export AGENT_ROUTER_INTEGRATION="$integ"
 export HF_HUB_DISABLE_PROGRESS_BARS=1
-printf '%s' "$payload" | exec "$bin" hook
+# Never `exec`: the answer is vetted (one JSON object, exit 0, within AGENT_ROUTER_HOOK_TIMEOUT)
+# and replaced by {} otherwise. See _failopen.sh.
+FAILOPEN_PY="${AGENT_ROUTER_PYTHON:-$(dirname "$bin")/python}"
+fail_open_run "$bin" hook

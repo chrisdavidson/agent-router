@@ -5,6 +5,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
 repo="$(dirname "$(dirname "$integ")")"
 py="${AGENT_ROUTER_PYTHON:-$repo/.venv/bin/python}"
+# shellcheck source=_failopen.sh
+. "$here/_failopen.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
 payload="$(cat)"
 # Fast path: only the integrated plugin's agent is traced; everything else answers at once.
 # The main session's Agent call that starts a run is traced too (its prompt, before the run).
@@ -19,4 +21,5 @@ if [ -n "$AGENT_ROUTER_DISABLED" ] || [ ! -x "$py" ] \
   echo '{}'
   exit 0
 fi
-printf '%s' "$payload" | "$py" "$integ/trace.py" 2>/dev/null || echo '{}'
+FAILOPEN_EMPTY_ONLY=1   # record-only (D-08): nothing but {} ever reaches the host
+fail_open_run "$py" "$integ/trace.py"
