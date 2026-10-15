@@ -1,0 +1,137 @@
+[
+ {
+  "payload": {
+   "cwd": "/fixture/cwd",
+   "hook_event_name": "PreToolUse",
+   "session_id": "guard-session-0001",
+   "tool_input": {
+    "prompt": "Estimate how long the task takes.",
+    "subagent_type": "first-principles:first-principles"
+   },
+   "tool_name": "Agent",
+   "tool_use_id": "toolu_guard_agent"
+  },
+  "ts": "2026-10-01T00:00:00.000Z"
+ },
+ {
+  "payload": {
+   "agent_id": "agent-guard-1",
+   "agent_type": "first-principles:first-principles",
+   "cwd": "/fixture/cwd",
+   "hook_event_name": "SubagentStart",
+   "session_id": "guard-session-0001"
+  },
+  "ts": "2026-10-01T00:00:01.000Z"
+ },
+ {
+  "payload": {
+   "agent_id": "agent-guard-1",
+   "agent_type": "first-principles:first-principles",
+   "cwd": "/fixture/cwd",
+   "hook_event_name": "PostToolUse",
+   "session_id": "guard-session-0001",
+   "tool_input": {
+    "command": "mkdir -p /fixture/cwd/.first-principles && : > /fixture/cwd/.first-principles/analysis-20261001T000000Z.md"
+   },
+   "tool_name": "Bash",
+   "tool_response": {
+    "stdout": ""
+   },
+   "tool_use_id": "toolu_g1"
+  },
+  "ts": "2026-10-01T00:00:05.000Z"
+ },
+ {
+  "payload": {
+   "agent_id": "agent-guard-1",
+   "agent_type": "first-principles:first-principles",
+   "cwd": "/fixture/cwd",
+   "hook_event_name": "PostToolUse",
+   "session_id": "guard-session-0001",
+   "tool_input": {
+    "command": "cat >> /fixture/cwd/.first-principles/analysis-20261001T000000Z.md <<'EOF'\n## Answer\n\nAbout 4 hours.\n\n## 1. Problem Essence\n\nHow long a fixed task takes.\nEOF"
+   },
+   "tool_name": "Bash",
+   "tool_response": {
+    "stdout": ""
+   },
+   "tool_use_id": "toolu_g2"
+  },
+  "ts": "2026-10-01T00:00:20.000Z"
+ },
+ {
+  "payload": {
+   "agent_id": "agent-guard-1",
+   "agent_type": "first-principles:first-principles",
+   "analysis_texts": {},
+   "cwd": "/fixture/cwd",
+   "hook_event_name": "SubagentStop",
+   "last_assistant_message": "The task takes about four hours.",
+   "session_id": "guard-session-0001",
+   "stop_hook_active": false
+  },
+  "ts": "2026-10-01T00:00:30.000Z"
+ },
+ {
+  "payload": {
+   "agent_id": "agent-guard-1",
+   "agent_type": "first-principles:first-principles",
+   "cwd": "/fixture/cwd",
+   "hook_event_name": "PostToolUse",
+   "session_id": "guard-session-0001",
+   "tool_input": {
+    "command": "cat >> /fixture/cwd/.first-principles/analysis-20261001T000000Z.md <<'EOF'\n## 2. Assumptions Table\n\n| ID | Assumption | Type | Verdict |\n|---|---|---|---|\n| A-1 | Speed is constant | untested belief | Challenge |\nEOF"
+   },
+   "tool_name": "Bash",
+   "tool_response": {
+    "stdout": ""
+   },
+   "tool_use_id": "toolu_g3"
+  },
+  "ts": "2026-10-01T00:00:45.000Z"
+ },
+ {
+  "payload": {
+   "agent_id": "agent-guard-1",
+   "agent_type": "first-principles:first-principles",
+   "analysis_texts": {},
+   "cwd": "/fixture/cwd",
+   "hook_event_name": "SubagentStop",
+   "last_assistant_message": "The report is still being assembled.",
+   "session_id": "guard-session-0001",
+   "stop_hook_active": true
+  },
+  "ts": "2026-10-01T00:00:55.000Z"
+ },
+ {
+  "payload": {
+   "agent_id": "agent-guard-1",
+   "agent_type": "first-principles:first-principles",
+   "cwd": "/fixture/cwd",
+   "hook_event_name": "PostToolUse",
+   "session_id": "guard-session-0001",
+   "tool_input": {
+    "command": "cat >> /fixture/cwd/.first-principles/analysis-20261001T000000Z.md <<'EOF'\n## 6. Conclusion\n\n**Recommended approach:** Plan for four hours.\n\n**Confidence:** MEDIUM\nEOF"
+   },
+   "tool_name": "Bash",
+   "tool_response": {
+    "stdout": ""
+   },
+   "tool_use_id": "toolu_g4"
+  },
+  "ts": "2026-10-01T00:01:10.000Z"
+ },
+ {
+  "payload": {
+   "agent_id": "agent-guard-1",
+   "agent_type": "first-principles:first-principles",
+   "analysis_texts": {},
+   "cwd": "/fixture/cwd",
+   "hook_event_name": "SubagentStop",
+   "last_assistant_message": "Delivered: four hours, MEDIUM confidence.",
+   "session_id": "guard-session-0001",
+   "stop_hook_active": true
+  },
+  "ts": "2026-10-01T00:01:20.000Z"
+ }
+]

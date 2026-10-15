@@ -14,7 +14,7 @@ Q       ?= What is 17% of 2,340 exactly?
 export Q
 
 .DEFAULT_GOAL := help
-.PHONY: help venv install clean test test-model test-live lint format eval calibrate \
+.PHONY: help venv install clean test test-model test-live bench lint format eval calibrate \
         calibrate-cascade run route
 
 help: ## List available targets
@@ -39,13 +39,16 @@ test-model: ## Tests that load model2vec potion-base-8M (downloads once)
 test-live: ## Live tests: real Claude session + paid Jev/OpenRouter calls
 	$(BIN)/pytest -q -m live -s
 
+bench: ## Latency baselines (HOOK-04); UPDATE_BASELINE=1 rewrites tests/fixtures/fp/latency-baseline.json
+	$(BIN)/pytest -q -m bench -s
+
 lint: ## Ruff lint and format check
-	$(BIN)/ruff check src tests
-	$(BIN)/ruff format --check src tests
+	$(BIN)/ruff check src tests integrations/first-principles/*.py
+	$(BIN)/ruff format --check src tests integrations/first-principles/*.py
 
 format: ## Format and autofix with ruff
-	$(BIN)/ruff format src tests
-	$(BIN)/ruff check --fix src tests
+	$(BIN)/ruff format src tests integrations/first-principles/*.py
+	$(BIN)/ruff check --fix src tests integrations/first-principles/*.py
 
 eval: ## Score a backend on the holdout split (BACKEND=local by default)
 	$(CLI) eval --backend $(BACKEND)

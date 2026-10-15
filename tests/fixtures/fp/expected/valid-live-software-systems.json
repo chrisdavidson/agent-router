@@ -1,0 +1,274 @@
+{
+  "assumptions": {
+    "by_type": {
+      "convention": 4,
+      "current constraint": 1,
+      "untested belief": 14
+    },
+    "by_verdict": {
+      "Accept": 6,
+      "Challenge": 12,
+      "Discard": 1
+    },
+    "count": 19,
+    "rows": [
+      {
+        "assumption": "A-1 — Slow deploys cost the business a material amount",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A-2 — Microservices shorten deploy time",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A-3 — Every deploy has to run the full test suite",
+        "type": "convention",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A-4 — Every deploy needs a coordinated restart of the application",
+        "type": "convention",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A-5 — The 45-minute pipeline is what holds the cadence at 2 deploys a day",
+        "type": "untested belief",
+        "verdict": "Discard"
+      },
+      {
+        "assumption": "A-6 — The pipeline splits into about 5 min setup, 35 min tests and 5 min deploy/restart",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A-7 — Each engineer produces about 1 deployable change per working day",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A-8 — Each engineer waits on CI about 2 times a day and half of that waiting is lost",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A-9 — The split extracts about 60% of the 350 KLOC at roughly 2 KLOC per engineer-week (range 1–5)",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A-10 — Deploys and CI waits happen only inside an 8-hour (480-minute) working day",
+        "type": "current constraint",
+        "verdict": "Accept"
+      },
+      {
+        "assumption": "A-11 — Each service's test time is proportional to its share of the code",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A-12 — A deploy pipeline should run at no more than 50% utilisation so a queue does not form",
+        "type": "convention",
+        "verdict": "Accept"
+      },
+      {
+        "assumption": "A-13 — The test suite can run on parallel workers with no dependence on test order or shared state",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A-14 — Production deploys run one pipeline at a time",
+        "type": "convention",
+        "verdict": "Accept"
+      },
+      {
+        "assumption": "A-15 — Most changes stay inside one of the four domains",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A-16 — With 8 shards, each run uses 8 × 5 + 35 + 5 = 80 runner-minutes of CI compute, against 45 today",
+        "type": "untested belief",
+        "verdict": "Accept"
+      },
+      {
+        "assumption": "A-17 — Changes become ready at times spread evenly across the day",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A-18 — Time lost waiting scales in proportion to pipeline duration",
+        "type": "untested belief",
+        "verdict": "Accept"
+      },
+      {
+        "assumption": "A-19 — A checkout touches catalog, cart and fulfillment code",
+        "type": "untested belief",
+        "verdict": "Accept"
+      }
+    ]
+  },
+  "chains": [
+    {
+      "confidence": "MEDIUM",
+      "id": "C1",
+      "tag": null,
+      "title": "The 45-minute pipeline does not cap deploys at 2 a day"
+    },
+    {
+      "confidence": "MEDIUM",
+      "id": "C2",
+      "tag": null,
+      "title": "Most of a change's lead time is spent waiting for the next deploy, not in the pipeline"
+    },
+    {
+      "confidence": "MEDIUM",
+      "id": "C3",
+      "tag": null,
+      "title": "The 45 minutes becomes the binding limit only when each change deploys on its own"
+    },
+    {
+      "confidence": "MEDIUM",
+      "id": "C4",
+      "tag": null,
+      "title": "Splitting the tests by service saves no more time than splitting them by shard"
+    },
+    {
+      "confidence": "MEDIUM",
+      "id": "C5",
+      "tag": null,
+      "title": "The cost of the 45-minute wait could be anywhere from minor to large, because nobody has measured it"
+    },
+    {
+      "confidence": "MEDIUM",
+      "id": "C6",
+      "tag": null,
+      "title": "Microservices are a large investment with a slow payback"
+    },
+    {
+      "confidence": "MEDIUM",
+      "id": "C7",
+      "tag": null,
+      "title": "Speeding up the pipeline inside the monolith pays back in weeks, at least 6 times faster than microservices"
+    },
+    {
+      "confidence": "MEDIUM",
+      "id": "C8",
+      "tag": null,
+      "title": "Microservices swap restart coordination for version coordination and add new failure modes to the revenue path"
+    },
+    {
+      "confidence": "MEDIUM",
+      "id": "C9",
+      "tag": null,
+      "title": "Recommend option B — speed up the pipeline and raise deploy cadence inside the monolith"
+    },
+    {
+      "confidence": "HIGH",
+      "id": "C10",
+      "tag": null,
+      "title": "Waiting for the next batch outweighs pipeline time whenever deploys are spaced more than twice the pipeline time apart"
+    },
+    {
+      "confidence": "HIGH",
+      "id": "C11",
+      "tag": null,
+      "title": "Any test-time gain from a service split is also available to the monolith as shards"
+    },
+    {
+      "confidence": "HIGH",
+      "id": "C12",
+      "tag": null,
+      "title": "Splitting the app adds runtime failure modes to every call path the split crosses"
+    }
+  ],
+  "conclusion": {
+    "confidence": "MEDIUM",
+    "recommended": "Keep the monolith and go after lead time where it is actually spent. Run the suite in parallel on 8 shards (target ≤20 min, about 14.375 min), add changed-file test selection, and replace the coordinated restart with a rolling restart. Then move toward deploying each change on its own, enforcing a 20-minute pipeline budget in CI (chain C9)."
+  },
+  "contradictions": [],
+  "dead_ends": [
+    "Microservices as the fix for deploy speed",
+    "Flaky reruns as a hidden capacity cap",
+    "Merges cluster before deploys, so the pipeline dominates lead time",
+    "Merge-queue batching instead of a faster pipeline",
+    "Smaller per-service restarts as the decisive microservice advantage",
+    "Extract only one service"
+  ],
+  "gate": {
+    "bands": {
+      "1": "Rigorous",
+      "2": "Rigorous",
+      "3": "Rigorous",
+      "4": "Rigorous",
+      "5": "Rigorous",
+      "6": "Rigorous"
+    },
+    "cleared": true,
+    "criteria": {
+      "1": "Identify Essence",
+      "2": "Challenge Assumptions",
+      "3": "Establish Ground Truths",
+      "4": "Reason Upward",
+      "5": "Validate",
+      "6": "Conclusion-to-Ground-Truth Traceability"
+    },
+    "fix_repeat": false,
+    "passes": 1,
+    "result": "cleared · passes: 2 · Fix/Repeat fired: yes"
+  },
+  "ground_truths": {
+    "count": 17,
+    "unverified": [
+      "GT-1?",
+      "GT-2?",
+      "GT-3?",
+      "GT-4?",
+      "GT-5?",
+      "GT-11?",
+      "GT-12?",
+      "GT-13?",
+      "GT-14?",
+      "GT-15?",
+      "GT-16?",
+      "GT-17?"
+    ]
+  },
+  "re_entry": {
+    "disclosure": "Disclosed: One re-entry edge fired, the Self-Audit Gate's Fix/Repeat loop. Trigger: Criterion 3 scored Hand-wavy on the first pass, and Criteria 1, 4, 5 and 6 scored Sound",
+    "fired": true
+  },
+  "run_mode": null,
+  "run_mode_line": null,
+  "sections": [
+    "Answer",
+    "1. Problem Essence",
+    "2. Assumptions Table",
+    "3. Ground Truths",
+    "4. Derivation Chains",
+    "5. Abandoned Reasoning",
+    "6. Conclusion",
+    "Appendix — process output",
+    "Trade-off matrix (process output)",
+    "Assumption Audit scan (process output)",
+    "Adversarial pass (process output)",
+    "Techniques applied and not applied (process output)",
+    "§6→§4 closure ledger (process output)",
+    "Self-audit scan (process output)",
+    "Self-Audit Gate (process output)",
+    "Structured summary (process output)"
+  ],
+  "techniques_not_applied": [
+    {
+      "phase": 1,
+      "reason": "the core question is a choice between interventions, not whether a current figure is a convention or a hard bound",
+      "technique": "theoretical-limit"
+    },
+    {
+      "phase": 5,
+      "reason": "the conclusion is a plan, so the pre-mortem ran as the adversarial technique",
+      "technique": "inversion"
+    }
+  ]
+}

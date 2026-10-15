@@ -1,0 +1,14 @@
+{
+  "host": "Linux 7.2.5-3-omarchy x86_64, python 3.11.16; wall-clock of `bin/hook` subprocess, 2 warm-up runs discarded, local decider backend",
+  "pretooluse_bash_in_fp_agent": {
+    "n": 20,
+    "p50": 443.4,
+    "p95": 468.1
+  },
+  "recorded_at": "2026-10-15T23:18:27+00:00",
+  "user_prompt_routed": {
+    "n": 20,
+    "p50": 444.2,
+    "p95": 468.8
+  }
+}

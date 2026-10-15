@@ -1,0 +1,326 @@
+[
+  {
+    "agent_id": null,
+    "kind": "delegation",
+    "prompt_chars": 33,
+    "prompt_names_calc": false,
+    "session": "guard-session-0001",
+    "tool_name": "Agent",
+    "tool_use_id": "toolu_guard_agent",
+    "ts": "2026-10-01T00:00:00.000Z"
+  },
+  {
+    "agent_id": "agent-guard-1",
+    "kind": "run_start",
+    "session": "guard-session-0001",
+    "ts": "2026-10-01T00:00:01.000Z"
+  },
+  {
+    "agent_id": "agent-guard-1",
+    "command": "mkdir -p /fixture/cwd/.first-principles && : > /fixture/cwd/.first-principles/analysis-20261001T000000Z.md",
+    "kind": "report_op",
+    "op": "create",
+    "path": "/fixture/cwd/.first-principles/analysis-20261001T000000Z.md",
+    "session": "guard-session-0001",
+    "tool_name": "Bash",
+    "tool_use_id": "toolu_g1",
+    "ts": "2026-10-01T00:00:05.000Z"
+  },
+  {
+    "agent_id": "agent-guard-1",
+    "chars": 157,
+    "headings": [
+      "Answer",
+      "1. Problem Essence"
+    ],
+    "kind": "section_written",
+    "path": "/fixture/cwd/.first-principles/analysis-20261001T000000Z.md",
+    "restarts": false,
+    "revises": false,
+    "session": "guard-session-0001",
+    "text": "## Answer\n\nAbout 4 hours.\n\n## 1. Problem Essence\n\nHow long a fixed task takes.\n",
+    "tool_name": "Bash",
+    "tool_use_id": "toolu_g2",
+    "ts": "2026-10-01T00:00:20.000Z"
+  },
+  {
+    "agent_id": "agent-guard-1",
+    "analysis": null,
+    "analysis_exact": true,
+    "analysis_sha256": "c09440a61c5d0e908564b08506ae5d15be8fc1f4615a9070697d8835e8d26ce3",
+    "analysis_source": "appends",
+    "analysis_text": "<79 chars>",
+    "decisions": {
+      "assumptions": {
+        "by_type": {},
+        "by_verdict": {},
+        "count": 0,
+        "rows": []
+      },
+      "chains": [],
+      "conclusion": {
+        "confidence": null,
+        "recommended": null
+      },
+      "contradictions": [],
+      "dead_ends": [],
+      "gate": {
+        "bands": {},
+        "cleared": null,
+        "criteria": {},
+        "fix_repeat": false,
+        "passes": 0,
+        "passes_written": 0,
+        "result": null
+      },
+      "ground_truths": {
+        "count": 0,
+        "unverified": []
+      },
+      "re_entry": null,
+      "run_mode": null,
+      "run_mode_line": null,
+      "sections": [
+        "Answer",
+        "1. Problem Essence"
+      ],
+      "techniques_not_applied": []
+    },
+    "duration_s": 29.0,
+    "final_message": "The task takes about four hours.",
+    "kind": "run_end",
+    "references_read": [],
+    "report_restarts": 0,
+    "report_revisions": 0,
+    "routing": {
+      "calc_calls": 0,
+      "calc_calls_after_note": null,
+      "calc_calls_before_note": null,
+      "calc_failures": 0,
+      "calc_loaded_at": null,
+      "calc_loaded_before_first_note": null,
+      "calc_notes": 0,
+      "delegation": null,
+      "delegation_prompt_names_calc": false,
+      "interpreter_calls": 0,
+      "interpreter_calls_calc_could_run": 0,
+      "note_calls": []
+    },
+    "sections_written": 1,
+    "session": "guard-session-0001",
+    "sources": {
+      "checks": 0,
+      "failed": 0,
+      "failed_hosts": {},
+      "ok": 0,
+      "reported_missing": 0
+    },
+    "tool_failures": 0,
+    "ts": "2026-10-01T00:00:30.000Z"
+  },
+  {
+    "agent_id": "agent-guard-1",
+    "chars": 216,
+    "headings": [
+      "2. Assumptions Table"
+    ],
+    "kind": "section_written",
+    "path": "/fixture/cwd/.first-principles/analysis-20261001T000000Z.md",
+    "restarts": false,
+    "revises": false,
+    "session": "guard-session-0001",
+    "text": "## 2. Assumptions Table\n\n| ID | Assumption | Type | Verdict |\n|---|---|---|---|\n| A-1 | Speed is constant | untested belief | Challenge |\n",
+    "tool_name": "Bash",
+    "tool_use_id": "toolu_g3",
+    "ts": "2026-10-01T00:00:45.000Z"
+  },
+  {
+    "agent_id": "agent-guard-1",
+    "analysis": null,
+    "analysis_exact": true,
+    "analysis_sha256": "f823116c1642ad4e0c546f2adc89206f921cb62718c5390489ae18e08184eda9",
+    "analysis_source": "appends",
+    "analysis_text": "<217 chars>",
+    "decisions": {
+      "assumptions": {
+        "by_type": {
+          "untested belief": 1
+        },
+        "by_verdict": {
+          "Challenge": 1
+        },
+        "count": 1,
+        "rows": [
+          {
+            "assumption": "Speed is constant",
+            "type": "untested belief",
+            "verdict": "Challenge"
+          }
+        ]
+      },
+      "chains": [],
+      "conclusion": {
+        "confidence": null,
+        "recommended": null
+      },
+      "contradictions": [],
+      "dead_ends": [],
+      "gate": {
+        "bands": {},
+        "cleared": null,
+        "criteria": {},
+        "fix_repeat": false,
+        "passes": 0,
+        "passes_written": 0,
+        "result": null
+      },
+      "ground_truths": {
+        "count": 0,
+        "unverified": []
+      },
+      "re_entry": null,
+      "run_mode": null,
+      "run_mode_line": null,
+      "sections": [
+        "Answer",
+        "1. Problem Essence",
+        "2. Assumptions Table"
+      ],
+      "techniques_not_applied": []
+    },
+    "duration_s": 54.0,
+    "final_message": "The report is still being assembled.",
+    "kind": "run_end",
+    "references_read": [],
+    "report_restarts": 0,
+    "report_revisions": 0,
+    "routing": {
+      "calc_calls": 0,
+      "calc_calls_after_note": null,
+      "calc_calls_before_note": null,
+      "calc_failures": 0,
+      "calc_loaded_at": null,
+      "calc_loaded_before_first_note": null,
+      "calc_notes": 0,
+      "delegation": null,
+      "delegation_prompt_names_calc": false,
+      "interpreter_calls": 0,
+      "interpreter_calls_calc_could_run": 0,
+      "note_calls": []
+    },
+    "sections_written": 2,
+    "session": "guard-session-0001",
+    "sources": {
+      "checks": 0,
+      "failed": 0,
+      "failed_hosts": {},
+      "ok": 0,
+      "reported_missing": 0
+    },
+    "tool_failures": 0,
+    "ts": "2026-10-01T00:00:55.000Z"
+  },
+  {
+    "agent_id": "agent-guard-1",
+    "chars": 167,
+    "headings": [
+      "6. Conclusion"
+    ],
+    "kind": "section_written",
+    "path": "/fixture/cwd/.first-principles/analysis-20261001T000000Z.md",
+    "restarts": false,
+    "revises": false,
+    "session": "guard-session-0001",
+    "text": "## 6. Conclusion\n\n**Recommended approach:** Plan for four hours.\n\n**Confidence:** MEDIUM\n",
+    "tool_name": "Bash",
+    "tool_use_id": "toolu_g4",
+    "ts": "2026-10-01T00:01:10.000Z"
+  },
+  {
+    "agent_id": "agent-guard-1",
+    "analysis": null,
+    "analysis_exact": true,
+    "analysis_sha256": "88feefbf8eefc4531a0a401d660874050ddbde1fb8b3043001ab291d6e38a87d",
+    "analysis_source": "appends",
+    "analysis_text": "<306 chars>",
+    "decisions": {
+      "assumptions": {
+        "by_type": {
+          "untested belief": 1
+        },
+        "by_verdict": {
+          "Challenge": 1
+        },
+        "count": 1,
+        "rows": [
+          {
+            "assumption": "Speed is constant",
+            "type": "untested belief",
+            "verdict": "Challenge"
+          }
+        ]
+      },
+      "chains": [],
+      "conclusion": {
+        "confidence": "MEDIUM",
+        "recommended": "Plan for four hours."
+      },
+      "contradictions": [],
+      "dead_ends": [],
+      "gate": {
+        "bands": {},
+        "cleared": null,
+        "criteria": {},
+        "fix_repeat": false,
+        "passes": 0,
+        "passes_written": 0,
+        "result": null
+      },
+      "ground_truths": {
+        "count": 0,
+        "unverified": []
+      },
+      "re_entry": null,
+      "run_mode": null,
+      "run_mode_line": null,
+      "sections": [
+        "Answer",
+        "1. Problem Essence",
+        "2. Assumptions Table",
+        "6. Conclusion"
+      ],
+      "techniques_not_applied": []
+    },
+    "duration_s": 79.0,
+    "final_message": "Delivered: four hours, MEDIUM confidence.",
+    "kind": "run_end",
+    "references_read": [],
+    "report_restarts": 0,
+    "report_revisions": 0,
+    "routing": {
+      "calc_calls": 0,
+      "calc_calls_after_note": null,
+      "calc_calls_before_note": null,
+      "calc_failures": 0,
+      "calc_loaded_at": null,
+      "calc_loaded_before_first_note": null,
+      "calc_notes": 0,
+      "delegation": null,
+      "delegation_prompt_names_calc": false,
+      "interpreter_calls": 0,
+      "interpreter_calls_calc_could_run": 0,
+      "note_calls": []
+    },
+    "sections_written": 3,
+    "session": "guard-session-0001",
+    "sources": {
+      "checks": 0,
+      "failed": 0,
+      "failed_hosts": {},
+      "ok": 0,
+      "reported_missing": 0
+    },
+    "tool_failures": 0,
+    "ts": "2026-10-01T00:01:20.000Z"
+  }
+]
