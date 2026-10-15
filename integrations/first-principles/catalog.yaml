@@ -7,6 +7,10 @@
 # slash-only skills, the Self-Audit Gate) stays with first-principles, so no entry here
 # routes to an individual technique.
 #
+# ${...} are catalog variables, filled from the integration's manifest at load time (see
+# MANIFEST.md): fp.* from the first-principles plugin's published manifest (or the pinned
+# fallback), self.* from this integration's own plugin.
+#
 # Examples and native_examples are written independently of first-principles' routing
 # catalogs, which are used as the holdout in eval_set.yaml.
 version: "fp-2026-09-28.2"
@@ -18,7 +22,7 @@ entries:
     project: first-principles-skill
     license: MIT
     url: https://github.com/chrisdavidson/first-principles-skill
-    target: first-principles:first-principles
+    target: ${fp.agent_type}
     points: [prompt, tool]
     replaces: [Agent]
     agents: [main]
@@ -50,10 +54,10 @@ entries:
     project: agent-router (own code)
     license: MIT
     url: https://github.com/usathyan/agent-router
-    target: mcp__plugin_agent-router-fp_agent_router__calc
+    target: ${self.calc_tool}
     points: [tool]
     replaces: [Bash]
-    agents: ["first-principles:first-principles"]
+    agents: ["${fp.agent_type}"]
     threshold: 0.8  # calibrate.py, first-principles-agent cal cases
     fits: calc_expression  # only a one-expression call the calculator can run (core/fit.py)
     what: >

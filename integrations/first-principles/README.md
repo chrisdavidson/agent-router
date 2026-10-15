@@ -47,8 +47,9 @@ cannot run, it prints `{}` and the session carries on unchanged (fail open).
 | `AGENT_ROUTER_THRESHOLD` | calibrated (`calibration.json`) | higher = fewer notes |
 | `AGENT_ROUTER_DISABLED` | unset | `1` turns every checkpoint off |
 | `AGENT_ROUTER_STATE_DIR` | `$XDG_STATE_HOME/agent-router` | per-session state and audit log |
-| `AGENT_ROUTER_SKIP_INPUT` | `\.first-principles\b` | tool calls matching this are never routed |
-| `AGENT_ROUTER_SKIP_PROMPT` | `^\s*/first-principles:` | prompts matching this get no delegation note: they already launch the agent |
+| `AGENT_ROUTER_SKIP_INPUT` | derived from the manifest: the report directory, escaped, then `(?!\w)` | tool calls matching this are never routed |
+| `AGENT_ROUTER_SKIP_PROMPT` | derived: `^\s*(?:<command prefix>\|/<this plugin's name>:)` | prompts matching this get no delegation note: they already launch the agent, or come from this plugin's own commands |
+| `FP_PLUGIN_ROOT` | unset | the first-principles plugin tree to read the manifest, schema and examples from (see [`MANIFEST.md`](MANIFEST.md)) |
 
 Hook cost: about 0.45 s per routed call (prompt, `Agent`, and `Bash` inside the agent). A
 `Bash` call on the main thread is answered by the shell script in milliseconds, without Python.
@@ -156,25 +157,26 @@ reference (second-order thinking, Phase 2 inversion).
 
 | File | What |
 |---|---|
-| `catalog.yaml` | the two entries agent-router may point at (each scoped to one agent context, with its own threshold), plus the `none` exemplars |
+| `MANIFEST.md`, `manifest.fallback.json`, `descriptor.json` | the integration manifest format, the pinned copy used when the plugin publishes none, and this integration's descriptor |
+| `catalog.yaml` | the two entries agent-router may point at (each scoped to one agent context, with its own threshold), plus the `none` exemplars. Targets are `${...}` variables filled from the manifest |
 | `eval_set.yaml` | `cal` cases written for this integration; `test` holdout = first-principles' own routing catalog (13 P, 20 N) plus Bash calls inside the agent |
 | `calibration.json`, `calibrate.py` | classifier parameters, then one threshold per entry, all fit on the `cal` split only |
 | `plugin/` | the Claude Code plugin: hooks, `.mcp.json`, `bin/hook`, `bin/mcp`, `bin/trace` |
 | `trace.py` | the decision trace: hook handler, analysis parser, `--replay`, `--report` |
 | `battery.py` | live A/B: first-principles' routing catalog with and without this plugin |
-| `run_examples.py` | runs first-principles' 14 worked examples through the agent and tabulates every router decision |
+| `run_examples.py` | runs the plugin's worked examples (read from `<plugin root>/<examples_dir>`) through the agent and tabulates every router decision |
 
 ## Measuring it
 
 - **Offline:** `agent-router eval --catalog catalog.yaml --cases eval_set.yaml --skip-input
   '\.first-principles\b'` scores the catalog on the `test` holdout with the local
   classifier and `calibration.json`. `calibrate.py` re-fits the calibration on the `cal` split.
-- **Live A/B:** `.venv/bin/python integrations/first-principles/battery.py` runs
+- **Live A/B:** `.venv/bin/python integrations/first-principles/battery.py --fp-repo <checkout>` runs
   first-principles' routing catalog with and without this plugin, one fresh `claude -p`
   session per prompt, scored with first-principles' own `detect_routing`. It costs tokens; a
   delegated session is stopped at the delegation.
-- **Worked examples:** `.venv/bin/python integrations/first-principles/run_examples.py` runs
-  first-principles' 14 worked examples through the agent and writes a per-example summary
+- **Worked examples:** `.venv/bin/python integrations/first-principles/run_examples.py [--plugin-root PATH]` runs
+  the plugin's worked examples (`--fp-repo` is a deprecated alias) through the agent and writes a per-example summary
   and a table of every router decision to a local output folder. Each run gets a status:
   - `complete`
   - `partial`: it ended, but its report lacks a section 1–6 or the gate

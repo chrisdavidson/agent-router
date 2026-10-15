@@ -6,10 +6,14 @@ integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
 repo="$(dirname "$(dirname "$integ")")"
 py="${AGENT_ROUTER_PYTHON:-$repo/.venv/bin/python}"
 payload="$(cat)"
-# Fast path: only the first-principles agent is traced; everything else answers at once.
+# Fast path: only the integrated plugin's agent is traced; everything else answers at once.
 # The main session's Agent call that starts a run is traced too (its prompt, before the run).
-agent_re='"agent_type"[[:space:]]*:[[:space:]]*"first-principles:first-principles"'
-handoff_re='"subagent_type"[[:space:]]*:[[:space:]]*"first-principles:first-principles"'
+# The agent type is the one literal this script must carry (it cannot start Python to read the
+# manifest); FP_AGENT_TYPE overrides it, and a test holds the default equal to the pinned
+# fallback manifest's agent_type. hooks/hooks.json carries the same literal in its matchers.
+agent="${FP_AGENT_TYPE:-first-principles:first-principles}"
+agent_re='"agent_type"[[:space:]]*:[[:space:]]*"'"$agent"'"'
+handoff_re='"subagent_type"[[:space:]]*:[[:space:]]*"'"$agent"'"'
 if [ -n "$AGENT_ROUTER_DISABLED" ] || [ ! -x "$py" ] \
   || ! [[ $payload =~ $agent_re || $payload =~ $handoff_re ]]; then
   echo '{}'

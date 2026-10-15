@@ -148,8 +148,18 @@ def to_output(decision: Decision, hook_event: str) -> dict[str, Any]:
     return {}
 
 
-def handle(payload: dict[str, Any], make_router: RouterFactory, root: Path | None = None) -> dict:
-    """Route one hook payload; returns the hook output (``{}`` when nothing applies)."""
+def handle(
+    payload: dict[str, Any],
+    make_router: RouterFactory,
+    root: Path | None = None,
+    integration: dict[str, Any] | None = None,
+) -> dict:
+    """Route one hook payload; returns the hook output (``{}`` when nothing applies).
+
+    ``integration`` is how the integrated plugin's manifest was resolved for this call
+    (source, plugin root, manifest version, warnings). It is stored in the session state once,
+    by the first call that routes.
+    """
     root = root if root is not None else state_root()
     session = _safe_name(str(payload.get("session_id") or ""))
     state_path = root / "sessions" / f"{session}.json"
@@ -157,6 +167,8 @@ def handle(payload: dict[str, Any], make_router: RouterFactory, root: Path | Non
     event = to_event(payload, state)
     if event is None:
         return {}
+    if integration is not None and "integration" not in state:
+        state["integration"] = integration
     seed = {
         (event.session_id, int(t), str(e))
         for t, e in state.get("suggested", [])

@@ -11,8 +11,8 @@ if [ ! -x "$bin" ]; then
   exit 0
 fi
 payload="$(cat)"
-# Fast path: a main-thread Bash call has no eligible entry (exact-calc is scoped to the
-# first-principles agent), so answer without starting Python.
+# Fast path: a main-thread Bash call has no eligible entry (the calculator is scoped to the
+# integrated plugin's agent), so answer without starting Python.
 # (A false match only means the full path runs; routing itself decides.)
 bash_re='"tool_name"[[:space:]]*:[[:space:]]*"Bash"'
 agent_re='"agent_type"[[:space:]]*:'
@@ -23,11 +23,10 @@ fi
 export AGENT_ROUTER_CATALOG="${AGENT_ROUTER_CATALOG:-$integ/catalog.yaml}"
 export AGENT_ROUTER_CALIBRATION="${AGENT_ROUTER_CALIBRATION:-$integ/calibration.json}"
 export AGENT_ROUTER_MODE=advisory
-# the agent's own report commands (.first-principles/analysis-*.md) are never routed: appends
-# name the file, in-place revisions often `cd` into the directory first, so match the name alone
-export AGENT_ROUTER_SKIP_INPUT="${AGENT_ROUTER_SKIP_INPUT:-\.first-principles\b}"
-# a prompt that already launches first-principles (/first-principles:...) needs no delegation
-# note: in the 28 example runs the note fired on 10 such prompts and could change nothing
-export AGENT_ROUTER_SKIP_PROMPT="${AGENT_ROUTER_SKIP_PROMPT:-^\s*/first-principles:}"
+# Identity (agent type, report directory, command prefixes) is not typed here: with this set,
+# `agent-router hook` resolves the plugin's published manifest (or the pinned fallback) and
+# derives the catalog's targets and the default skip patterns from it. An explicit
+# AGENT_ROUTER_SKIP_INPUT / AGENT_ROUTER_SKIP_PROMPT still wins. See ../../MANIFEST.md.
+export AGENT_ROUTER_INTEGRATION="$integ"
 export HF_HUB_DISABLE_PROGRESS_BARS=1
 printf '%s' "$payload" | exec "$bin" hook

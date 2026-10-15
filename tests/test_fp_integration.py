@@ -7,12 +7,20 @@ from pathlib import Path
 
 import pytest
 
+from agent_router.contracts.integration import variables_for_catalog
 from agent_router.core.catalog import load_catalog
 from agent_router.core.types import HookPoint
 from agent_router.evaluate import load_cases
 
 INTEG = Path(__file__).resolve().parents[1] / "integrations" / "first-principles"
 FP = "first-principles:first-principles"
+
+
+def _catalog():
+    """The integration catalog with its variables filled from the manifest (the pinned fallback
+    here: the tests' plugin cache is empty)."""
+    path = INTEG / "catalog.yaml"
+    return load_catalog(path, variables=variables_for_catalog(path))
 
 
 def _battery():
@@ -23,7 +31,7 @@ def _battery():
 
 
 def test_catalog_scopes_each_entry():
-    cat = load_catalog(INTEG / "catalog.yaml")
+    cat = _catalog()
     delegate = cat.get("first-principles-agent")
     assert delegate.kind == "agent" and delegate.target == FP and delegate.agents == ("main",)
     # no entry routes to an individual first-principles technique (that is Step 0's job)
@@ -34,7 +42,7 @@ def test_catalog_scopes_each_entry():
 
 
 def test_eval_set_ids_unique_and_labels_known():
-    cat = load_catalog(INTEG / "catalog.yaml")
+    cat = _catalog()
     cases = load_cases(INTEG / "eval_set.yaml")
     assert len({c.id for c in cases}) == len(cases)
     known = {e.id for e in cat.entries} | {"none"}
@@ -45,7 +53,7 @@ def test_eval_set_ids_unique_and_labels_known():
 
 def test_calibration_is_tagged_with_the_integration_catalog():
     cal = json.loads((INTEG / "calibration.json").read_text())
-    version = load_catalog(INTEG / "catalog.yaml").version
+    version = _catalog().version
     assert cal["model2vec"]["catalog_version"] == version
 
 
@@ -89,7 +97,7 @@ def test_holdout_meets_first_principles_thresholds(monkeypatch):
     from agent_router.evaluate import make_router, run_eval
 
     monkeypatch.setattr(local, "CALIBRATION_PATH", INTEG / "calibration.json")
-    cat = load_catalog(INTEG / "catalog.yaml")
+    cat = _catalog()
     router = make_router("local", cat)
     cases = [c for c in load_cases(INTEG / "eval_set.yaml") if c.id.startswith("fp-")]
     report = run_eval(lambda: router, cases)
@@ -124,7 +132,7 @@ def test_plugin_serves_only_the_calculator():
     assert list(mcp) == ["agent_router"]
     script = (INTEG / "plugin" / "bin" / "mcp").read_text()
     assert "mcp --tools calc" in script
-    target = load_catalog(INTEG / "catalog.yaml").get("exact-calc").target
+    target = _catalog().get("exact-calc").target
     assert target == "mcp__plugin_agent-router-fp_agent_router__calc"
 
 

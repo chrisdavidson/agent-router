@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 
@@ -84,10 +86,57 @@ class Catalog:
 _REQUIRED = ("id", "kind", "name", "project", "license", "url", "what", "target", "points")
 
 
-def load_catalog(path: str | Path = DEFAULT_CATALOG) -> Catalog:
+_VAR = re.compile(r"\$\{([^}]*)\}")
+_FREE_TEXT = frozenset({"examples", "not_for"})
+"""Entry fields that are exemplar text, never substituted (a shell example may hold ``${x}``)."""
+
+
+def _substitute(value: Any, variables: Mapping[str, str], where: str) -> Any:
+    """``${name}`` replaced in strings, recursively through lists and mappings."""
+    if isinstance(value, str):
+
+        def sub(m: re.Match[str]) -> str:
+            if m.group(1) not in variables:
+                raise CatalogError(f"{where}: unresolved variable ${{{m.group(1)}}}")
+            return variables[m.group(1)]
+
+        return _VAR.sub(sub, value)
+    if isinstance(value, list):
+        return [_substitute(v, variables, where) for v in value]
+    if isinstance(value, dict):
+        return {k: _substitute(v, variables, where) for k, v in value.items()}
+    return value
+
+
+def _expand(data: dict[str, Any], variables: Mapping[str, str]) -> dict[str, Any]:
+    out = dict(data)
+    entries = []
+    for raw in data["entries"]:
+        if not isinstance(raw, dict):
+            entries.append(raw)
+            continue
+        where = f"entry {raw.get('id', '?')}"
+        entries.append(
+            {
+                k: v if k in _FREE_TEXT else _substitute(v, variables, f"{where}: {k}")
+                for k, v in raw.items()
+            }
+        )
+    out["entries"] = entries
+    return out
+
+
+def load_catalog(
+    path: str | Path = DEFAULT_CATALOG, variables: Mapping[str, str] | None = None
+) -> Catalog:
+    """Load a catalog. With ``variables``, ``${name}`` in the entries' string fields (and in
+    the lists and mappings they hold; not ``examples`` / ``not_for``) is replaced by its value,
+    and a name with no value raises :class:`CatalogError`. Without them nothing is substituted."""
     data = yaml.safe_load(Path(path).read_text())
     if not isinstance(data, dict) or "entries" not in data:
         raise CatalogError("catalog must be a mapping with an 'entries' list")
+    if variables is not None:
+        data = _expand(data, variables)
     entries: list[CatalogEntry] = []
     seen: set[str] = set()
     for raw in data["entries"]:

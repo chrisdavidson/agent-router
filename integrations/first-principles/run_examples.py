@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Run first-principles' worked examples through the agent, with agent-router-fp loaded.
+"""Run the integrated plugin's worked examples through its agent, with this integration loaded.
 
-first-principles-skill ships 14 worked examples (``shared/examples/*.md``). Each is a finished
+The plugin ships worked examples in its tree (the manifest's ``examples_dir``, found under the
+plugin root; see MANIFEST.md). Each is a finished
 analysis; this script takes each example's *setup* (its ``**Scenario.**`` paragraph, else the
 ``**Claim under analysis.**`` / ``**Target quantity.**`` / ``**Target:**`` paragraph, else its
 ``**Core problem:**``), asks the agent to analyse it from
-scratch, and records what the agent-router checkpoints did along the way. The
-first-principles repository is only read.
+scratch, and records what the agent-router checkpoints did along the way. The plugin tree is
+only read.
 
 For each example, in ``<out>/<name>/``:
   run.jsonl          the ``claude -p`` stream-json capture
   prompt.txt         the exact prompt sent
-  .first-principles/ the agent's analysis file (the agent writes it into its cwd)
+  <output dir>/      the agent's analysis file (the agent writes it into its cwd)
 and ``<out>/summary.md`` / ``summary.json``: status (complete / partial / failed, with what is
 missing), delegated?, analysis file and size, calculator
 notes and calls, cost, turns, duration. ``<out>/state/audit/`` holds every checkpoint;
@@ -20,15 +21,19 @@ Replay them in the demo UI with ``agent-router demo --catalog
 integrations/first-principles/catalog.yaml --audit-dir <out>/state/audit``.
 
 Entry modes:
-  launcher  (default) ``/first-principles:first-principles-analysis <setup>``: the agent
+  launcher  (default) ``<manifest launcher> <setup>``: the agent
             always runs, so every example exercises the exact-recompute checkpoint.
   nudge     the bare setup as a prompt: whether the agent runs depends on the delegation
-            nudge and first-principles' own routing.
+            nudge and the plugin's own routing.
 
 Costs real tokens: each example is a full analysis (up to the agent's 60 turns).
 
+The plugin root is ``--plugin-root``, else the one the manifest resolution finds
+(``$FP_PLUGIN_ROOT``, the recorded root, the Claude plugin cache).
+``--fp-repo PATH`` is a deprecated alias for ``--plugin-root PATH/<plugin name>``.
+
 Usage:
-    run_examples.py [--fp-repo PATH] [--only NAME,...] [--entry launcher|nudge]
+    run_examples.py [--plugin-root PATH] [--only NAME,...] [--entry launcher|nudge]
                     [--model M] [--jobs N] [--out DIR] [--timeout S] [--dry-run]
 """
 
@@ -47,9 +52,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PLUGIN = HERE / "plugin"
-CALC_TOOL = "mcp__plugin_agent-router-fp_agent_router__calc"
-FP_AGENT = "first-principles:first-principles"
-LAUNCHER = "/first-principles:first-principles-analysis"
 
 # Where each worked example states its setup, in order of preference; the prefix is prepended
 # so the agent knows what kind of input it is (a claim to test, a quantity to estimate, ...).
@@ -84,23 +86,53 @@ def extract_setup(md: str) -> tuple[str, str]:
     raise ValueError("no setup paragraph found (Scenario / Claim / Target / Core problem)")
 
 
-def build_prompt(setup: str, entry: str) -> str:
+def build_prompt(setup: str, entry: str, launcher: str | None = None) -> str:
+    """The prompt for one example; ``launcher`` is the manifest's launcher command."""
     ask = (
         f"{setup}\n\nAnalyse this from first principles. Show the arithmetic for every "
         "computed figure and recompute it."
     )
-    return f"{LAUNCHER} {ask}" if entry == "launcher" else ask
+    if entry != "launcher":
+        return ask
+    return f"{launcher or _trace_module().MANIFEST.launcher} {ask}"
 
 
-def _trace_module():
-    """trace.py, next to this script (standard library only): its report parser."""
-    import importlib.util
+_TRACE = None
 
-    spec = importlib.util.spec_from_file_location("fp_trace", HERE / "trace.py")
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+
+def _trace_module(reload: bool = False):
+    """trace.py, next to this script: its report parser, and the plugin identity it derives
+    from the manifest (``AGENT``, ``CALC_TOOL``, ``MANIFEST``, ...). ``reload`` re-derives it
+    after the environment changed (a plugin root was chosen)."""
+    global _TRACE
+    if _TRACE is None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("fp_trace", HERE / "trace.py")
+        assert spec and spec.loader
+        _TRACE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_TRACE)
+    elif reload:
+        _TRACE.configure()
+    return _TRACE
+
+
+def choose_plugin_root(root: Path | None) -> Path | None:
+    """Make ``root`` the plugin root for this process (re-deriving the identity from its
+    manifest) and return the root in force: ``root``, else the resolved one, else None."""
+    tr = _trace_module()
+    if root is not None:
+        from agent_router.contracts.integration import load_integration
+
+        os.environ[load_integration(HERE).root_env] = str(root)
+        tr = _trace_module(reload=True)
+    found = tr.INTEGRATION.get("plugin_root")
+    return Path(found) if found else None
+
+
+def list_examples(plugin_root: Path) -> list[Path]:
+    """The worked examples under the plugin root's ``examples_dir``."""
+    return sorted((plugin_root / _trace_module().MANIFEST.examples_dir).glob("*.md"))
 
 
 REQUIRED_SECTIONS = tuple(range(1, 7))  # the report's ## 1. to ## 6.
@@ -140,7 +172,7 @@ def completeness(events: list[dict], files: list[Path]) -> tuple[str, list[str]]
         for b in (e.get("message") or {}).get("content") or []
         if b.get("type") == "tool_use"
         and b.get("name") in ("Agent", "Task")
-        and FP_AGENT in json.dumps(b.get("input", {}))
+        and _trace_module().AGENT in json.dumps(b.get("input", {}))
     }
     returned = {  # its result, or a backgrounded agent's completion notification
         b.get("tool_use_id")
@@ -211,10 +243,11 @@ def summarize(name: str, workdir: Path, capture: Path, state: Path) -> dict:
         if b.get("type") == "tool_use"
     ]
     delegated = any(
-        b.get("name") in ("Agent", "Task") and FP_AGENT in json.dumps(b.get("input", {}))
+        b.get("name") in ("Agent", "Task")
+        and _trace_module().AGENT in json.dumps(b.get("input", {}))
         for b in tool_uses
     )
-    calc_calls = sum(b.get("name") == CALC_TOOL for b in tool_uses)
+    calc_calls = sum(b.get("name") == _trace_module().CALC_TOOL for b in tool_uses)
     result = next((e for e in reversed(events) if e.get("type") == "result"), {})
     audit = state / "audit" / f"{session}.jsonl"
     records = (
@@ -222,7 +255,7 @@ def summarize(name: str, workdir: Path, capture: Path, state: Path) -> dict:
         if session and audit.is_file()
         else []
     )
-    files = sorted((workdir / ".first-principles").glob("analysis-*.md"))
+    files = sorted(workdir.glob(_trace_module().OUTPUT_GLOB))
     words = sum(len(f.read_text(errors="replace").split()) for f in files)
     inline = None if files else inline_report(events)
     if inline:
@@ -239,10 +272,12 @@ def summarize(name: str, workdir: Path, capture: Path, state: Path) -> dict:
         "analysis_files": [str(f) for f in files],
         "analysis_words": words,
         "delegation_note": any(
-            r["action"] == "suggest" and r["entry_id"] == "first-principles-agent" for r in records
+            r["action"] == "suggest" and r["entry_id"] == _trace_module().DELEGATE_ENTRY
+            for r in records
         ),
         "calc_notes": sum(
-            r["action"] == "suggest" and r["entry_id"] == "exact-calc" for r in records
+            r["action"] == "suggest" and r["entry_id"] == _trace_module().CALC_ENTRY
+            for r in records
         ),
         "report_writes_skipped": sum(r["reason"] == "skip pattern" for r in records),
         "calc_calls": calc_calls,
@@ -253,7 +288,7 @@ def summarize(name: str, workdir: Path, capture: Path, state: Path) -> dict:
     }
 
 
-def run_example(name: str, prompt: str, out: Path, args) -> dict:
+def run_example(name: str, prompt: str, out: Path, args, plugin_root: Path) -> dict:
     workdir = out / name
     workdir.mkdir(parents=True, exist_ok=True)
     (workdir / "prompt.txt").write_text(prompt + "\n")
@@ -263,7 +298,7 @@ def run_example(name: str, prompt: str, out: Path, args) -> dict:
         "claude",
         "-p",
         "--plugin-dir",
-        str(args.fp_repo / "first-principles"),
+        str(plugin_root),
         "--plugin-dir",
         str(PLUGIN),
         "--no-session-persistence",
@@ -367,8 +402,8 @@ def write_decisions(out: Path, rows: list[dict]) -> None:
     lines = [
         "# agent-router decisions",
         "",
-        f"Every checkpoint the agent-router-fp hooks recorded, from `{audit_dir}`.",
-        "`(main)` = the main session, `(in agent)` = inside first-principles:first-principles.",
+        f"Every checkpoint the hooks of this integration recorded, from `{audit_dir}`.",
+        "`(main)` = the main session, `(in agent)` = inside the plugin's agent.",
         "",
         "## Counts per example",
         "",
@@ -415,9 +450,8 @@ def write_decisions(out: Path, rows: list[dict]) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument(
-        "--fp-repo", type=Path, default=Path.home() / "Projects" / "first-principles-skill"
-    )
+    ap.add_argument("--plugin-root", type=Path, help="root of the plugin whose examples to run")
+    ap.add_argument("--fp-repo", type=Path, help="deprecated: --plugin-root PATH/<plugin name>")
     ap.add_argument("--only", help="comma-separated example names (file stems)")
     ap.add_argument("--entry", choices=["launcher", "nudge"], default="launcher")
     ap.add_argument("--model", help="claude --model (default: the CLI's default)")
@@ -427,12 +461,27 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="print the prompts, run nothing")
     args = ap.parse_args()
 
-    examples = sorted((args.fp_repo / "shared" / "examples").glob("*.md"))
+    root = args.plugin_root
+    if root is None and args.fp_repo is not None:
+        root = args.fp_repo / _trace_module().MANIFEST.plugin_name
+        print(f"--fp-repo is deprecated: using --plugin-root {root}", file=sys.stderr)
+    if root is not None and not root.is_dir():
+        print(f"plugin root {root} is not a directory", file=sys.stderr)
+        return 2
+    plugin_root = choose_plugin_root(root)
+    if plugin_root is None:
+        print(
+            "no plugin root: pass --plugin-root, or set the plugin-root environment variable "
+            "(see MANIFEST.md)",
+            file=sys.stderr,
+        )
+        return 2
+    examples = list_examples(plugin_root)
     if args.only:
         wanted = set(args.only.split(","))
         examples = [e for e in examples if e.stem in wanted]
     if not examples:
-        print("no examples found", file=sys.stderr)
+        print(f"no examples found under {plugin_root}", file=sys.stderr)
         return 2
     prompts = {}
     for path in examples:
@@ -450,7 +499,9 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     print(f"{len(prompts)} examples -> {out}  (entry={args.entry}, jobs={args.jobs})")
     with cf.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-        futures = {pool.submit(run_example, n, p, out, args): n for n, p in prompts.items()}
+        futures = {
+            pool.submit(run_example, n, p, out, args, plugin_root): n for n, p in prompts.items()
+        }
         rows = [f.result() for f in cf.as_completed(futures)]
     rows.sort(key=lambda r: r["example"])
     write_summary(out, rows)

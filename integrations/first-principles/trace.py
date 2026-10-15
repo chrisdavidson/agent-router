@@ -37,6 +37,10 @@ prose=<y>``. In every other case (no block, a bad block, an unusable schema) ``d
 the unchanged prose parse (``decisions_source`` ``prose``), and with no report text at all
 both are null. ``analysis_source`` keeps its own meaning: where the report TEXT came from.
 
+The plugin's identity (agent type, report paths, summary heading, calculator tool) is derived from
+its integration manifest, or the pinned fallback, when this module loads (``configure()``);
+``run_end.integration`` records how the manifest was found. See MANIFEST.md.
+
 A first-principles run can stop more than once (its delivery guard may refuse the stop). Every
 SubagentStop writes a run_end carrying ``stop_attempt`` (1-based count for that agent id) and
 ``stop_hook_active``; consumers take the last run_end per agent id (``last_run_ends``).
@@ -72,19 +76,60 @@ except ImportError:
     except ImportError:
         contracts = None  # type: ignore[assignment]  # the trace then records contract: null
 
-AGENT = "first-principles:first-principles"
-CALC_TOOL = "mcp__plugin_agent-router-fp_agent_router__calc"
 MAX_TEXT = 300
 
+# Identity of the integrated plugin, derived from its manifest by configure() below.
+AGENT: str  # the agent's subagent type
+CALC_TOOL: str  # the exact calculator's tool name
+SUMMARY_HEADING: str
+OUTPUT_GLOB: str  # where the agent writes its analysis, relative to its cwd
+DELEGATE_ENTRY: str  # catalog entry ids, from the integration's descriptor
+CALC_ENTRY: str
+REPORT_DIR: re.Pattern[str]
+REPORT_PATH: re.Pattern[str]
+APPEND: re.Pattern[str]
+MANIFEST: Any  # the resolved manifest (agent_router.contracts.manifest.Manifest)
+INTEGRATION: dict[str, Any]  # how the manifest was found: source, plugin_root, version, warnings
+
 # The summary-block contract. Schema versions the reader accepts; a block of another version is
-# read but marked unverified. Pinned here until the integration manifest names them.
-SUMMARY_HEADING = "## Structured summary (process output)"
+# read but marked unverified. What the publisher emits is the manifest's ``summary.schema_version``;
+# what this reader accepts stays here, owned by the router.
 ACCEPTED_SCHEMA_VERSIONS = {1}
 PINNED_SCHEMA = HERE / "contract" / "summary-schema.json"
 
-REPORT_DIR = re.compile(r"\.first-principles(?:/|[\s\"';&)]|$)")
-REPORT_PATH = re.compile(r"""[^\s"'<>|;&=]*\.first-principles/analysis-[^\s"'<>|;&=]+\.md""")
-APPEND = re.compile(r">>\s*\S*\.first-principles/|>>\s*\"?\$")
+
+def _glob_regex(glob: str, directory: str) -> str:
+    """Regex for a path under ``directory`` matching the manifest's output glob (``*`` = one
+    or more path-safe characters). The match may be preceded by any path prefix."""
+    name = glob[len(directory) :].lstrip("/") if glob.startswith(directory) else glob
+    body = r"[^\s\"'<>|;&=]+".join(re.escape(part) for part in name.split("*"))
+    return r"""[^\s"'<>|;&=]*""" + re.escape(directory) + "/" + body
+
+
+def configure() -> None:
+    """(Re)derive the integrated plugin's identity from its manifest into the module globals:
+    agent type, calculator tool name, summary heading, catalog entry ids and the report-file
+    patterns. Runs once at import (the manifest, else the pinned fallback); tests call it again
+    after changing the environment. ``INTEGRATION`` is how the manifest was found."""
+    global AGENT, CALC_TOOL, SUMMARY_HEADING, OUTPUT_GLOB, DELEGATE_ENTRY, CALC_ENTRY
+    global REPORT_DIR, REPORT_PATH, APPEND, INTEGRATION, MANIFEST
+    from agent_router.contracts import integration as integ_mod
+
+    integ = integ_mod.load_integration(HERE)
+    resolved = integ_mod.resolve(integ, state_root=state_root())
+    man = MANIFEST = resolved.manifest
+    INTEGRATION = resolved.record()
+    AGENT = man.agent_type
+    CALC_TOOL = integ.calc_tool
+    DELEGATE_ENTRY, CALC_ENTRY = integ.delegate_entry, integ.calc_entry
+    SUMMARY_HEADING = man.heading
+    OUTPUT_GLOB = man.output_glob
+    d = re.escape(man.output_dir)
+    REPORT_DIR = re.compile(d + r"(?:/|[\s\"';&)]|$)")
+    REPORT_PATH = re.compile(_glob_regex(man.output_glob, man.output_dir))
+    APPEND = re.compile(r">>\s*\S*" + d + r"/|>>\s*\"?\$")
+
+
 HEADING = re.compile(r"^(#{1,3}) (.+)$", re.M)
 RESTART = re.compile(r"""(?:^|[;&\n])\s*:\s*>\s*["']?[$\w./]""")  # `: > "$F"` empties the report
 REVISE = re.compile(r"\bsed -i|\bperl -\w*i|\.write\(|write_text\(|open\([^)]*['\"][wa]")
@@ -133,6 +178,9 @@ def state_root() -> Path:
 
 def _safe(session: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", session)[:128] or "unknown"
+
+
+configure()
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -344,16 +392,22 @@ def parse_analysis(text: str) -> dict[str, Any]:
 
 def schema_location() -> tuple[Path, str]:
     """The field table to read the block against, and where it came from: ``env``
-    (AGENT_ROUTER_FP_SCHEMA, used as given), ``plugin_root`` ($FP_PLUGIN_ROOT/references/
-    summary-schema.json, when that file exists), else the ``pinned`` copy shipped here."""
+    (AGENT_ROUTER_FP_SCHEMA, used as given), ``plugin_root`` (the manifest's schema path under
+    the resolved plugin root, when that file exists), else the ``pinned`` copy shipped here.
+    The root is resolved afresh on each call; the cheap lookups are the point of a manifest."""
     env = os.environ.get("AGENT_ROUTER_FP_SCHEMA", "").strip()
     if env:
         return Path(env), "env"
-    root = os.environ.get("FP_PLUGIN_ROOT", "").strip()
-    if root:
-        cand = Path(root) / "references" / "summary-schema.json"
-        if cand.is_file():
-            return cand, "plugin_root"
+    try:
+        from agent_router.contracts import integration as integ_mod
+
+        resolved = integ_mod.resolve(integ_mod.load_integration(HERE), state_root=state_root())
+        if resolved.plugin_root is not None:
+            cand = resolved.plugin_root / resolved.manifest.schema
+            if cand.is_file():
+                return cand, "plugin_root"
+    except Exception:  # fail open: the pinned copy
+        pass
     return PINNED_SCHEMA, "pinned"
 
 
@@ -686,9 +740,7 @@ def _analysis_path(records: list[dict[str, Any]], cwd: str) -> Path | None:
             p = p if p.is_absolute() else Path(cwd or ".") / p
             if p.is_file():
                 return p
-    found = sorted(
-        Path(cwd or ".").glob(".first-principles/analysis-*.md"), key=lambda f: f.stat().st_mtime
-    )
+    found = sorted(Path(cwd or ".").glob(OUTPUT_GLOB), key=lambda f: f.stat().st_mtime)
     return found[-1] if found else None
 
 
@@ -800,7 +852,7 @@ def _routing(
     prompt = before[-1] if before else None
     in_agent = [r for r in audit if inside(r) and r.get("agent_type") == AGENT]
     notes = [
-        r for r in in_agent if r.get("action") == "suggest" and r.get("entry_id") == "exact-calc"
+        r for r in in_agent if r.get("action") == "suggest" and r.get("entry_id") == CALC_ENTRY
     ]
     first = _when(notes[0]["ts"]) if notes else None
     calcs = [r for r in run if r.get("kind") == "calc" or r.get("was") == "calc"]
@@ -816,7 +868,7 @@ def _routing(
     # the router offered exact-calc to its decider only for a call the calculator can run
     judged = {r.get("tool_use_id"): r for r in in_agent if r.get("tool_use_id")}
     could_run = [
-        "exact-calc" in (judged[r["tool_use_id"]].get("options") or [])
+        CALC_ENTRY in (judged[r["tool_use_id"]].get("options") or [])
         for r in shells
         if r.get("tool_use_id") in judged
     ]
@@ -826,7 +878,7 @@ def _routing(
         else {
             "action": prompt.get("action"),
             "entry_id": prompt.get("entry_id"),
-            "p": (prompt.get("probabilities") or {}).get("first-principles-agent"),
+            "p": (prompt.get("probabilities") or {}).get(DELEGATE_ENTRY),
             "applied_threshold": prompt.get("applied_threshold"),
         },
         "delegation_prompt_names_calc": None
@@ -942,6 +994,7 @@ def handle(
             "decisions_source": derived["decisions_source"],
             "decisions_verified": derived["decisions_verified"],
             "contract": derived["contract"],
+            "integration": INTEGRATION,
             "stop_attempt": stops + 1,
             "stop_hook_active": bool(payload.get("stop_hook_active")),
             "routing": _routing(audit, run, handoffs[-1] if handoffs else None, start, end),

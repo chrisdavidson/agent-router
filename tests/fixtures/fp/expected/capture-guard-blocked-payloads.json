@@ -104,6 +104,14 @@
     "decisions_verified": null,
     "duration_s": 29.0,
     "final_message": "The task takes about four hours.",
+    "integration": {
+      "manifest_version": 1,
+      "plugin_root": null,
+      "source": "fallback",
+      "warnings": [
+        "no plugin root found: using the pinned fallback"
+      ]
+    },
     "kind": "run_end",
     "references_read": [],
     "report_restarts": 0,
@@ -224,6 +232,14 @@
     "decisions_verified": null,
     "duration_s": 54.0,
     "final_message": "The report is still being assembled.",
+    "integration": {
+      "manifest_version": 1,
+      "plugin_root": null,
+      "source": "fallback",
+      "warnings": [
+        "no plugin root found: using the pinned fallback"
+      ]
+    },
     "kind": "run_end",
     "references_read": [],
     "report_restarts": 0,
@@ -345,6 +361,14 @@
     "decisions_verified": null,
     "duration_s": 79.0,
     "final_message": "Delivered: four hours, MEDIUM confidence.",
+    "integration": {
+      "manifest_version": 1,
+      "plugin_root": null,
+      "source": "fallback",
+      "warnings": [
+        "no plugin root found: using the pinned fallback"
+      ]
+    },
     "kind": "run_end",
     "references_read": [],
     "report_restarts": 0,

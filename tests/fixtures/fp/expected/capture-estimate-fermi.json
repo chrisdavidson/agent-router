@@ -608,6 +608,14 @@
     "decisions_verified": null,
     "duration_s": 554.9,
     "final_message": "The estimate comes to about **$100 per kWh of stored heat** ($99.94/kWh_th, $499,691 installed), with a range of **$48–252/kWh_th**. Spread over its cycle life, that capital is **0.99 ¢ per kWh delivered without discounting, or 2.40 ¢ at a 7% real discount rate** (range 1.13–8.81 ¢). Confidence is *",
+    "integration": {
+      "manifest_version": 1,
+      "plugin_root": null,
+      "source": "fallback",
+      "warnings": [
+        "no plugin root found: using the pinned fallback"
+      ]
+    },
     "kind": "run_end",
     "references_read": [
       "output-template.md",

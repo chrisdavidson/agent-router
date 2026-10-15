@@ -21,6 +21,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from agent_router.contracts.integration import (
+    IntegrationError,
+    integration_dir,
+    load_integration,
+    resolve,
+    skip_patterns,
+    variables,
+    variables_for_catalog,
+)
 from agent_router.core.types import HookPoint, RouterEvent
 
 EMBEDDERS = ("model2vec", "hashing")
@@ -44,9 +53,24 @@ def _catalog(args: argparse.Namespace):
 
     path = getattr(args, "catalog", None) or os.environ.get("AGENT_ROUTER_CATALOG", "").strip()
     try:
-        return load_catalog(path or DEFAULT_CATALOG)
-    except (OSError, CatalogError) as exc:
+        return load_catalog(path or DEFAULT_CATALOG, variables=_catalog_variables(args, path))
+    except (OSError, CatalogError, IntegrationError) as exc:
         raise CliError(f"cannot load catalog {path or DEFAULT_CATALOG}: {exc}") from exc
+
+
+def _state_root() -> Path:
+    from agent_router.adapters.claude_code import state_root
+
+    return state_root()
+
+
+def _catalog_variables(args: argparse.Namespace, path: str | Path | None) -> dict[str, str] | None:
+    """Catalog variables from the integration manifest, when this catalog belongs to one
+    (``AGENT_ROUTER_INTEGRATION``, or a ``descriptor.json`` next to the catalog)."""
+    ctx = getattr(args, "integration_context", None)
+    if ctx is not None:
+        return variables(*ctx[:2])
+    return variables_for_catalog(path or None, state_root=_state_root())
 
 
 def _apply_calibration_env() -> None:
@@ -404,6 +428,25 @@ def cmd_run(args: argparse.Namespace) -> int:
 # --- hook / mcp (Claude Code plugin) ---------------------------------------------------------
 
 
+def _derive_integration(args: argparse.Namespace) -> dict[str, Any] | None:
+    """When ``AGENT_ROUTER_INTEGRATION`` names an integration directory, resolve its manifest
+    once and derive what the integration no longer types: the catalog variables (kept on
+    ``args``) and the default skip patterns (an explicit environment value wins). Returns the
+    record of how the manifest was found, for the session state."""
+    directory = integration_dir(None)
+    if directory is None:
+        return None
+    integ = load_integration(directory)
+    resolved = resolve(integ, state_root=_state_root())
+    args.integration_context = (integ, resolved.manifest)
+    skip_input, skip_prompt = skip_patterns(integ, resolved.manifest)
+    if not os.environ.get("AGENT_ROUTER_SKIP_INPUT", "").strip():
+        os.environ["AGENT_ROUTER_SKIP_INPUT"] = skip_input
+    if not os.environ.get("AGENT_ROUTER_SKIP_PROMPT", "").strip():
+        os.environ["AGENT_ROUTER_SKIP_PROMPT"] = skip_prompt
+    return resolved.record()
+
+
 def cmd_hook(args: argparse.Namespace) -> int:
     """One Claude Code command hook: hook JSON on stdin, hook JSON on stdout, always exit 0.
 
@@ -418,6 +461,7 @@ def cmd_hook(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
     out: dict[str, Any] = {}
     try:
+        recorded = _derive_integration(args)
         if not args.backend:
             args.backend = os.environ.get("AGENT_ROUTER_BACKEND", "").strip() or "local"
         payload = json.load(sys.stdin)
@@ -425,6 +469,7 @@ def cmd_hook(args: argparse.Namespace) -> int:
             out = handle(
                 payload,
                 lambda audit, seed: _router(args, env=True, audit_path=audit, suggested=seed),
+                integration=recorded,
             )
     except Exception as exc:  # a hook must never break the host session
         print(f"agent-router hook: failing open: {type(exc).__name__}: {exc}", file=sys.stderr)
