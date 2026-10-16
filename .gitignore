@@ -11,3 +11,4 @@ audit/*.jsonl
 !audit/sample-session.jsonl
 .DS_Store
 .superpowers/
+uv.lock
