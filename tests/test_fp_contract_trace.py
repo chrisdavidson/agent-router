@@ -110,10 +110,10 @@ def test_unusable_block_falls_back_to_prose(tmp_path, name):
 
 
 def test_schema_violation_falls_back_to_prose(tmp_path):
-    (end,) = _run(tmp_path, (VALID / "live-estimate-fermi.md").read_text(encoding="utf-8"))
+    (end,) = _run(tmp_path, (NEG / "schema_violation.md").read_text(encoding="utf-8"))
     assert end["contract"]["contract_status"] == "schema_violation"
     assert end["decisions_source"] == "prose"
-    assert any(v["path"] == "conclusion.rests_on" for v in end["contract"]["violations"])
+    assert any(v["path"] == "chains[0].confidence" for v in end["contract"]["violations"])
 
 
 def test_unsupported_version_still_surfaces_decisions_unverified(tmp_path):
@@ -186,7 +186,11 @@ def test_unverified_ground_truth_and_reentry_disagreements():
 
 def test_schema_location_order(tmp_path, monkeypatch):
     assert tr.schema_location() == (tr.PINNED_SCHEMA, "pinned")
-    assert tr.PINNED_SCHEMA.read_bytes() == (FIX / "schema" / "summary-schema.json").read_bytes()
+    # the trace pins the publisher's current schema (9.21: conclusion.rests_on optional); the
+    # 9.20.0 copy beside it stays as the pin of the break that version introduced
+    assert (
+        tr.PINNED_SCHEMA.read_bytes() == (FIX / "schema" / "summary-schema-9.21.json").read_bytes()
+    )
     root = tmp_path / "plugin"
     (root / "references").mkdir(parents=True)
     monkeypatch.setenv("FP_PLUGIN_ROOT", str(root))

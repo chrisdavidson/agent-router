@@ -124,4 +124,5 @@ def test_fixture_report_dirs_not_empty():
         "invalid_json",
         "unsupported_version",
         "dangling_rests_on",
+        "schema_violation",
     }

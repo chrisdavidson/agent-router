@@ -1,7 +1,7 @@
 {
-  "$comment": "Structured-summary block schema for the first-principles agent. Canonical source: shared/spine/references/summary-schema.json. Emitted verbatim to first-principles/references/summary-schema.json by scripts/sync-content.py --write: edit the source, never the emitted copy. This is a hand-validatable field table, not JSON Schema; reading it needs no validator dependency.",
+  "$comment": "Structured-summary block schema for the first-principles agent. Canonical source: shared/spine/references/summary-schema.json. Emitted verbatim to first-principles/references/summary-schema.json by scripts/sync-content.py --write: edit the source, never the emitted copy. This is a hand-validatable field table, not JSON Schema; reading it needs no validator dependency. A nested field marked \"optional\": true may be absent from the block; an absent optional key reads exactly as null and its null_when governs it.",
   "schema_version": 1,
-  "versioning": "schema_version is an integer starting at 1. Changes are add-only: adding a field keeps the version; removing or renaming a field, or narrowing an enum, increments it.",
+  "versioning": "schema_version is an integer starting at 1. Adding an OPTIONAL field (one marked \"optional\": true, whose key may be absent and then reads as null) keeps the version; adding a required field, removing or renaming a field, or narrowing an enum increments it.",
   "block": {
     "heading": "## Structured summary (process output)",
     "fence": "json",
@@ -291,7 +291,8 @@
             "pattern": "^(GT-[1-9][0-9]*\\??|C[1-9][0-9]*)$"
           },
           "source": "Every id on section 6's **Pre-check:** head, in the order the head gives them, each Cn without its parenthesised band and each GT-N? with its ? kept: the same ids the chain rests_on field reads from a chain's head, read here from the Conclusion's own Pre-check line.",
-          "null_when": "The document's section 6 carries no **Pre-check:** line (a legacy worked example). An agent report never writes null."
+          "optional": true,
+          "null_when": "The document's section 6 carries no **Pre-check:** line (a legacy worked example). An agent report never writes null. The key is absent only in blocks written before the field existed (plugin 9.16-9.17 era); an absent key reads exactly as null and this null_when governs it. An agent report always writes the key."
         }
       }
     }
@@ -299,7 +300,7 @@
   "invariants": [
     {
       "id": "INV-01",
-      "rule": "Every key in required is present. A nullable field may be null only when its null_when condition holds; an agent report populates every field."
+      "rule": "Every key in required is present. A nullable field may be null only when its null_when condition holds; an agent report populates every field. A nested field marked optional may be absent, and its absence reads as null under its null_when."
     },
     {
       "id": "INV-02",

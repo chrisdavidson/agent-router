@@ -360,3 +360,66 @@ def test_the_contracts_package_names_no_first_principles_literal():
         ):
             assert banned not in text, f"{f.name} names {banned!r}"
     assert contracts.read_contract  # imported above, so the package loads without the literal
+
+
+# -- optional: a field added after its schema version began -------------------------------------
+
+
+def _schema_with_optional(tmp_path, flag=True):
+    raw = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    raw["fields"]["conclusion"]["fields"]["rests_on"]["optional"] = flag
+    path = tmp_path / "summary-schema.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("path", LIVE, ids=lambda p: p.stem)
+def test_an_optional_field_may_be_absent_from_an_older_block(tmp_path, path):
+    """first-principles' fix for the conclusion.rests_on break: the field is marked optional,
+    so a block written before it existed validates as schema_version 1 again."""
+    r = read_contract(
+        path.read_text(encoding="utf-8"),
+        heading=HEADING,
+        schema_path=_schema_with_optional(tmp_path),
+        accepted_versions={1},
+    )
+    assert r["contract_status"] == "valid", r["violations"]
+
+
+def test_optional_does_not_make_a_sibling_optional(tmp_path):
+    table = load_schema(_schema_with_optional(tmp_path))
+    data = _block(LIVE[0])
+    del data["conclusion"]["confidence"]
+    (v,) = [x for x in validate(data, table) if x.severity == "error"]
+    assert (v.path, v.code) == ("conclusion.confidence", "required")
+
+
+def test_an_optional_field_present_is_still_validated(tmp_path):
+    table = load_schema(_schema_with_optional(tmp_path))
+    data = _block(LIVE[0])
+    data["conclusion"]["rests_on"] = ["not-an-id"]
+    (v,) = [x for x in validate(data, table) if x.severity == "error"]
+    assert (v.path, v.code) == ("conclusion.rests_on[0]", "pattern")
+
+
+def test_optional_must_be_a_boolean(tmp_path):
+    with pytest.raises(SchemaError, match="optional"):
+        load_schema(_schema_with_optional(tmp_path, flag="yes"))
+
+
+def test_optional_needs_nullable_and_is_not_allowed_at_the_top_level(tmp_path):
+    """Mirrors the publisher's own checker (first-principles 261015-tya)."""
+    raw = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    rests_on = raw["fields"]["conclusion"]["fields"]["rests_on"]
+    rests_on.update(optional=True, nullable=False)
+    bad = tmp_path / "not-nullable.json"
+    bad.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(SchemaError, match="nullable"):
+        load_schema(bad)
+    raw = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    raw["fields"]["dead_ends"]["optional"] = True
+    raw["fields"]["dead_ends"]["nullable"] = True
+    top = tmp_path / "top-level.json"
+    top.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(SchemaError, match="top-level"):
+        load_schema(top)

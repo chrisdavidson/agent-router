@@ -75,6 +75,18 @@ Phase 2 validator tests, so they do not depend on a first-principles checkout.
   append, and a final `SubagentStop` (`stop_hook_active` true, allowed). The test feeds them to
   `trace.handle`. Today this yields three `run_end` records; HOOK-05 will change that.
 
+## The 9.21 schema fix (2026-10-16)
+
+first-principles 9.21 marks `conclusion.rests_on` `"optional": true`: a block written before
+that field existed may leave the key out. Against that schema the three live reports read as
+`valid`. They failed the 9.20.0 schema (`schema/summary-schema.json`, kept as the pin of that
+break). `schema/summary-schema-9.21.json` is the current copy, byte-identical to the trace's
+pinned `integrations/first-principles/contract/summary-schema.json`.
+
+* `reports/negative/schema_violation.md`: `live-estimate-fermi.md` with one edit, the block's
+  `chains[0].confidence` set to `"CERTAIN"` (not in the enum). It is the fixture for "a block
+  that does not match the schema", the role the live reports played under 9.20.0.
+
 ## expected/
 
 Golden outputs: `<valid|negative>-<name>.json` is `parse_analysis` of that report;

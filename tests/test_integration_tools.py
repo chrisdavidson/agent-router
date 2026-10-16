@@ -121,7 +121,7 @@ def test_answer_excerpt_ends_at_the_next_section_and_is_none_without_one():
         ("misplaced.md", "misplaced"),
         ("invalid_json.md", "invalid_json"),
         ("unsupported_version.md", "unsupported_version"),
-        ("dangling_rests_on.md", "schema_violation"),
+        ("schema_violation.md", "schema_violation"),
     ],
 )
 def test_verify_summary_reports_each_contract_status(tmp_path, name, status):

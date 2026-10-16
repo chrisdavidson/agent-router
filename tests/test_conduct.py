@@ -333,7 +333,7 @@ def test_verify_a_valid_analysis_with_its_reports(capsys, tmp_path):
 
 
 def test_verify_a_schema_violation_is_reported_not_repaired(capsys, tmp_path):
-    path = _analysis(tmp_path, "dangling_rests_on.md")
+    path = _analysis(tmp_path, "schema_violation.md")
     before = path.read_bytes()
     code, out = _run(capsys, "verify", str(path), "--root", str(tmp_path))
     assert code == 0 and out["contract_status"] == "schema_violation" and out["violations"]

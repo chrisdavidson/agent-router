@@ -2,8 +2,10 @@
 
 The block is a heading followed by exactly one fenced ``json`` block, last in the file. Its
 contract is a *field table*, a small JSON document of the publisher's own (not JSON Schema):
-``required``, ``fields`` (each with ``type``, ``nullable``, ``enum``, ``pattern``, ``const``,
-``items``, ``fields``, ``length``, ``minimum``, ``maximum``) and documentation keys. The keywords
+``required``, ``fields`` (each with ``type``, ``nullable``, ``optional``, ``enum``, ``pattern``,
+``const``, ``items``, ``fields``, ``length``, ``minimum``, ``maximum``) and documentation keys.
+``optional: true`` marks a field added after its schema version began: the key may be absent
+(blocks written before it), and an absent key reads as null. The keywords
 are the ones the publisher's own checker implements. A field spec carrying any other keyword
 makes :func:`load_schema` raise :class:`SchemaError`: a schema feature this validator does not
 understand must not be silently ignored.
@@ -53,6 +55,7 @@ _KNOWN_FIELD_KEYS = (
         {
             "type",
             "nullable",
+            "optional",
             "const",
             "enum",
             "pattern",
@@ -207,6 +210,10 @@ def _check_spec(spec: Any, path: str) -> None:
         raise SchemaError(f"{path}: unknown schema keyword(s) {sorted(unknown)!r}")
     if "type" in spec and spec["type"] not in _TYPES:
         raise SchemaError(f"{path}: unknown type {spec['type']!r}")
+    if "optional" in spec and not isinstance(spec["optional"], bool):
+        raise SchemaError(f"{path}: 'optional' must be true or false")
+    if spec.get("optional") and not spec.get("nullable"):  # an absent key reads as null
+        raise SchemaError(f"{path}: 'optional' needs 'nullable': true")
     if "pattern" in spec:
         try:
             re.compile(spec["pattern"])
@@ -244,6 +251,8 @@ def load_schema(path: str | Path) -> FieldTable:
         raise SchemaError(f"schema file {p}: 'required' must be a list of strings")
     for key, spec in fields.items():
         _check_spec(spec, key)
+        if isinstance(spec, dict) and spec.get("optional"):  # top level: 'required' governs
+            raise SchemaError(f"{key}: 'optional' is not allowed on a top-level field")
     return FieldTable(str(p), schema.get("schema_version"), tuple(required), fields, schema)
 
 
@@ -294,7 +303,10 @@ def _validate_value(value: Any, spec: dict[str, Any], path: str, out: list[Viola
                 )
         for key, subspec in sub.items():
             if key not in value:
-                out.append(Violation(f"{path}.{key}", "missing required key", code="required"))
+                # an optional field was added after the version began: blocks written before
+                # it may leave the key out, and an absent key reads as null
+                if not subspec.get("optional", False):
+                    out.append(Violation(f"{path}.{key}", "missing required key", code="required"))
             else:
                 _validate_value(value[key], subspec, f"{path}.{key}", out)
 
