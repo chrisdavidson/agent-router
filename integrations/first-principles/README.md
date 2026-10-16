@@ -12,9 +12,14 @@ it untouched. It adds two checkpoints that plugin does not have:
    figure"), it gets a note pointing at an exact calculator this plugin serves
    (`mcp__plugin_agent-router-fp_agent_router__calc`: exact fractions and big integers, and a
    list of expressions in one call). The note is offered only when the call is one expression the calculator can run (`fits:
-   calc_expression`). Scripts with variables, loops or `math.log` are skipped as `does not fit`
-   without reaching the classifier. In the 28 example runs, all 16 notes had fired on such
-   scripts or on text commands.
+   calc_expression`). A short straight-line python script (variables, `print`, `math.log`,
+   `pi`) gets a second entry, `exact-calc-script`, pointing at `calc_script` (`fits:
+   calc_script`: a `python3 - <<'EOF'` / `cat <<EOF | python3` heredoc or a multi-statement
+   `python3 -c` whose body the calculator's script evaluator runs; no loops, functions, lists
+   or imports other than `math`). Anything else is skipped as `does not fit` without reaching
+   the classifier. In the 28 example runs, all 16 notes had fired on scripts the calculator
+   could not run or on text commands; [`CALC-SCRIPT-COVERAGE.md`](CALC-SCRIPT-COVERAGE.md)
+   measures how many of the agent's interpreter calls the two entries could take.
 
 Both are advisory: the model may ignore a note, and nothing is ever blocked.
 
@@ -93,6 +98,16 @@ state directory, file locking and the `timeout` binary. It exits 1 only if a che
 Hook cost: about 0.45 s per routed call (prompt, `Agent`, and `Bash` inside the agent). A
 `Bash` call on the main thread is answered by the shell script in milliseconds, without Python.
 Notes are once per turn per entry, so an analysis gets at most one calculator note.
+
+The MCP server (`bin/mcp`) also serves three read-only tools for a conductor, as structured
+calls instead of shell commands: `route` (the decision `agent-router route --json` prints, with
+this integration's catalog, manifest variables and calibration; advisory, nothing is audited),
+`verify_summary(path)` (the report's `contract_status`, violations, the schema used, the
+decisions read from the summary block and an excerpt of its `## Answer` section; the path must
+be inside the working directory) and `doctor` (the checks of `agent-router doctor`). They are
+served only because `bin/mcp` exports `AGENT_ROUTER_INTEGRATION`; a bare `agent-router mcp`
+serves the catalog tools and `calc_script`. A failure is a tool error, never a crash, and none
+of them can block anything.
 
 Every checkpoint is logged to `<state dir>/audit/<session>.jsonl` (same format as the rest of
 agent-router, plus `agent_type`, `agent_id` and `tool_use_id`).
@@ -201,6 +216,7 @@ reference (second-order thinking, Phase 2 inversion).
 | `eval_set.yaml` | `cal` cases written for this integration; `test` holdout = first-principles' own routing catalog (13 P, 20 N) plus Bash calls inside the agent |
 | `calibration.json`, `calibrate.py` | classifier parameters, then one threshold per entry, all fit on the `cal` split only |
 | `plugin/` | the Claude Code plugin: hooks, `.mcp.json`, `bin/hook`, `bin/mcp`, `bin/trace` |
+| `measure_calc_fit.py`, `CALC-SCRIPT-COVERAGE.md` | offline: how many recorded interpreter calls `calc_expression` / `calc_script` accept, and whether the calculator's figures agree with the real output |
 | `trace.py` | the decision trace: hook handler, analysis parser, `--replay`, `--report` |
 | `battery.py` | live A/B: first-principles' routing catalog with and without this plugin |
 | `run_examples.py` | runs the plugin's worked examples (read from `<plugin root>/<examples_dir>`) through the agent and tabulates every router decision |

@@ -18,6 +18,7 @@ Descriptor keys (all strings; unknown keys are ignored)::
     own_plugin_json      the router-side plugin's ``plugin.json``, relative to the directory
     delegate_entry       catalog entry id of the "delegate to the agent" checkpoint
     calc_entry           catalog entry id of the exact-calculator checkpoint
+    calc_script_entry    optional: catalog entry id of the calculator-script checkpoint
     schema_env           environment variable that may name a summary schema file outright
     pinned_schema        the pinned summary schema, relative to the directory
     accepted_schema_versions   list of integers: the summary-schema versions the reader accepts
@@ -26,10 +27,11 @@ Descriptor keys (all strings; unknown keys are ignored)::
 Catalog variables (``${name}`` in a catalog file, see ``core.catalog.load_catalog``):
 
     fp.plugin_name  fp.agent_type  fp.command_prefix  fp.launcher  fp.output_dir  fp.output_glob
-    self.plugin_name  self.calc_tool
+    self.plugin_name  self.calc_tool  self.calc_script_tool
 
-``fp.*`` come from the manifest. ``self.plugin_name`` is the router-side plugin's name and
-``self.calc_tool`` the name Claude Code gives its calculator tool.
+``fp.*`` come from the manifest. ``self.plugin_name`` is the router-side plugin's name,
+``self.calc_tool`` and ``self.calc_script_tool`` the names Claude Code gives its calculator and
+calculator-script tools.
 """
 
 from __future__ import annotations
@@ -71,6 +73,7 @@ class Integration:
     own_plugin_name: str
     delegate_entry: str
     calc_entry: str
+    calc_script_entry: str
     schema_env: str
     pinned_schema: Path
     accepted_schema_versions: frozenset[int]
@@ -78,6 +81,10 @@ class Integration:
     @property
     def calc_tool(self) -> str:
         return f"mcp__plugin_{self.own_plugin_name}_{MCP_SERVER}__calc"
+
+    @property
+    def calc_script_tool(self) -> str:
+        return f"mcp__plugin_{self.own_plugin_name}_{MCP_SERVER}__calc_script"
 
     def fallback(self) -> Manifest:
         return load_manifest(self.fallback_path)
@@ -88,6 +95,10 @@ def _text(data: Mapping[str, Any], key: str, where: Path) -> str:
     if not isinstance(value, str) or not value.strip():
         raise IntegrationError(f"{where}: {key} must be a non-empty string")
     return value
+
+
+def _optional_text(data: Mapping[str, Any], key: str, where: Path) -> str:
+    return _text(data, key, where) if key in data else ""
 
 
 def load_integration(directory: str | Path) -> Integration:
@@ -121,6 +132,7 @@ def load_integration(directory: str | Path) -> Integration:
         own_plugin_name=own,
         delegate_entry=_text(data, "delegate_entry", path),
         calc_entry=_text(data, "calc_entry", path),
+        calc_script_entry=_optional_text(data, "calc_script_entry", path),
         schema_env=_text(data, "schema_env", path),
         pinned_schema=root / _text(data, "pinned_schema", path),
         accepted_schema_versions=frozenset(versions),
@@ -208,6 +220,7 @@ def variables(integ: Integration, manifest: Manifest) -> dict[str, str]:
         "fp.output_glob": manifest.output_glob,
         "self.plugin_name": integ.own_plugin_name,
         "self.calc_tool": integ.calc_tool,
+        "self.calc_script_tool": integ.calc_script_tool,
     }
 
 

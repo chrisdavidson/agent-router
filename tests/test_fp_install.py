@@ -245,7 +245,10 @@ def test_hook_fails_open_when_nothing_resolves(lay):
 def test_mcp_execs_the_resolved_binary_with_its_arguments(lay):
     lay.path_tool('echo "ran $*"')
     proc = _run(lay.bin / "mcp", "", lay.env())
-    assert (proc.returncode, proc.stdout.strip()) == (0, "ran mcp --tools calc")
+    assert (proc.returncode, proc.stdout.strip()) == (
+        0,
+        "ran mcp --tools calc,calc_script,route,verify_summary,doctor",
+    )
 
 
 def test_mcp_exits_non_zero_with_a_message_when_nothing_resolves(lay):

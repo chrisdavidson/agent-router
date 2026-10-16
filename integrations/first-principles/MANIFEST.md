@@ -83,8 +83,11 @@ the plugin publishes.
  "fallback_manifest": "manifest.fallback.json",
  "own_plugin_json": "plugin/.claude-plugin/plugin.json",
  "delegate_entry": "first-principles-agent",
- "calc_entry": "exact-calc"}
+ "calc_entry": "exact-calc",
+ "calc_script_entry": "exact-calc-script"}
 ```
+
+`calc_script_entry` is optional (an integration without the script form omits it).
 
 `agent-router hook` (and every command given this catalog) finds the descriptor either through
 `AGENT_ROUTER_INTEGRATION=<dir>` (which `plugin/bin/hook` sets) or because it sits beside the
@@ -101,6 +104,7 @@ is a `CatalogError`.
 | `fp.plugin_name`, `fp.agent_type`, `fp.command_prefix`, `fp.launcher`, `fp.output_dir`, `fp.output_glob` | the resolved manifest |
 | `self.plugin_name` | `name` in the router-side plugin's `plugin.json` |
 | `self.calc_tool` | `mcp__plugin_<self.plugin_name>_agent_router__calc` |
+| `self.calc_script_tool` | `mcp__plugin_<self.plugin_name>_agent_router__calc_script` |
 
 The hook's defaults, used when `AGENT_ROUTER_SKIP_INPUT` / `AGENT_ROUTER_SKIP_PROMPT` are unset
 or empty (an explicit value wins):

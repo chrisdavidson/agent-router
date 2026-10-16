@@ -13,7 +13,7 @@
 #
 # Examples and native_examples are written independently of first-principles' routing
 # catalogs, which are used as the holdout in eval_set.yaml.
-version: "fp-2026-09-28.2"
+version: "fp-2026-10-15.1"
 
 entries:
   - id: first-principles-agent
@@ -26,7 +26,7 @@ entries:
     points: [prompt, tool]
     replaces: [Agent]
     agents: [main]
-    threshold: 0.55  # calibrate.py, main-thread cal cases
+    threshold: 0.6  # calibrate.py, main-thread cal cases
     what: >
       Rebuild a claim, decision or design from verified fundamentals: challenge its
       assumptions, establish ground truths and reason upward, not by analogy or convention.
@@ -75,6 +75,71 @@ entries:
       - awk 'BEGIN { print 1500 * 0.07 * 12 }'
       - python3 -c "print(sum([120, 85.5, 40.25]) / 3)"
       - expr 365 \* 24 \* 60
+
+  - id: exact-calc-script
+    kind: tool
+    name: Exact calculator, script form
+    project: agent-router (own code)
+    license: MIT
+    url: https://github.com/usathyan/agent-router
+    target: ${self.calc_script_tool}
+    points: [tool]
+    replaces: [Bash]
+    agents: ["${fp.agent_type}"]
+    threshold: 0.8  # calibrate.py, first-principles-agent cal cases
+    fits: calc_script  # only a python script the calculator's script form can run (core/fit.py)
+    what: >
+      A short straight-line python script (assignments, print, math.log) computed with exact
+      fractions and no floating point error; no loops, functions or imports other than math.
+    not_for:
+      - writing, appending to or reading a file
+      - counting words or lines in a file
+      - running a program or a test suite
+      - a script with loops, functions, numpy, pandas or scipy
+    examples:
+      - |-
+        python3 - <<'EOF'
+        import math
+        rate = 0.07
+        years = 10
+        print(math.log(2) / math.log(1 + rate), years * rate)
+        EOF
+      - |-
+        python3 -c "
+        import math
+        Th = 838.15; Tc = 303.15
+        eta = 1 - Tc / Th
+        print('carnot', eta, math.log(Th / Tc))
+        "
+      - |-
+        python3 <<'EOF'
+        cost = 12500
+        users = 340
+        churn = 0.045
+        margin = cost / users
+        print(margin, margin * (1 - churn), 1 / churn)
+        EOF
+      - |-
+        python3 -c "
+        base = 2340
+        growth = 1.06
+        total = base * growth ** 5
+        print('total', total, total - base)
+        "
+      - |-
+        cat <<'EOF' | python3
+        import math
+        n = 1_000_000
+        bits = math.log2(n)
+        print(bits, bits / 8, math.exp(1))
+        EOF
+      - |-
+        python3 - <<'EOF'
+        demand = 4.2e6
+        per_unit = 1530 * 275
+        mass = demand * 3.6 / per_unit
+        print(mass, mass / 1000, mass * 0.85)
+        EOF
 
 # Steps where the main session's own tools are enough (compete as the `none` option).
 native_examples:

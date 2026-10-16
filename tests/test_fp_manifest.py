@@ -289,9 +289,13 @@ def test_renaming_the_agent_type_retargets_the_catalog(tmp_path):
     cat = load_catalog(path, variables=integ_mod.variables_for_catalog(path, env))
     assert cat.get("first-principles-agent").target == "acme:solver"
     assert cat.get("exact-calc").agents == ("acme:solver",)
+    assert cat.get("exact-calc-script").agents == ("acme:solver",)
     from agent_router.core.types import HookPoint
 
-    assert [e.id for e in cat.eligible(HookPoint.TOOL, "Bash", "acme:solver")] == ["exact-calc"]
+    assert [e.id for e in cat.eligible(HookPoint.TOOL, "Bash", "acme:solver")] == [
+        "exact-calc",
+        "exact-calc-script",
+    ]
     assert cat.eligible(HookPoint.TOOL, "Bash", AGENT) == []
 
 
@@ -607,6 +611,8 @@ def test_the_descriptor_matches_the_catalog_and_the_plugin():
     assert cat.get(integ.calc_entry).kind == "tool"
     assert integ.expected_plugin == mf.load_manifest(FALLBACK_FILE).plugin_name
     assert cat.get(integ.calc_entry).target == integ.calc_tool
+    assert cat.get(integ.calc_script_entry).kind == "tool"
+    assert cat.get(integ.calc_script_entry).target == integ.calc_script_tool
 
 
 def test_the_static_host_config_agrees_with_the_fallback_manifest():
@@ -620,6 +626,7 @@ def test_the_static_host_config_agrees_with_the_fallback_manifest():
     for event in ("PostToolUse", "PostToolUseFailure"):
         (group,) = hooks[event]
         assert integ.calc_tool in group["matcher"].split("|")
+        assert integ.calc_script_tool in group["matcher"].split("|")
     script = (PLUGIN / "bin" / "trace").read_text()
     (default,) = re.findall(r'FP_AGENT_TYPE:-([^}"]+)\}', script)
     assert default == AGENT

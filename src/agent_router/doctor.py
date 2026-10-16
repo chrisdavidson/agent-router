@@ -543,7 +543,9 @@ def _check_mcp(ctx: _Ctx) -> Check:
     return Check("mcp server", PASS, f"{script} serves {', '.join(result)}")
 
 
-def wiring_problems(plugin: Path, agent_type: str, calc_tool: str) -> list[str]:
+def wiring_problems(
+    plugin: Path, agent_type: str, calc_tool: str, calc_script_tool: str = ""
+) -> list[str]:
     """What is wrong with the plugin's static host config: hooks.json commands that are not
     executable files, matchers that no longer name the manifest's agent / calculator, a trace
     script whose fast-path default is another agent, and a missing or non-executable MCP
@@ -570,6 +572,12 @@ def wiring_problems(plugin: Path, agent_type: str, calc_tool: str) -> list[str]:
                 matcher
             ).split("|"):
                 problems.append(f"{event} matcher lacks the calculator tool {calc_tool}")
+            if (
+                calc_script_tool
+                and event in ("PostToolUse", "PostToolUseFailure")
+                and calc_script_tool not in str(matcher).split("|")
+            ):
+                problems.append(f"{event} matcher lacks the script tool {calc_script_tool}")
     try:
         mcp = json.loads((plugin / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         commands.update(str(s.get("command", "")) for s in mcp.values())
@@ -593,7 +601,8 @@ def _check_wiring(ctx: _Ctx) -> Check:
     if ctx.integ is None or ctx.resolved is None:
         return Check("hooks wiring", WARN, "skipped: no manifest resolution")
     agent = ctx.resolved.manifest.agent_type
-    problems = wiring_problems(ctx.plugin, agent, ctx.integ.calc_tool)
+    script_tool = ctx.integ.calc_script_tool if ctx.integ.calc_script_entry else ""
+    problems = wiring_problems(ctx.plugin, agent, ctx.integ.calc_tool, script_tool)
     if problems:
         return Check("hooks wiring", FAIL, "; ".join(problems))
     return Check("hooks wiring", PASS, f"matchers name {agent} and the calculator; commands exist")

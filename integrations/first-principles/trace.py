@@ -12,7 +12,8 @@ router's ``audit/<session>.jsonl``:
   section_written  a ``cat >> .first-principles/analysis-*.md`` append: the headings written
   report_op        any other report-file command: ``op`` = create, revise (the agent
                    rewrites part of its report in place) or check
-  calc             a call to the exact calculator: expression and result
+  calc             a call to the exact calculator: expression and result (``script: true``
+                   for its script form, ``calc_script``)
   shell            any other Bash call (``math`` when it computes a figure)
   tool_failed      PostToolUseFailure
   run_end          SubagentStop: duration, final message, the analysis file parsed into its
@@ -81,10 +82,12 @@ MAX_TEXT = 300
 # Identity of the integrated plugin, derived from its manifest by configure() below.
 AGENT: str  # the agent's subagent type
 CALC_TOOL: str  # the exact calculator's tool name
+CALC_SCRIPT_TOOL: str  # its script form's tool name
 SUMMARY_HEADING: str
 OUTPUT_GLOB: str  # where the agent writes its analysis, relative to its cwd
 DELEGATE_ENTRY: str  # catalog entry ids, from the integration's descriptor
 CALC_ENTRY: str
+CALC_SCRIPT_ENTRY: str  # "" when the descriptor names none
 REPORT_DIR: re.Pattern[str]
 REPORT_PATH: re.Pattern[str]
 APPEND: re.Pattern[str]
@@ -112,6 +115,7 @@ def configure() -> None:
     patterns. Runs once at import (the manifest, else the pinned fallback); tests call it again
     after changing the environment. ``INTEGRATION`` is how the manifest was found."""
     global AGENT, CALC_TOOL, SUMMARY_HEADING, OUTPUT_GLOB, DELEGATE_ENTRY, CALC_ENTRY
+    global CALC_SCRIPT_TOOL, CALC_SCRIPT_ENTRY
     global REPORT_DIR, REPORT_PATH, APPEND, INTEGRATION, MANIFEST
     global ACCEPTED_SCHEMA_VERSIONS, PINNED_SCHEMA
     from agent_router.contracts import integration as integ_mod
@@ -121,8 +125,9 @@ def configure() -> None:
     man = MANIFEST = resolved.manifest
     INTEGRATION = resolved.record()
     AGENT = man.agent_type
-    CALC_TOOL = integ.calc_tool
+    CALC_TOOL, CALC_SCRIPT_TOOL = integ.calc_tool, integ.calc_script_tool
     DELEGATE_ENTRY, CALC_ENTRY = integ.delegate_entry, integ.calc_entry
+    CALC_SCRIPT_ENTRY = integ.calc_script_entry
     ACCEPTED_SCHEMA_VERSIONS, PINNED_SCHEMA = (
         set(integ.accepted_schema_versions),
         integ.pinned_schema,
@@ -669,6 +674,13 @@ def _tool_record(payload: dict[str, Any]) -> dict[str, Any] | None:
             "expression": _trunc(inp.get("expression")),
             "result": _trunc(_text_of(payload.get("tool_response")), 200),
         }
+    if tool == CALC_SCRIPT_TOOL:  # the calculator's script form: a calc record, flagged
+        return {
+            "kind": "calc",
+            "script": True,
+            "expression": _trunc(inp.get("script")),
+            "result": _trunc(_text_of(payload.get("tool_response")), 200),
+        }
     if tool == "Read":
         path = str(inp.get("file_path") or "")
         name = Path(path).name
@@ -850,8 +862,9 @@ def _routing(
     ]
     prompt = before[-1] if before else None
     in_agent = [r for r in audit if inside(r) and r.get("agent_type") == AGENT]
+    calc_entries = {CALC_ENTRY, CALC_SCRIPT_ENTRY} - {""}
     notes = [
-        r for r in in_agent if r.get("action") == "suggest" and r.get("entry_id") == CALC_ENTRY
+        r for r in in_agent if r.get("action") == "suggest" and r.get("entry_id") in calc_entries
     ]
     first = _when(notes[0]["ts"]) if notes else None
     calcs = [r for r in run if r.get("kind") == "calc" or r.get("was") == "calc"]
@@ -867,7 +880,7 @@ def _routing(
     # the router offered exact-calc to its decider only for a call the calculator can run
     judged = {r.get("tool_use_id"): r for r in in_agent if r.get("tool_use_id")}
     could_run = [
-        CALC_ENTRY in (judged[r["tool_use_id"]].get("options") or [])
+        bool(calc_entries & set(judged[r["tool_use_id"]].get("options") or []))
         for r in shells
         if r.get("tool_use_id") in judged
     ]

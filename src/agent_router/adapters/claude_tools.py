@@ -17,6 +17,9 @@ SERVER_NAME = "agent_router"
 SERVER_VERSION = "0.1.0"
 _TOOLS = ("calc", "json_query", "html_to_markdown", "repo_stats")
 TOOL_NAMES = [f"mcp__{SERVER_NAME}__{n}" for n in _TOOLS]
+# Served too, but not a catalog target of the packaged catalog (an integration's catalog routes
+# to it): the same calculator as a script.
+EXTRA_TOOL_NAMES = [f"mcp__{SERVER_NAME}__calc_script"]
 
 
 def _schema(required: list[str], **props: str) -> dict[str, Any]:
@@ -48,7 +51,7 @@ def _safe(fn: Callable[[dict[str, Any]], str]) -> Callable[[dict[str, Any]], Awa
 
 
 def build_tools(root: Path) -> list[SdkMcpTool[Any]]:
-    """The four catalog tools, with file access confined to ``root``."""
+    """The four catalog tools and ``calc_script``, with file access confined to ``root``."""
     root = Path(root).resolve()
 
     calc_tool = tool(
@@ -58,6 +61,17 @@ def build_tools(root: Path) -> list[SdkMcpTool[Any]]:
         "comb, perm. Returns an integer, 'a/b (≈ decimal)', or '≈ decimal' if irrational.",
         _schema(["expression"], expression="Math expression, e.g. '3/7 + 5/11' or '2**200'."),
     )(_safe(lambda a: calc.evaluate(_req(a, "expression"))))
+
+    calc_script_tool = tool(
+        "calc_script",
+        "Exact calculator for a short python-style script (agent-router, MIT). Statements "
+        "separated by newlines or ';': `import math`, `name = expression`, `name += expression`, "
+        "`print(...)` and bare expressions; each print or bare expression returns one line "
+        "'<expression> = <value>'. Exact fractions and big integers, plus math.log, ln, log10, "
+        "log2, exp, sqrt, pi and e (shown as '≈ decimal'). No loops, functions, f-strings, lists, "
+        "files or other imports: those return an error naming the line.",
+        _schema(["script"], script="The script, e.g. 'x = 3\\nprint(x * 2, math.log(x))'."),
+    )(_safe(lambda a: calc.evaluate_script(_req(a, "script"))))
 
     json_tool = tool(
         "json_query",
@@ -96,7 +110,7 @@ def build_tools(root: Path) -> list[SdkMcpTool[Any]]:
         _schema([], path="Workspace-relative directory (default '.')."),
     )(_safe(lambda a: repo_stats.stats(a.get("path") or ".", root=root)))
 
-    return [calc_tool, json_tool, html_tool, stats_tool]
+    return [calc_tool, calc_script_tool, json_tool, html_tool, stats_tool]
 
 
 def build_mcp_server(root: Path) -> McpSdkServerConfig:

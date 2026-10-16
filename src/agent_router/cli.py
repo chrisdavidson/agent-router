@@ -490,9 +490,9 @@ def cmd_hook(args: argparse.Namespace) -> int:
 
 
 def cmd_mcp(args: argparse.Namespace) -> int:
-    from agent_router.adapters.mcp_stdio import TOOLS, build_server
+    from agent_router.adapters.mcp_stdio import build_server, default_tools
 
-    tools = args.tools.split(",") if args.tools else list(TOOLS)
+    tools = args.tools.split(",") if args.tools else list(default_tools())
     try:
         server = build_server(Path(args.root or os.getcwd()), [t.strip() for t in tools])
     except ValueError as exc:
@@ -652,7 +652,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_hook)
 
     p = sub.add_parser("mcp", help="serve the catalog tools as a stdio MCP server")
-    p.add_argument("--tools", help="comma-separated subset (default: all)")
+    p.add_argument(
+        "--tools",
+        help=(
+            "comma-separated subset (default: the catalog tools, plus route, verify_summary and "
+            "doctor when AGENT_ROUTER_INTEGRATION is set)"
+        ),
+    )
     p.add_argument("--root", help="directory the file tools are confined to (default: cwd)")
     p.set_defaults(func=cmd_mcp)
 

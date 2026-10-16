@@ -4,7 +4,7 @@
 # split test: the holdout. fp-P* / fp-N* are the 13 DELEGATE and 20 NO-DELEGATE prompts of
 #             first-principles-skill tests/routing-catalog.md (MIT, copied verbatim), the
 #             battery that plugin's own description-based routing is measured on.
-version: "fp-2026-09-28.2"
+version: "fp-2026-10-15.1"
 
 cases:
   # ------------------------------------------------------------ cal: prompt, delegate
@@ -137,6 +137,30 @@ cases:
   - {id: x-n8, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
      agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"import yaml; print(yaml.__version__)\""}}
 
+  # ------------------------------------------------------------ cal: python scripts inside the first-principles agent
+  - {id: s-c1, split: cal, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nimport math\nr = 0.035\nprint(math.log(2) / math.log(1 + r))\nEOF"}}
+  - {id: s-c2, split: cal, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"\nimport math\nTh = 650.0; Tc = 300.0\neta = 1 - Tc / Th\nprint(eta, math.log(Th / Tc))\n\""}}
+  - {id: s-c3, split: cal, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 <<EOF\nrevenue = 4200000\ncost = 3150000\nmargin = (revenue - cost) / revenue\nprint(margin, revenue * margin)\nEOF"}}
+  - {id: s-c4, split: cal, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"\nprincipal = 15000\nrate = 0.048\nvalue = principal * (1 + rate) ** 12\nprint(value, value - principal)\n\""}}
+  - {id: s-c5, split: cal, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "cat <<'EOF' | python3\nimport math\nbits = math.log2(250000)\nprint(bits, bits / 8)\nEOF"}}
+  - {id: s-c6, split: cal, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nlaunches = 52\nmass = 18.5\nfuel = 0.92\ntotal = launches * mass\nprint(total, total * fuel, total / launches)\nEOF"}}
+  - {id: s-c7, split: cal, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"x = 3.2e6; y = 1.9e5; print(x / y, math.log(x / y))\""}}
+  - {id: s-n1, split: cal, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nimport json\nwith open('data.json') as f:\n    data = json.load(f)\nprint(len(data))\nEOF"}}
+  - {id: s-n2, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "cat > /tmp/notes.txt <<'EOF'\nTotal cost estimate\nline two\nEOF"}}
+  - {id: s-n3, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nimport numpy as np\narr = np.arange(10)\nprint(arr.mean())\nEOF"}}
+  - {id: s-n4, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\ntotal = 0\nfor i in range(10):\n    total += i * 2\nprint(total)\nEOF"}}
+
   # ------------------------------------------------------------ test: first-principles P rows
   - {id: fp-P1, split: test, point: prompt, expected: first-principles-agent,
      text: "Analyze from first principles why most New Year's resolutions fail by February. What are the fundamental drivers, not the surface symptoms?"}
@@ -235,3 +259,16 @@ cases:
      agent_type: "first-principles:first-principles", tool_input: {command: "cat >> \".first-principles/analysis-20260928T120000Z.md\" <<'FP_EOF'\n## Derivation Chains\nC1: GT-1 (12 units) x GT-2 ($1,500) = $18,000\nFP_EOF"}}
   - {id: x-t9, split: test, point: tool, expected: none, text: "", tool_name: Bash,
      agent_type: "first-principles:first-principles", tool_input: {command: "grep -c '^#' \".first-principles/analysis-20260928T120000Z.md\""}}
+  # ------------------------------------------------------------ test: python scripts inside the first-principles agent
+  - {id: s-t1, split: test, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nimport math\ngrowth = 0.12\nprint(math.log(10) / math.log(1 + growth))\nEOF"}}
+  - {id: s-t2, split: test, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"\nspan = 48.0; load = 2.5\nmoment = load * span ** 2 / 8\nprint(moment, moment / 1000)\n\""}}
+  - {id: s-t3, split: test, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 <<'EOF'\nusers = 12000\nconv = 0.031\nfunnel = users * conv\nprint(funnel, funnel * 49)\nEOF"}}
+  - {id: s-t4, split: test, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "cat > scratch.py <<'EOF'\ntotal = 1\nprint(total)\nEOF"}}
+  - {id: s-t5, split: test, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nimport pandas as pd\ndf = pd.read_csv('costs.csv')\nprint(df.sum())\nEOF"}}
+  - {id: s-t6, split: test, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nfor n in range(5):\n    print(n ** 2)\nEOF"}}

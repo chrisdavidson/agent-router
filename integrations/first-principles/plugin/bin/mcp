@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-# agent-router stdio MCP server for the first-principles integration: the exact calculator
-# only. Surfaces as mcp__plugin_agent-router-fp_agent_router__calc.
+# agent-router stdio MCP server for the first-principles integration: the exact calculator (and
+# its script form) plus the conductor's structured tools (route, verify_summary, doctor).
+# Surfaces as mcp__plugin_agent-router-fp_agent_router__<tool>.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
 # shellcheck source=_resolve.sh
 . "$here/_resolve.sh" || { echo "agent-router mcp: cannot load $here/_resolve.sh" >&2; exit 1; }
 # AGENT_ROUTER_BIN, the checkout .venv, else `agent-router` on PATH. No fail-open here: an MCP
 # server that cannot start must say so (stderr) and exit non-zero.
 ar_resolve_bin || { echo "agent-router mcp: $AR_ERR" >&2; exit 1; }
-exec "$AR_BIN" mcp --tools calc
+# The integration tools resolve the manifest, catalog and schema from this directory, the same
+# way bin/hook does. Read-only: advisory mode, nothing is blocked.
+export AGENT_ROUTER_INTEGRATION="$integ"
+export AGENT_ROUTER_MODE=advisory
+export HF_HUB_DISABLE_PROGRESS_BARS=1
+exec "$AR_BIN" mcp --tools calc,calc_script,route,verify_summary,doctor
