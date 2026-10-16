@@ -126,6 +126,8 @@ The demo has four tabs:
 | Live agent | Replay |
 |---|---|
 | ![Live agent timeline](img/demo-live.png) | ![Replay](img/demo-replay.png) |
+| **Playground (dark)** | **Trace** |
+| ![Playground in dark mode](img/demo-playground-dark.png) | ![Trace](img/demo-trace.png) |
 
 `make help` lists all targets:
 
@@ -156,6 +158,11 @@ Extras are optional:
 
 Choose a backend with `--backend`. Without the flag, the default is `cascade` when a Jev key is set,
 otherwise `local`.
+
+The Playground's **Compare classifiers** runs one step through every backend. Without keys or
+extras, as below, only `local` answers and the others say what they need:
+
+![Compare classifiers with no API key: local answers, the rest are unavailable](img/demo-compare.png)
 
 | Backend | What it is | License | Needs |
 |---|---|---|---|

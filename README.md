@@ -6,7 +6,7 @@ moment, looks at what it's about to do, and checks it against a short, fixed lis
 MIT licensed · works with the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) today ·
 designed to also plug into Codex CLI and Gemini CLI.
 
-![The demo: one agent step, judged by every classifier](docs/img/demo-compare.png)
+![The demo's Playground: one agent step, the checkpoint's decision, and the note the agent receives](docs/img/demo-playground.png)
 
 ## The idea, explained simply
 
@@ -72,6 +72,8 @@ The page has four tabs:
 | **Live agent** | Give a real Claude agent a task and watch every checkpoint happen, step by step. | A few cents per run |
 | **Replay** | Step back through any earlier run, one checkpoint at a time. | Free |
 | **Trace** | What an integrated agent did and decided in a run (for now, the first-principles agent): sections written, references opened, calculator use against the router's notes, the parsed conclusion, assumptions and Self-Audit Gate. Follows a run live (`make trace`). | Free |
+
+![The Trace tab: a first-principles run's summary card, what the agent did, and what it decided](docs/img/demo-trace.png)
 
 ### How to read a decision
 

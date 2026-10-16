@@ -290,6 +290,9 @@ Replaying the 28 example captures with their reports removed gives decisions for
 
 **In the demo.** The **Trace** tab shows each run: a summary card, a timeline of what the agent
 did with the router's notes placed where they fired, and the decisions parsed from its report.
+
+![Trace tab: the estimate-fermi example replayed through today's trace.py](../../docs/img/demo-trace.png)
+
 Start it before or during a run, from the checkout:
 
 ```bash
