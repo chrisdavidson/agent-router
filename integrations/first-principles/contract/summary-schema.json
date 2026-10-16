@@ -1,0 +1,448 @@
+{
+  "$comment": "Structured-summary block schema for the first-principles agent. Canonical source: shared/spine/references/summary-schema.json. Emitted verbatim to first-principles/references/summary-schema.json by scripts/sync-content.py --write: edit the source, never the emitted copy. This is a hand-validatable field table, not JSON Schema; reading it needs no validator dependency. A nested field marked \"optional\": true may be absent from the block; an absent optional key reads exactly as null and its null_when governs it.",
+  "schema_version": 1,
+  "versioning": "schema_version is an integer starting at 1. Adding an OPTIONAL field (one marked \"optional\": true, whose key may be absent and then reads as null) keeps the version; adding a required field, removing or renaming a field, or narrowing an enum increments it.",
+  "block": {
+    "heading": "## Structured summary (process output)",
+    "fence": "json",
+    "count": 1,
+    "placement": "The last element of the delivered file's ## Appendix — process output: the heading, then exactly one fenced json block, and nothing after it.",
+    "final_message": "The agent's final message does not carry the block; it exists only in the delivered file.",
+    "status": "Process output that restates decisions the document already records and adds none. It is not environment state (the output template's environment-state rule applies unchanged) and not a seventh output section. A reader who ignores it loses nothing."
+  },
+  "required": [
+    "schema_version",
+    "run_mode",
+    "assumptions",
+    "ground_truths",
+    "chains",
+    "dead_ends",
+    "techniques",
+    "gate",
+    "re_entry",
+    "conclusion"
+  ],
+  "fields": {
+    "schema_version": {
+      "type": "integer",
+      "nullable": false,
+      "const": 1,
+      "source": "This schema's own schema_version."
+    },
+    "run_mode": {
+      "type": "string",
+      "nullable": true,
+      "pattern": "^(full-composer|focused-(five-whys|fishbone|inversion|pre-mortem|trade-off|second-order|estimate|theoretical-limit))$",
+      "source": "The Step 0 MODE the run used, verbatim: full-composer or focused-<technique>.",
+      "null_when": "The document records no Step 0 mode (a legacy worked example). An agent report never writes null."
+    },
+    "assumptions": {
+      "type": "array",
+      "nullable": false,
+      "source": "Section 2 Assumptions Table: one item per row, in row order.",
+      "items": {
+        "type": "object",
+        "fields": {
+          "id": {
+            "type": "string",
+            "pattern": "^A-[1-9][0-9]*$",
+            "source": "A-n, where n is the row's 1-based position in the section 2 table: the same A-N the chains' [Assumes: A-N] marks and the Assumption Audit scan use. The table itself carries no ID column."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "physical law",
+              "current constraint",
+              "convention",
+              "untested belief"
+            ],
+            "source": "The row's Type cell's parent type (a trailing parenthesised subtype is dropped): exactly one of the four types.",
+            "nullable": true,
+            "null_when": "Legacy worked examples only: the row's Type cell is not a single taxonomy type (a pre-taxonomy value such as `factual`/`value`, which assumption-taxonomy.md says must not be backfilled, or a compound `a / b` cell). An agent report never writes null."
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "Accept",
+              "Challenge",
+              "Discard"
+            ],
+            "source": "The token that leads the row's Verdict cell, before its em-dash."
+          }
+        }
+      }
+    },
+    "ground_truths": {
+      "type": "array",
+      "nullable": false,
+      "source": "Section 3 Ground Truths: one item per declared ground truth, in declaration order.",
+      "items": {
+        "type": "object",
+        "fields": {
+          "id": {
+            "type": "string",
+            "pattern": "^GT-[1-9][0-9]*$",
+            "source": "The ground truth's id as section 3 declares it, written without any ? suffix."
+          },
+          "read_at_source": {
+            "type": "boolean",
+            "source": "Judged from the canonical section 3 declaration: false exactly when section 3 declares the id as GT-N? (provenance reported-by-delegate or unverified); true when it declares it unsuffixed (read-at-source)."
+          }
+        }
+      }
+    },
+    "chains": {
+      "type": "array",
+      "nullable": false,
+      "source": "Section 4 Derivation Chains: one item per chain, in document order.",
+      "items": {
+        "type": "object",
+        "fields": {
+          "id": {
+            "type": "string",
+            "pattern": "^C[1-9][0-9]*$",
+            "source": "The chain's Cn id."
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "HIGH",
+              "MEDIUM",
+              "LOW"
+            ],
+            "source": "The chain's own **Confidence:** line."
+          },
+          "rests_on": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^(GT-[1-9][0-9]*\\??|C[1-9][0-9]*)$"
+            },
+            "source": "Every identifier on the chain's head line (the part before the first arrow), in order, written as the head writes it with any ? suffix kept: the same list as the chain's **Pre-check:** head field."
+          }
+        }
+      }
+    },
+    "dead_ends": {
+      "type": "array",
+      "nullable": false,
+      "items": {
+        "type": "string"
+      },
+      "source": "The name in each section 5 '### Dead End: [Name]' heading, in order. An empty array when section 5 holds only its Nothing material here line."
+    },
+    "techniques": {
+      "type": "object",
+      "nullable": true,
+      "null_when": "The document has no Techniques not applied: block (a legacy worked example, which may still apply a technique in its prose). An agent report never writes null. A focused-mode run writes an object (its not_applied may be empty), never null.",
+      "fields": {
+        "applied": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "five-whys",
+              "fishbone",
+              "inversion",
+              "pre-mortem",
+              "trade-off",
+              "second-order",
+              "estimate",
+              "theoretical-limit"
+            ]
+          },
+          "source": "Each companion technique the run applied, by slug, in first-applied order."
+        },
+        "not_applied": {
+          "type": "array",
+          "source": "One item per line of the Techniques not applied: block; an empty array when that block is omitted because every invocation fired.",
+          "items": {
+            "type": "object",
+            "fields": {
+              "technique": {
+                "type": "string",
+                "enum": [
+                  "five-whys",
+                  "fishbone",
+                  "inversion",
+                  "pre-mortem",
+                  "trade-off",
+                  "second-order",
+                  "estimate",
+                  "theoretical-limit"
+                ]
+              },
+              "phase": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "source": "The phase whose invocation of the technique did not fire, per the agent body's procedure."
+              },
+              "reason": {
+                "type": "string",
+                "source": "The <reason> of the matching '<technique> — not applicable — <reason>' line, verbatim."
+              }
+            }
+          }
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "nullable": true,
+      "null_when": "The document carries no '## Self-Audit Gate (process output)' section (a legacy worked example). An agent report whose gate did not run writes passes as [] and cleared as false, never null.",
+      "fields": {
+        "passes": {
+          "type": "array",
+          "source": "One item per scoring pass, in order: each earlier pass read from its **Pass N (before re-score):** line, the final pass read from the six verdict blocks.",
+          "items": {
+            "type": "object",
+            "fields": {
+              "bands": {
+                "type": "array",
+                "length": 6,
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "Absent",
+                    "Hand-wavy",
+                    "Sound",
+                    "Rigorous"
+                  ]
+                },
+                "source": "The band each of Criteria 1 to 6 received in this pass, in criterion order."
+              },
+              "gate_cleared": {
+                "type": "boolean",
+                "source": "The rubric's Gate cleared condition for this pass: no criterion scores Absent."
+              },
+              "hand_wavy_cap_cleared": {
+                "type": "boolean",
+                "source": "The rubric's Hand-wavy cap cleared condition for this pass: at most one criterion scores Hand-wavy."
+              }
+            }
+          }
+        },
+        "fix_repeat_fired": {
+          "type": "boolean",
+          "source": "Whether the Self-Audit Gate's Fix/Repeat loop fired: the Fix/Repeat fired value of the **Gate result:** line."
+        },
+        "cleared": {
+          "type": "boolean",
+          "source": "Whether the final pass cleared both conditions: the cleared / not cleared value of the **Gate result:** line."
+        }
+      }
+    },
+    "re_entry": {
+      "type": "object",
+      "nullable": true,
+      "null_when": "The document records no Self-Audit Gate section and no re-entry disclosure (a legacy worked example). An agent report never writes null.",
+      "fields": {
+        "fired": {
+          "type": "boolean",
+          "source": "A statement of fact, not a phrase to be searched: true when any of the four re-entry edges fired anywhere in the run; false means no edge fired anywhere."
+        },
+        "edges": {
+          "type": "array",
+          "source": "One item per edge that fired, in firing order; an empty array exactly when fired is false.",
+          "items": {
+            "type": "object",
+            "fields": {
+              "edge": {
+                "type": "string",
+                "enum": [
+                  "the second-order pass's return to Phase 2 for re-challenging",
+                  "the Self-Audit Gate's Fix/Repeat loop",
+                  "the Criterion 1 Absent verdict's return to Phase 1",
+                  "the mid-run input re-open"
+                ]
+              },
+              "trigger": {
+                "type": "string",
+                "source": "One short sentence: what triggered the edge (the criterion that failed, or the input that was missing), as the document's re-entry disclosure states it."
+              }
+            }
+          }
+        }
+      }
+    },
+    "conclusion": {
+      "type": "object",
+      "nullable": false,
+      "fields": {
+        "recommendation": {
+          "type": "string",
+          "source": "Section 6's **Recommended approach:** text, copied in full and verbatim, including every item of any list it introduces. Never cut at a colon, never paraphrased."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ],
+          "source": "Section 6's **Confidence:** line."
+        },
+        "rests_on": {
+          "type": "array",
+          "nullable": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(GT-[1-9][0-9]*\\??|C[1-9][0-9]*)$"
+          },
+          "source": "Every id on section 6's **Pre-check:** head, in the order the head gives them, each Cn without its parenthesised band and each GT-N? with its ? kept: the same ids the chain rests_on field reads from a chain's head, read here from the Conclusion's own Pre-check line.",
+          "optional": true,
+          "null_when": "The document's section 6 carries no **Pre-check:** line (a legacy worked example). An agent report never writes null. The key is absent only in blocks written before the field existed (plugin 9.16-9.17 era); an absent key reads exactly as null and this null_when governs it. An agent report always writes the key."
+        }
+      }
+    }
+  },
+  "invariants": [
+    {
+      "id": "INV-01",
+      "rule": "Every key in required is present. A nullable field may be null only when its null_when condition holds; an agent report populates every field. A nested field marked optional may be absent, and its absence reads as null under its null_when."
+    },
+    {
+      "id": "INV-02",
+      "rule": "Every id the block names (A-n, GT-n, Cn, and every rests_on entry) is one the document uses, and every value agrees with the document. Where they disagree the block is corrected to match the document."
+    },
+    {
+      "id": "INV-03",
+      "rule": "ground_truths[].read_at_source is false exactly when section 3 declares that id as GT-N?, and true exactly when section 3 declares it unsuffixed."
+    },
+    {
+      "id": "INV-04",
+      "rule": "Each gate.passes[] entry has six bands; gate_cleared is true exactly when no band is Absent; hand_wavy_cap_cleared is true exactly when at most one band is Hand-wavy."
+    },
+    {
+      "id": "INV-05",
+      "rule": "gate.cleared is true exactly when passes is non-empty and its last entry has both gate_cleared and hand_wavy_cap_cleared true."
+    },
+    {
+      "id": "INV-06",
+      "rule": "gate.passes lists every scoring pass in order, including a pass that was later rewritten: one entry per **Pass N (before re-score):** line, then one for the final verdict blocks. Its length equals the passes value of the **Gate result:** line."
+    },
+    {
+      "id": "INV-07",
+      "rule": "gate.fix_repeat_fired true implies re_entry.fired true and an edges entry for the Self-Audit Gate's Fix/Repeat loop, because the Fix/Repeat loop is one of the four bounded re-entry edges."
+    },
+    {
+      "id": "INV-08",
+      "rule": "A gate.passes of length two or more implies re_entry.fired true."
+    },
+    {
+      "id": "INV-09",
+      "rule": "re_entry.fired is false exactly when re_entry.edges is empty."
+    },
+    {
+      "id": "INV-10",
+      "rule": "conclusion.recommendation is section 6's **Recommended approach:** in full, including any list it introduces; conclusion.confidence equals section 6's **Confidence:** band; conclusion.rests_on holds exactly the ids on section 6's **Pre-check:** head."
+    }
+  ],
+  "example": {
+    "schema_version": 1,
+    "run_mode": "full-composer",
+    "assumptions": [
+      {
+        "id": "A-1",
+        "type": "physical law",
+        "verdict": "Accept"
+      },
+      {
+        "id": "A-2",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      }
+    ],
+    "ground_truths": [
+      {
+        "id": "GT-1",
+        "read_at_source": true
+      },
+      {
+        "id": "GT-2",
+        "read_at_source": false
+      }
+    ],
+    "chains": [
+      {
+        "id": "C1",
+        "confidence": "HIGH",
+        "rests_on": [
+          "GT-1"
+        ]
+      },
+      {
+        "id": "C2",
+        "confidence": "MEDIUM",
+        "rests_on": [
+          "GT-2?",
+          "C1"
+        ]
+      }
+    ],
+    "dead_ends": [
+      "Rewrite from scratch"
+    ],
+    "techniques": {
+      "applied": [
+        "inversion",
+        "trade-off"
+      ],
+      "not_applied": [
+        {
+          "technique": "estimate",
+          "phase": 4,
+          "reason": "no conclusion turns on a magnitude that is uncertain"
+        }
+      ]
+    },
+    "gate": {
+      "passes": [
+        {
+          "bands": [
+            "Sound",
+            "Hand-wavy",
+            "Sound",
+            "Hand-wavy",
+            "Sound",
+            "Sound"
+          ],
+          "gate_cleared": true,
+          "hand_wavy_cap_cleared": false
+        },
+        {
+          "bands": [
+            "Sound",
+            "Sound",
+            "Sound",
+            "Hand-wavy",
+            "Sound",
+            "Sound"
+          ],
+          "gate_cleared": true,
+          "hand_wavy_cap_cleared": true
+        }
+      ],
+      "fix_repeat_fired": true,
+      "cleared": true
+    },
+    "re_entry": {
+      "fired": true,
+      "edges": [
+        {
+          "edge": "the Self-Audit Gate's Fix/Repeat loop",
+          "trigger": "Criteria 2 and 4 scored Hand-wavy on the first pass, failing the Hand-wavy cap."
+        }
+      ]
+    },
+    "conclusion": {
+      "recommendation": "Adopt option B (chain C2), in two steps:\n1. Pilot it on one team for a month (chain C2).\n2. Roll it out if the pilot's defect rate stays at or below today's (chain C1).",
+      "confidence": "MEDIUM",
+      "rests_on": [
+        "C1",
+        "C2"
+      ]
+    }
+  }
+}

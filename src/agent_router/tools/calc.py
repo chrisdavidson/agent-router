@@ -2,9 +2,12 @@
 
 Never calls ``eval``/``exec``. Supports int/decimal literals (as exact Fractions),
 ``+ - * / // % **``, unary +/-, parentheses, postfix percent (``17% of 2340``, ``50%``) and
-the functions in ``FUNCTIONS``. Irrational results (``sqrt(2)``, fractional powers) are
-reported as ``≈ decimal``. A top-level list or tuple (``[2*3, 7/2]``) evaluates each item and
-returns ``[6, 7/2 (≈ 3.5)]``. All failures raise ``ValueError``.
+the functions in ``FUNCTIONS``. Irrational results (``sqrt(2)``, fractional powers, and the
+approximate functions ``log``, ``ln``, ``log10``, ``log2``, ``exp`` and the constants ``pi`` and
+``e``, 50 digits) are reported as ``≈ decimal``. A ``math.`` prefix is accepted. A top-level
+list or tuple (``[2*3, 7/2]``) evaluates each item and returns ``[6, 7/2 (≈ 3.5)]``.
+``evaluate_script`` runs a short straight-line script (assignments, ``print``); see its
+docstring. All failures raise ``ValueError``.
 """
 
 import ast
@@ -24,6 +27,10 @@ MAX_RESULT_BITS = 32_000
 MAX_INT_ARG = 1_000
 MAX_EXPRESSION_CHARS = 1_000
 MAX_DEPTH = 100
+MAX_SCRIPT_CHARS = 10_000
+MAX_STATEMENTS = 200
+MAX_NAMES = 100
+MAX_EXP_ARG = 9_000  # exp(9000) has ~3,900 digits, just under MAX_DIGITS
 MAX_ITEMS = 50  # a top-level list: agents batch a table's rows (6 of ~600 calls in the fp runs)
 DECIMAL_PLACES = 10
 _APPROX_DIGITS = 50
@@ -138,6 +145,85 @@ def _lcm(*xs: Fraction) -> Fraction:
     return Fraction(math.lcm(*ints))
 
 
+_PI = Fraction(Decimal("3.14159265358979323846264338327950288419716939937510582097494"))
+
+
+def _dec(x: Fraction) -> Decimal:
+    return Decimal(x.numerator) / Decimal(x.denominator)
+
+
+def _positive(x: Fraction, fn: str) -> None:
+    if x <= 0:
+        raise ValueError(f"{fn}() of a non-positive number (math domain error)")
+
+
+def _ln(x: Fraction, state: _Inexact) -> Fraction:
+    _positive(x, "ln")
+    if x == 1:
+        return Fraction(0)
+    state.flag = True
+    with localcontext() as ctx:
+        ctx.prec = _APPROX_DIGITS
+        return Fraction(_dec(x).ln())
+
+
+def _log(x: Fraction, state: _Inexact, base: Fraction | None = None) -> Fraction:
+    if base is None:
+        _positive(x, "log")
+        return _ln(x, state)
+    _positive(x, "log")
+    _positive(base, "log")
+    if base == 1:
+        raise ValueError("log() with base 1 (division by zero)")
+    if x == 1:
+        return Fraction(0)
+    state.flag = True
+    with localcontext() as ctx:
+        ctx.prec = _APPROX_DIGITS
+        return Fraction(_dec(x).ln() / _dec(base).ln())
+
+
+def _log10(x: Fraction, state: _Inexact) -> Fraction:
+    _positive(x, "log10")
+    if x == 1:
+        return Fraction(0)
+    state.flag = True
+    with localcontext() as ctx:
+        ctx.prec = _APPROX_DIGITS
+        return Fraction(_dec(x).log10())
+
+
+def _log2(x: Fraction, state: _Inexact) -> Fraction:
+    _positive(x, "log2")
+    if x == 1:
+        return Fraction(0)
+    state.flag = True
+    with localcontext() as ctx:
+        ctx.prec = _APPROX_DIGITS
+        return Fraction(_dec(x).ln() / Decimal(2).ln())
+
+
+def _exp(x: Fraction, state: _Inexact) -> Fraction:
+    if abs(x) > MAX_EXP_ARG:
+        raise ValueError(f"exp() argument too large (limit {MAX_EXP_ARG})")
+    if x == 0:
+        return Fraction(1)
+    state.flag = True
+    with localcontext() as ctx:
+        ctx.prec = _APPROX_DIGITS
+        return Fraction(_dec(x).exp())
+
+
+def _e_constant() -> Fraction:
+    with localcontext() as ctx:
+        ctx.prec = _APPROX_DIGITS + 10
+        return Fraction(Decimal(1).exp())
+
+
+_E = _e_constant()
+# name -> (value, inexact): usable in an expression with no assignment
+_CONSTANTS: dict[str, tuple[Fraction, bool]] = {"pi": (_PI, True), "e": (_E, True)}
+
 FUNCTIONS: dict[str, Callable[..., Fraction]] = {
     "abs": lambda x: abs(x),
     "round": _round,
@@ -148,7 +234,15 @@ FUNCTIONS: dict[str, Callable[..., Fraction]] = {
     "lcm": _lcm,
     "percent_of": percent_of,
 }
-_STATEFUL = {"sqrt": _sqrt}
+# name -> (function called as fn(state, *args), min args, max args); the result may be inexact
+_STATEFUL: dict[str, tuple[Callable[..., Fraction], int, int]] = {
+    "sqrt": (lambda state, x: _sqrt(x, state), 1, 1),
+    "ln": (lambda state, x: _ln(x, state), 1, 1),
+    "log": (lambda state, x, base=None: _log(x, state, base), 1, 2),
+    "log10": (lambda state, x: _log10(x, state), 1, 1),
+    "log2": (lambda state, x: _log2(x, state), 1, 1),
+    "exp": (lambda state, x: _exp(x, state), 1, 1),
+}
 
 _BINOPS = {
     ast.Add: operator.add,
@@ -184,17 +278,47 @@ def _checked(x: Fraction) -> Fraction:
     return x
 
 
-def _eval(node: ast.AST, state: _Inexact, depth: int = 0) -> Fraction:
+_Env = dict[str, tuple[Fraction, bool]]
+
+
+def _lookup(name: str, state: _Inexact, env: _Env | None) -> Fraction:
+    found = (env or {}).get(name) or _CONSTANTS.get(name)
+    if found is None:
+        raise ValueError(f"name {name!r} is not defined")
+    value, inexact = found
+    state.flag = state.flag or inexact
+    return value
+
+
+def _math_name(node: ast.AST) -> str | None:
+    """``log`` for the call target ``math.log``; None for any other attribute."""
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "math"
+    ):
+        return node.attr
+    return None
+
+
+def _eval(node: ast.AST, state: _Inexact, depth: int = 0, env: _Env | None = None) -> Fraction:
     if depth > MAX_DEPTH:
         raise ValueError(f"expression nested too deeply (limit {MAX_DEPTH})")
     if isinstance(node, ast.Expression):
-        return _eval(node.body, state, depth + 1)
+        return _eval(node.body, state, depth + 1, env)
+    if isinstance(node, ast.Name):
+        return _lookup(node.id, state, env)
+    if isinstance(node, ast.Attribute):
+        name = _math_name(node)
+        if name is None:
+            raise ValueError("attribute access is not supported (only math.<name>)")
+        return _lookup(name, state, None)  # math.<constant>; never a user variable
     if isinstance(node, ast.Constant):
         if isinstance(node.value, bool) or not isinstance(node.value, int | float):
             raise ValueError(f"unsupported literal {node.value!r}")
         return Fraction(repr(node.value)) if isinstance(node.value, float) else Fraction(node.value)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd | ast.USub):
-        v = _eval(node.operand, state, depth + 1)
+        v = _eval(node.operand, state, depth + 1, env)
         return -v if isinstance(node.op, ast.USub) else v
     if isinstance(node, ast.BinOp):
         # "a+b+c+..." parses as a left-leaning chain; walk it iteratively so long flat
@@ -202,20 +326,24 @@ def _eval(node: ast.AST, state: _Inexact, depth: int = 0) -> Fraction:
         chain = [node]
         while isinstance(chain[-1].left, ast.BinOp):
             chain.append(chain[-1].left)
-        acc = _eval(chain[-1].left, state, depth + 1)
+        acc = _eval(chain[-1].left, state, depth + 1, env)
         for link in reversed(chain):
-            acc = _binop(link.op, acc, _eval(link.right, state, depth + 1), state)
+            acc = _binop(link.op, acc, _eval(link.right, state, depth + 1, env), state)
         return acc
     if isinstance(node, ast.Call):
-        if not isinstance(node.func, ast.Name) or node.keywords:
+        name = node.func.id if isinstance(node.func, ast.Name) else _math_name(node.func)
+        if name is None or node.keywords:
             raise ValueError("only plain calls to supported functions are allowed")
-        name = node.func.id
-        args = [_eval(a, state, depth + 1) for a in node.args]
+        if name not in _STATEFUL and name not in FUNCTIONS:
+            raise ValueError(f"unknown function {name!r}")
+        args = [_eval(a, state, depth + 1, env) for a in node.args]
         try:
             if name in _STATEFUL:
-                if len(args) != 1:
-                    raise ValueError(f"{name}() takes one argument")
-                return _checked(_STATEFUL[name](args[0], state))
+                fn, lo, hi = _STATEFUL[name]
+                if not lo <= len(args) <= hi:
+                    want = str(lo) if lo == hi else f"{lo}-{hi}"
+                    raise ValueError(f"{name}() takes {want} argument(s)")
+                return _checked(fn(state, *args))
             fn = FUNCTIONS.get(name)
             if fn is None:
                 raise ValueError(f"unknown function {name!r}")
@@ -295,3 +423,185 @@ def _one(tree: ast.Expression) -> str:
         return format_result(_eval(tree, state), state.flag)
     except (ArithmeticError, RecursionError, MemoryError) as e:  # decimal/overflow edge cases
         raise ValueError(f"cannot evaluate: {type(e).__name__}") from e
+
+
+# --- scripts ----------------------------------------------------------------------------------
+
+_BUILTIN_NAMES = frozenset({*FUNCTIONS, *_STATEFUL, *_CONSTANTS, "math", "print"})
+_CONSTRUCTS = {
+    "For": "for loop",
+    "AsyncFor": "for loop",
+    "While": "while loop",
+    "If": "if statement",
+    "FunctionDef": "function definition",
+    "AsyncFunctionDef": "function definition",
+    "ClassDef": "class definition",
+    "With": "with statement",
+    "Try": "try statement",
+    "Return": "return statement",
+    "Delete": "del statement",
+    "Global": "global statement",
+    "Assert": "assert statement",
+    "Raise": "raise statement",
+    "AnnAssign": "annotated assignment",
+    "Match": "match statement",
+}
+_EXPR_CONSTRUCTS = {
+    "ListComp": "comprehension",
+    "SetComp": "comprehension",
+    "DictComp": "comprehension",
+    "GeneratorExp": "comprehension",
+    "Subscript": "subscript",
+    "Lambda": "lambda",
+    "List": "list",
+    "Tuple": "tuple",
+    "Dict": "dict",
+    "Set": "set",
+    "JoinedStr": "f-string",
+    "Compare": "comparison",
+    "BoolOp": "boolean operator",
+    "IfExp": "conditional expression",
+    "NamedExpr": "walrus assignment",
+}
+
+
+def _where(node: ast.AST, msg: str) -> ValueError:
+    return ValueError(f"line {getattr(node, 'lineno', '?')}: {msg}")
+
+
+def _first_construct(node: ast.AST) -> ast.AST | None:
+    """The first expression node in ``node`` that is a named unsupported construct."""
+    for sub in ast.walk(node):
+        if type(sub).__name__ in _EXPR_CONSTRUCTS:
+            return sub
+    return None
+
+
+def _source(script: str, node: ast.AST) -> str:
+    return (ast.get_source_segment(script, node) or ast.unparse(node)).strip()
+
+
+def _value(node: ast.expr, env: _Env) -> tuple[Fraction, bool]:
+    if isinstance(node, ast.JoinedStr):
+        raise _where(node, 'f-strings are not supported (use print("label", expr))')
+    state = _Inexact()
+    try:
+        return _eval(node, state, 0, env), state.flag
+    except ValueError as exc:
+        if str(exc).startswith("unsupported syntax"):
+            bad = _first_construct(node)
+            if bad is not None:
+                raise _where(
+                    bad, f"{_EXPR_CONSTRUCTS[type(bad).__name__]} is not supported"
+                ) from exc
+        raise _where(node, str(exc)) from exc
+    except (ArithmeticError, RecursionError, MemoryError) as exc:
+        raise _where(node, f"cannot evaluate: {type(exc).__name__}") from exc
+
+
+def _show(script: str, node: ast.expr, env: _Env) -> str:
+    value, inexact = _value(node, env)
+    try:
+        return f"{_source(script, node)} = {format_result(value, inexact)}"
+    except ValueError as exc:
+        raise _where(node, str(exc)) from exc
+
+
+def _print_line(script: str, call: ast.Call, env: _Env) -> str | None:
+    if call.keywords:
+        raise _where(call, "print() keyword arguments (sep, end, file) are not supported")
+    parts: list[str] = []
+    for arg in call.args:
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            parts.append(arg.value)  # a label, emitted verbatim
+        else:
+            parts.append(_show(script, arg, env))
+    return ", ".join(parts) if parts else None
+
+
+def _check_import(stmt: ast.Import | ast.ImportFrom) -> None:
+    if isinstance(stmt, ast.Import):
+        if any(a.name != "math" or a.asname for a in stmt.names):
+            raise _where(stmt, "only 'import math' is supported")
+        return
+    if stmt.module != "math" or stmt.level:
+        raise _where(stmt, "only 'from math import ...' is supported")
+    for a in stmt.names:
+        if a.asname or a.name not in _BUILTIN_NAMES - {"math", "print"}:
+            raise _where(stmt, f"math.{a.name} is not supported")
+
+
+def _assign(script: str, stmt: ast.stmt, env: _Env) -> None:
+    if isinstance(stmt, ast.Assign):
+        if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
+            raise _where(stmt, "only 'name = expression' assignments are supported")
+        target, aug = stmt.targets[0], None
+    else:
+        assert isinstance(stmt, ast.AugAssign)
+        if not isinstance(stmt.target, ast.Name):
+            raise _where(stmt, "only 'name += expression' updates are supported")
+        target, aug = stmt.target, stmt.op
+    name = target.id
+    if name in _BUILTIN_NAMES:
+        raise _where(stmt, f"cannot assign to {name!r}: it is a function or constant")
+    if name not in env and len(env) >= MAX_NAMES:
+        raise _where(stmt, f"too many names (limit {MAX_NAMES})")
+    value, inexact = _value(stmt.value, env)
+    if aug is not None:
+        if name not in env:
+            raise _where(stmt, f"name {name!r} is not defined")
+        old, old_inexact = env[name]
+        state = _Inexact()
+        try:
+            value = _binop(aug, old, value, state)
+        except ValueError as exc:
+            raise _where(stmt, str(exc)) from exc
+        inexact = inexact or old_inexact or state.flag
+    env[name] = (_checked(value), inexact)
+
+
+def evaluate_script(script: str) -> str:
+    """Run a straight-line script exactly; return one output line per ``print`` / bare expression.
+
+    Statements (newline- or ``;``-separated): ``import math`` and ``from math import ...``
+    (ignored), ``name = expr``, ``name += expr`` (and the other arithmetic operators),
+    ``print(a, "label", b)`` and a bare expression. An expression is shown as
+    ``<source text> = <value>``; a string-literal ``print`` argument is emitted verbatim; the
+    arguments of one ``print`` are joined with ``", "``. Names keep their inexact (``≈``) flag.
+    No loops, functions, f-strings, subscripts, comprehensions, attribute access other than
+    ``math.<name>`` or I/O: those raise ``ValueError`` naming the construct and its line. The
+    script is parsed, never executed. All failures raise ``ValueError``.
+    """
+    if not script or not script.strip():
+        raise ValueError("empty script")
+    if len(script) > MAX_SCRIPT_CHARS:
+        raise ValueError(f"script too long (limit {MAX_SCRIPT_CHARS} chars)")
+    try:
+        tree = ast.parse(script, mode="exec")
+    except SyntaxError as exc:
+        raise ValueError(f"invalid script: line {exc.lineno}: {exc.msg}") from exc
+    except (RecursionError, MemoryError, ValueError) as exc:  # ValueError: null bytes
+        raise ValueError("invalid script") from exc
+    if len(tree.body) > MAX_STATEMENTS:
+        raise ValueError(f"too many statements (limit {MAX_STATEMENTS})")
+    env: _Env = {}
+    out: list[str] = []
+    for stmt in tree.body:
+        kind = type(stmt).__name__
+        if isinstance(stmt, ast.Import | ast.ImportFrom):
+            _check_import(stmt)
+        elif isinstance(stmt, ast.Assign | ast.AugAssign):
+            _assign(script, stmt, env)
+        elif isinstance(stmt, ast.Expr):
+            call = stmt.value
+            if isinstance(call, ast.Call) and getattr(call.func, "id", None) == "print":
+                line = _print_line(script, call, env)
+                if line is not None:
+                    out.append(line)
+                continue
+            out.append(_show(script, stmt.value, env))
+        else:
+            raise _where(stmt, f"{_CONSTRUCTS.get(kind, kind)} is not supported")
+    if not out:
+        raise ValueError("the script prints nothing (end it with print(...))")
+    return "\n".join(out)

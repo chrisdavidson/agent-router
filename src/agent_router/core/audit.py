@@ -95,6 +95,8 @@ class AuditLog:
             "catalog_version": catalog_version,
             "thresholds": {"threshold": config.threshold, "mode": config.mode},
         }
+        if decision.downgraded:  # only when it happened, so the record's shape is unchanged
+            rec["downgraded"] = True
         line = json.dumps(rec, ensure_ascii=False, default=str)
         with self._lock:
             if self.path is None:

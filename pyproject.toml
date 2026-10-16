@@ -1,6 +1,6 @@
 [project]
 name = "agent-router"
-version = "0.1.0"
+version = "0.2.0"
 description = "MIT-licensed router that asks a Jev-spec classifier whether an MIT open-source alternative from a fixed catalog fits, at each hook point of a Claude Agent SDK agent."
 readme = "README.md"
 license = "MIT"
@@ -41,8 +41,9 @@ asyncio_mode = "auto"
 markers = [
   "model: needs the model2vec potion-base-8M weights (downloads once from Hugging Face)",
   "live: real Claude Agent SDK sessions (your Claude login, costs tokens) and paid Jev / OpenRouter API calls (needs OPENROUTER_API_KEY or TYPESAFE_API_KEY)",
+  "bench: wall-clock latency baselines (host-dependent; run with `make bench`)",
 ]
-addopts = "-m 'not live and not model'"
+addopts = "-m 'not live and not model and not bench'"
 
 [tool.ruff]
 line-length = 100

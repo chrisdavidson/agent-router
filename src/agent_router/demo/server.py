@@ -518,7 +518,14 @@ def create_app(
                         "session": path.stem,
                         "records": len(records),
                         "runs": sum(r.get("kind") == "run_start" for r in records),
-                        "finished": sum(r.get("kind") == "run_end" for r in records),
+                        # one run_end per stop attempt: count each agent once
+                        "finished": len(
+                            {
+                                r.get("agent_id") or id(r)
+                                for r in records
+                                if r.get("kind") == "run_end"
+                            }
+                        ),
                         "title": title,
                         "mtime": path.stat().st_mtime,
                     }

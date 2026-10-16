@@ -1,0 +1,360 @@
+{
+  "contract": {
+    "contract_status": "unsupported_version",
+    "schema_path": "<pinned schema>",
+    "schema_source": "pinned",
+    "schema_version": 2,
+    "violations": [
+      {
+        "code": "version",
+        "message": "version 2 is not accepted",
+        "path": "schema_version",
+        "severity": "error"
+      }
+    ]
+  },
+  "decisions": {
+    "assumptions": {
+      "by_type": {
+        "convention": 7,
+        "current constraint": 1,
+        "physical law": 1,
+        "untested belief": 11
+      },
+      "by_verdict": {
+        "Accept": 9,
+        "Challenge": 11
+      },
+      "count": 20,
+      "rows": [
+        {
+          "assumption": "A-1: \"5 MWh\" means usable thermal energy stored (MWh_th)",
+          "id": "A-1",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-2: The storage medium is \"solar salt\" (60% NaNO3, 40% KNO3)",
+          "id": "A-2",
+          "type": "convention",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "A-3: The design is two tanks, one hot and one cold, with the salt pumped between them",
+          "id": "A-3",
+          "type": "convention",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "A-4: The salt operates between 288 °C (cold) and 566 °C (hot)",
+          "id": "A-4",
+          "type": "current constraint",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "A-5: Stored sensible heat = m·cp·ΔT",
+          "id": "A-5",
+          "type": "physical law",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "A-6: cp stays at 1.53 J/(g·K) across 288–566 °C",
+          "id": "A-6",
+          "type": "untested belief",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "A-7: 85% of the salt inventory is usable (range 80–92%); the rest is a \"heel\" left in the tank so the pumps stay submerged",
+          "id": "A-7",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-8: Each tank's height equals its diameter (H = D), with 10% freeboard, and the cold tank is built the same size as the hot tank",
+          "id": "A-8",
+          "type": "convention",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "A-9: Tank wall thickness is set by fabrication minimums (6–12 mm), not by the pressure of the salt",
+          "id": "A-9",
+          "type": "convention",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "A-10: Unit prices for salt, fabricated steel, pumps, piping, controls, insulation and foundations",
+          "id": "A-10",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-11: Indirect costs (EPC margin, engineering, commissioning, contingency) multiply the direct cost by 1.35 (range 1.25–1.50)",
+          "id": "A-11",
+          "type": "convention",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-12: Scope excludes the charging heater, the discharge heat exchanger and any power block",
+          "id": "A-12",
+          "type": "convention",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "A-13: Life is 30 years at 365 full cycles a year (low case: 20 years at 300 cycles a year)",
+          "id": "A-13",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-14: Heat is lost continuously with both tanks at full temperature and 25 °C ambient; a 1.5× factor covers foundations, nozzles and piping",
+          "id": "A-14",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-15: Levelisation covers capital only, uses a 7% real discount rate, excludes O&M and charging energy, and is in 2026 USD",
+          "id": "A-15",
+          "type": "convention",
+          "verdict": "Accept"
+        },
+        {
+          "assumption": "A-16: Salt density follows ρ = 2090 − 0.636·T(°C) kg/m³",
+          "id": "A-16",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-17: Every cycle delivers the full 5 MWh_th (surfaced in the Assumption Audit)",
+          "id": "A-17",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-18: Charging energy costs more than about 2.4 ¢/kWh_th (surfaced in the Assumption Audit)",
+          "id": "A-18",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-19: Roof framing, nozzles and internals add 1.3× to the shell steel (surfaced in the Assumption Audit)",
+          "id": "A-19",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        },
+        {
+          "assumption": "A-20: Two pumps and 50 m of heat-traced piping are enough for 2.94 kg/s at a 4-hour discharge (surfaced in the Assumption Audit)",
+          "id": "A-20",
+          "type": "untested belief",
+          "verdict": "Challenge"
+        }
+      ]
+    },
+    "chains": [
+      {
+        "confidence": "HIGH",
+        "id": "C1",
+        "rests_on": [
+          "GT-1",
+          "GT-2",
+          "GT-3"
+        ],
+        "tag": null,
+        "title": "Solar salt cycled from 288 to 566 °C stores 0.11815 kWh_th per kg, so it needs 8.4638 kg per kWh_th"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C2",
+        "rests_on": [
+          "C1",
+          "GT-14?",
+          "GT-5?"
+        ],
+        "tag": null,
+        "title": "The salt inventory of 49,787 kg costs $44,808, or $8.96/kWh_th (bracket $4.60–15.87)"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C3",
+        "rests_on": [
+          "C2",
+          "GT-4?",
+          "GT-7?",
+          "GT-8?",
+          "GT-6?"
+        ],
+        "tag": null,
+        "title": "Two tanks of 31.66 m³ each cost $113,786, or $22.76/kWh_th (bracket $10.36–59.71)"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C4",
+        "rests_on": [
+          "GT-1",
+          "GT-2",
+          "GT-3",
+          "GT-5?",
+          "GT-4?",
+          "GT-15?",
+          "GT-8?"
+        ],
+        "tag": null,
+        "title": "The lowest cost physics allows is about $3.84/kWh_th (salt alone), and the salt's pressure needs only 1.30 mm of shell"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C5",
+        "rests_on": [
+          "C2",
+          "C3",
+          "GT-10?",
+          "GT-9?",
+          "GT-11?"
+        ],
+        "tag": null,
+        "title": "Installed capital cost is $499,691, or $99.94/kWh_th (bracket $48.15–251.83)"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C6",
+        "rests_on": [
+          "C5",
+          "C2",
+          "C4"
+        ],
+        "tag": null,
+        "title": "At 5 MWh_th, the salt is 12.1% of direct cost, and installed cost is 26× the lowest the physics allows"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C7",
+        "rests_on": [
+          "C3",
+          "GT-12?",
+          "GT-2"
+        ],
+        "tag": null,
+        "title": "The store retains 92.0% of its heat per day on a one-cycle-per-day duty (bracket 90.0–93.9%)"
+      },
+      {
+        "confidence": "MEDIUM",
+        "id": "C8",
+        "rests_on": [
+          "C5",
+          "C7",
+          "GT-13?",
+          "GT-16?"
+        ],
+        "tag": null,
+        "title": "Levelised capital cost is 0.99 ¢/kWh_th delivered undiscounted, or 2.40 ¢/kWh_th at 7% real (brackets 0.47–4.66 ¢ and 1.13–8.81 ¢)"
+      }
+    ],
+    "conclusion": {
+      "confidence": "MEDIUM",
+      "recommended": "Use about $100/kWh_th of usable capacity ($99.94; $499,691 installed) as the central capital cost for a 5 MWh_th two-tank solar-salt store, and carry its bracket of $48–252/kWh_th with it (chain C5).",
+      "rests_on": null
+    },
+    "contradictions": [],
+    "dead_ends": [
+      "Scaling from utility-scale CSP storage",
+      "Hot-side cap at 550 °C",
+      "Hydrostatic-thickness tanks",
+      "Electric-basis reading of \"5 MWh\""
+    ],
+    "gate": {
+      "bands": {
+        "1": "Sound",
+        "2": "Rigorous",
+        "3": "Rigorous",
+        "4": "Rigorous",
+        "5": "Rigorous",
+        "6": "Rigorous"
+      },
+      "cleared": true,
+      "criteria": {
+        "1": "Identify Essence",
+        "2": "Challenge Assumptions",
+        "3": "Establish Ground Truths",
+        "4": "Reason Upward",
+        "5": "Validate",
+        "6": "Conclusion-to-Ground-Truth Traceability"
+      },
+      "fix_repeat": false,
+      "passes": 1,
+      "passes_written": 0,
+      "result": "cleared · passes: 1 · Fix/Repeat fired: no"
+    },
+    "ground_truths": {
+      "count": 16,
+      "unverified": [
+        "GT-4?",
+        "GT-5?",
+        "GT-6?",
+        "GT-7?",
+        "GT-8?",
+        "GT-9?",
+        "GT-10?",
+        "GT-11?",
+        "GT-12?",
+        "GT-13?",
+        "GT-14?",
+        "GT-15?",
+        "GT-16?"
+      ]
+    },
+    "re_entry": {
+      "disclosure": null,
+      "edges": [],
+      "fired": false
+    },
+    "run_mode": "full-composer",
+    "run_mode_line": null,
+    "sections": [
+      "Answer",
+      "1. Problem Essence",
+      "2. Assumptions Table",
+      "3. Ground Truths",
+      "4. Derivation Chains",
+      "5. Abandoned Reasoning",
+      "6. Conclusion",
+      "Appendix — process output",
+      "Assumption Audit scan (process output)",
+      "Techniques not applied (process output)",
+      "Adversarial pass (process output)",
+      "§6→§4 closure ledger (process output)",
+      "Self-audit scan (process output)",
+      "Self-Audit Gate (process output)",
+      "Structured summary (process output)"
+    ],
+    "techniques_applied": [
+      "inversion",
+      "five-whys",
+      "estimate",
+      "theoretical-limit",
+      "second-order"
+    ],
+    "techniques_not_applied": [
+      {
+        "phase": 2,
+        "reason": "the uncertainty is a cost total that can be broken into components, not a set of causes spread across categories",
+        "technique": "fishbone"
+      },
+      {
+        "phase": 4,
+        "reason": "the question is an estimate, not a choice between surviving options",
+        "technique": "trade-off"
+      },
+      {
+        "phase": 5,
+        "reason": "the conclusion is a claim (an estimate), not a plan; the Phase 5 adversarial pass therefore uses inversion",
+        "technique": "pre-mortem"
+      },
+      {
+        "phase": 1,
+        "reason": "at Phase 1 the essence does not depend on whether a current figure is a convention or a hard bound; the bound is derived in Phase 4 instead (C4)",
+        "technique": "theoretical-limit"
+      }
+    ]
+  },
+  "decisions_source": "block",
+  "decisions_verified": false
+}

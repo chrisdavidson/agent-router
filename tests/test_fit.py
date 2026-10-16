@@ -29,7 +29,6 @@ def test_one_expression_the_calculator_runs_fits(command):
         "cat > /tmp/tes.py <<'EOF'\nE=5000.0\nprint(E)\nEOF",
         "awk 'BEGIN{cp=1443+0.172*427.5; q=cp*275/3600000; printf \"%.2f\", q}'",
         "cd references; wc -c inversion.md pre-mortem.md trade-off.md",
-        'python3 -c "print(math.log(2))"',  # log is not a calculator function
         'python3 -c "print(sum([120, 85.5, 40.25]) / 3)"',  # lists are not supported
         "python3 -c \"import json; print(json.load(open('data.json'))['total'])\"",
         'python3 -c "import yaml; print(yaml.__version__)"',

@@ -18,7 +18,7 @@ With ``router`` the per-session audit log shows whether the nudge fired (``hint`
 Costs real tokens: one short Claude session per prompt x repeat x config.
 
 Usage:
-    battery.py [--fp-repo PATH] [--catalog PATH] [--configs baseline,router]
+    battery.py --fp-repo PATH [--plugin-root PATH] [--catalog PATH] [--configs baseline,router]
                [--router-plugin DIR] [--repeat N] [--model M] [--ids P1,N19]
                [--out DIR] [--timeout S]
 """
@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import functools
 import importlib.util
 import json
 import os
@@ -38,7 +39,17 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PLUGIN = HERE / "plugin"
-FP_AGENT = "first-principles:first-principles"
+
+
+@functools.cache
+def _identity():
+    """trace.py's view of the integrated plugin (agent type, manifest, catalog entry ids),
+    derived from its manifest or the pinned fallback."""
+    spec = importlib.util.spec_from_file_location("fp_trace", HERE / "trace.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def load_fp_router_check(fp_repo: Path):
@@ -61,7 +72,7 @@ def delegated_call(event: dict) -> bool:
         if (
             block.get("type") == "tool_use"
             and block.get("name") in ("Agent", "Task")
-            and FP_AGENT.split(":")[0] in json.dumps(block.get("input", {})).lower()
+            and _identity().AGENT.split(":")[0] in json.dumps(block.get("input", {})).lower()
         ):
             return True
     return False
@@ -119,7 +130,7 @@ def hint_fired(state: Path, session: str | None) -> bool:
         return False
     for line in audit.read_text().splitlines():
         rec = json.loads(line)
-        if rec.get("action") == "suggest" and rec.get("entry_id") == "first-principles-agent":
+        if rec.get("action") == "suggest" and rec.get("entry_id") == _identity().DELEGATE_ENTRY:
             return True
     return False
 
@@ -127,7 +138,15 @@ def hint_fired(state: Path, session: str | None) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument(
-        "--fp-repo", type=Path, default=Path.home() / "Projects" / "first-principles-skill"
+        "--fp-repo",
+        type=Path,
+        required=True,
+        help="the publisher's repository (scripts/check-routing.py, tests/routing-catalog.md)",
+    )
+    ap.add_argument(
+        "--plugin-root",
+        type=Path,
+        help="the plugin tree to load (default: <fp-repo>/<plugin name>)",
     )
     ap.add_argument("--catalog", type=Path, help="default: <fp-repo>/tests/routing-catalog.md")
     ap.add_argument("--configs", default="baseline,router")
@@ -150,7 +169,7 @@ def main() -> int:
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
     out_dir = args.out or Path(tempfile.gettempdir()) / f"fp-battery-{stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    fp_plugin = args.fp_repo / "first-principles"
+    fp_plugin = args.plugin_root or args.fp_repo / _identity().MANIFEST.plugin_name
     configs = {
         "baseline": [fp_plugin],
         "router": [fp_plugin, args.router_plugin],

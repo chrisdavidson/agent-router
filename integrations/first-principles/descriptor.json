@@ -1,0 +1,13 @@
+{
+  "descriptor_version": 1,
+  "expected_plugin": "first-principles",
+  "plugin_root_env": "FP_PLUGIN_ROOT",
+  "fallback_manifest": "manifest.fallback.json",
+  "own_plugin_json": "plugin/.claude-plugin/plugin.json",
+  "delegate_entry": "first-principles-agent",
+  "calc_entry": "exact-calc",
+  "calc_script_entry": "exact-calc-script",
+  "schema_env": "AGENT_ROUTER_FP_SCHEMA",
+  "pinned_schema": "contract/summary-schema.json",
+  "accepted_schema_versions": [1]
+}

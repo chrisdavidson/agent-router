@@ -89,6 +89,9 @@ class Decision:
     options: tuple[str, ...] = field(default_factory=tuple)
     threshold: float | None = None
     """The bar the chosen entry was held to (its own, else the router's); None when none chosen."""
+    downgraded: bool = False
+    """True when enforce mode would have denied but the agent is protected (never-block), so the
+    decision is an advisory SUGGEST instead."""
 
 
 PRIVATE_STAGE_KEYS = frozenset({"error"})

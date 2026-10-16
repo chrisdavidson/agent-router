@@ -29,7 +29,12 @@ from agent_router.adapters.claude_sdk import (
     Listener,
     emit,
 )
-from agent_router.adapters.claude_tools import SERVER_NAME, TOOL_NAMES, build_mcp_server
+from agent_router.adapters.claude_tools import (
+    EXTRA_TOOL_NAMES,
+    SERVER_NAME,
+    TOOL_NAMES,
+    build_mcp_server,
+)
 from agent_router.core.audit import AuditLog
 from agent_router.core.catalog import load_catalog
 from agent_router.core.config import RouterConfig
@@ -93,7 +98,7 @@ def build_options(
         cwd=workspace,
         setting_sources=["project"],
         mcp_servers={SERVER_NAME: build_mcp_server(workspace)},
-        allowed_tools=[*TOOL_NAMES, *native],
+        allowed_tools=[*TOOL_NAMES, *EXTRA_TOOL_NAMES, *native],
         permission_mode="default",
         hooks=hooks.hooks(),
     )

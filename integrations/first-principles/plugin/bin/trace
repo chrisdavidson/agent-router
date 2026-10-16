@@ -3,16 +3,26 @@
 # Hook JSON on stdin, always '{}' on stdout: record-only, it never steers the agent.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
-repo="$(dirname "$(dirname "$integ")")"
-py="${AGENT_ROUTER_PYTHON:-$repo/.venv/bin/python}"
+# shellcheck source=_resolve.sh
+. "$here/_resolve.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
+# shellcheck source=_failopen.sh
+. "$here/_failopen.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
 payload="$(cat)"
-# Fast path: only the first-principles agent is traced; everything else answers at once.
+# Fast path: only the integrated plugin's agent is traced; everything else answers at once.
 # The main session's Agent call that starts a run is traced too (its prompt, before the run).
-agent_re='"agent_type"[[:space:]]*:[[:space:]]*"first-principles:first-principles"'
-handoff_re='"subagent_type"[[:space:]]*:[[:space:]]*"first-principles:first-principles"'
-if [ -n "$AGENT_ROUTER_DISABLED" ] || [ ! -x "$py" ] \
-  || ! [[ $payload =~ $agent_re || $payload =~ $handoff_re ]]; then
+# The agent type is the one literal this script must carry (it cannot start Python to read the
+# manifest); FP_AGENT_TYPE overrides it, and a test holds the default equal to the pinned
+# fallback manifest's agent_type. hooks/hooks.json carries the same literal in its matchers.
+agent="${FP_AGENT_TYPE:-first-principles:first-principles}"
+agent_re='"agent_type"[[:space:]]*:[[:space:]]*"'"$agent"'"'
+handoff_re='"subagent_type"[[:space:]]*:[[:space:]]*"'"$agent"'"'
+if [ -n "$AGENT_ROUTER_DISABLED" ] || ! [[ $payload =~ $agent_re || $payload =~ $handoff_re ]]; then
   echo '{}'
   exit 0
 fi
-printf '%s' "$payload" | "$py" "$integ/trace.py" 2>/dev/null || echo '{}'
+# Which interpreter: AGENT_ROUTER_PYTHON, the checkout .venv, the python behind `agent-router` on
+# PATH, else python3 (_resolve.sh). None runnable: answer {} (fail open).
+ar_resolve_python || { echo '{}'; exit 0; }
+py="$AR_PY"
+FAILOPEN_EMPTY_ONLY=1   # record-only (D-08): nothing but {} ever reaches the host
+fail_open_run "$py" "$integ/trace.py"

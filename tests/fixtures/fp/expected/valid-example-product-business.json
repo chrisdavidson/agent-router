@@ -1,0 +1,111 @@
+{
+  "assumptions": {
+    "by_type": {
+      "convention": 1,
+      "untested belief": 7
+    },
+    "by_verdict": {
+      "Challenge": 6,
+      "Discard": 2
+    },
+    "count": 8,
+    "rows": [
+      {
+        "assumption": "A free tier drives top-of-funnel growth",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "Free users convert to paid at a meaningful rate",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "Competitors' free-tier economics are profitable",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "All our competitors have a free tier, so we need one",
+        "type": "convention",
+        "verdict": "Discard"
+      },
+      {
+        "assumption": "Adding a free tier has no opportunity cost",
+        "type": "untested belief",
+        "verdict": "Discard"
+      },
+      {
+        "assumption": "The current ICP (B2B teams, ~$10K/year contracts) responds to free-tier self-service",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "Free-tier acquisition cost is lower than current outbound acquisition cost",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      },
+      {
+        "assumption": "A free tier will not cannibalise existing paid accounts or renewals",
+        "type": "untested belief",
+        "verdict": "Challenge"
+      }
+    ]
+  },
+  "chains": [
+    {
+      "confidence": "MEDIUM",
+      "id": "C1",
+      "tag": null,
+      "title": "The competitor-parity argument cannot justify adding a free tier"
+    },
+    {
+      "confidence": "MEDIUM",
+      "id": "C2",
+      "tag": null,
+      "title": "The free-tier decision is empirical, not a convention to follow; a time-boxed pilot is the minimum required action before any adoption decision"
+    },
+    {
+      "confidence": "HIGH",
+      "id": "C3",
+      "tag": null,
+      "title": "The pilot threshold for adoption must be pre-specified before the pilot begins, not inferred from results afterward"
+    }
+  ],
+  "conclusion": {
+    "confidence": "MEDIUM",
+    "recommended": "(chains C2 and C3) Run a time-boxed 90-day pilot with a limited cohort of free-tier users (up to 5 users, limited projects) to generate the conversion data currently absent in GT-4?. Exclude existing customer domains and prospects in active deals from the pilot cohort, so the pilot cannot cannibalise paid accounts or renewals. Before the pilot launches, pre-specify the break-even threshold *formul"
+  },
+  "contradictions": [],
+  "dead_ends": [
+    "Competitors have free tiers, therefore we need one"
+  ],
+  "gate": {
+    "bands": {},
+    "cleared": null,
+    "criteria": {},
+    "fix_repeat": false,
+    "passes": 0,
+    "result": null
+  },
+  "ground_truths": {
+    "count": 4,
+    "unverified": [
+      "GT-4?"
+    ]
+  },
+  "re_entry": null,
+  "run_mode": null,
+  "run_mode_line": null,
+  "sections": [
+    "1. Problem Essence",
+    "2. Assumptions Table",
+    "3. Ground Truths",
+    "4. Derivation Chains",
+    "5. Abandoned Reasoning",
+    "6. Conclusion",
+    "Appendix — process output",
+    "Structured summary (process output)"
+  ],
+  "techniques_not_applied": []
+}

@@ -216,19 +216,25 @@ class Router:
                 threshold=threshold,
             )
         key = (event.session_id, event.turn_id, entry.id)
-        # 8. enforce at TOOL denies every matching call; it marks but never consults the set
+        # 8. enforce at TOOL denies every matching call; it marks but never consults the set.
+        # A protected agent (never-block, D-02) is never denied: its would-be deny falls through
+        # to the advisory path below and the decision is flagged ``downgraded``.
+        downgraded = False
         if cfg.mode == "enforce" and event.point == HookPoint.TOOL and entry.kind != "agent":
-            with self._lock:
-                self._suggested.add(key)
-            return Decision(
-                Action.ENFORCE,
-                f"p={prob:.3f} at or above threshold {threshold:.3f}, enforce mode",
-                entry_id=entry.id,
-                hint=render_deny(entry, tool_name or ""),
-                result=result,
-                options=option_ids,
-                threshold=threshold,
-            )
+            if event.agent_type is not None and event.agent_type in cfg.never_block_agents:
+                downgraded = True
+            else:
+                with self._lock:
+                    self._suggested.add(key)
+                return Decision(
+                    Action.ENFORCE,
+                    f"p={prob:.3f} at or above threshold {threshold:.3f}, enforce mode",
+                    entry_id=entry.id,
+                    hint=render_deny(entry, tool_name or ""),
+                    result=result,
+                    options=option_ids,
+                    threshold=threshold,
+                )
         # 9. advisory hints: once per (session, turn, entry)
         with self._lock:
             if key in self._suggested:
@@ -249,4 +255,5 @@ class Router:
             result=result,
             options=option_ids,
             threshold=threshold,
+            downgraded=downgraded,
         )

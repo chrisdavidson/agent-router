@@ -7,12 +7,20 @@ from pathlib import Path
 
 import pytest
 
+from agent_router.contracts.integration import variables_for_catalog
 from agent_router.core.catalog import load_catalog
 from agent_router.core.types import HookPoint
 from agent_router.evaluate import load_cases
 
 INTEG = Path(__file__).resolve().parents[1] / "integrations" / "first-principles"
 FP = "first-principles:first-principles"
+
+
+def _catalog():
+    """The integration catalog with its variables filled from the manifest (the pinned fallback
+    here: the tests' plugin cache is empty)."""
+    path = INTEG / "catalog.yaml"
+    return load_catalog(path, variables=variables_for_catalog(path))
 
 
 def _battery():
@@ -23,7 +31,7 @@ def _battery():
 
 
 def test_catalog_scopes_each_entry():
-    cat = load_catalog(INTEG / "catalog.yaml")
+    cat = _catalog()
     delegate = cat.get("first-principles-agent")
     assert delegate.kind == "agent" and delegate.target == FP and delegate.agents == ("main",)
     # no entry routes to an individual first-principles technique (that is Step 0's job)
@@ -34,7 +42,7 @@ def test_catalog_scopes_each_entry():
 
 
 def test_eval_set_ids_unique_and_labels_known():
-    cat = load_catalog(INTEG / "catalog.yaml")
+    cat = _catalog()
     cases = load_cases(INTEG / "eval_set.yaml")
     assert len({c.id for c in cases}) == len(cases)
     known = {e.id for e in cat.entries} | {"none"}
@@ -45,7 +53,7 @@ def test_eval_set_ids_unique_and_labels_known():
 
 def test_calibration_is_tagged_with_the_integration_catalog():
     cal = json.loads((INTEG / "calibration.json").read_text())
-    version = load_catalog(INTEG / "catalog.yaml").version
+    version = _catalog().version
     assert cal["model2vec"]["catalog_version"] == version
 
 
@@ -89,7 +97,7 @@ def test_holdout_meets_first_principles_thresholds(monkeypatch):
     from agent_router.evaluate import make_router, run_eval
 
     monkeypatch.setattr(local, "CALIBRATION_PATH", INTEG / "calibration.json")
-    cat = load_catalog(INTEG / "catalog.yaml")
+    cat = _catalog()
     router = make_router("local", cat)
     cases = [c for c in load_cases(INTEG / "eval_set.yaml") if c.id.startswith("fp-")]
     report = run_eval(lambda: router, cases)
@@ -124,7 +132,7 @@ def test_plugin_serves_only_the_calculator():
     assert list(mcp) == ["agent_router"]
     script = (INTEG / "plugin" / "bin" / "mcp").read_text()
     assert "mcp --tools calc" in script
-    target = load_catalog(INTEG / "catalog.yaml").get("exact-calc").target
+    target = _catalog().get("exact-calc").target
     assert target == "mcp__plugin_agent-router-fp_agent_router__calc"
 
 
@@ -589,7 +597,7 @@ def test_trace_report_has_one_row_per_finished_run(tmp_path):
     for agent in ("a1", "a2"):
         tr.handle({**base, "agent_id": agent, "hook_event_name": "SubagentStart"}, tmp_path)
     tr.handle({**base, "agent_id": "a1", "hook_event_name": "SubagentStop"}, tmp_path)
-    rows = tr.report(tmp_path / "trace").splitlines()[2:]
+    rows = [r for r in tr.report(tmp_path / "trace").splitlines()[2:] if r.startswith("|")]
     assert len(rows) == 1  # a2 never finished
     assert "MEDIUM" in rows[0] and "| yes |" in rows[0]  # confidence, Fix/Repeat
 
@@ -879,6 +887,46 @@ def test_run_examples_marks_a_killed_run_failed(tmp_path):
         "no result (killed or timed out)",
         "the agent did not hand back",
         "no analysis file",
+    ]
+
+
+def test_run_examples_fails_a_backgrounded_agent_the_cli_stopped(tmp_path):
+    """The 2026-10-15 rerun: the Agent call returned only its async-launch acknowledgement,
+    the main session ended its turn, and print mode stopped the agent ten minutes later with
+    sections 1-6 written and the file never assembled. Both runs read as "partial: no gate"."""
+    agent = {"type": "tool_use", "id": "ag", "name": "Agent", "input": {"subagent_type": FP}}
+    ack = {
+        "type": "tool_result",
+        "tool_use_id": "ag",
+        "content": "Async agent launched successfully.",
+    }
+    events = [
+        {"type": "assistant", "message": {"content": [agent]}},
+        {
+            "type": "user",
+            "message": {"content": [ack]},
+            "tool_use_result": {"isAsync": True, "status": "async_launched"},
+        },
+        {"type": "result", "is_error": False, "result": "it is still running"},
+        {"type": "runner", "bg_stopped": "Background tasks still running 10m after ..."},
+    ]
+    head = ANALYSIS[: ANALYSIS.index("## Self-Audit")] if "## Self-Audit" in ANALYSIS else ANALYSIS
+    status, problems = _run_examples().completeness(events, _report(tmp_path, head))
+    assert status == "failed"
+    assert "the agent did not hand back" in problems
+    assert "the CLI stopped the background agent (print-mode wait ceiling)" in problems
+
+
+def test_run_examples_reads_the_clis_stop_notice_from_the_capture(tmp_path):
+    capture = tmp_path / "run.jsonl"
+    notice = 'Background tasks still running 10m after the last turn (subagent "x"); stopping them.'
+    capture.write_text(
+        '{"type": "result", "is_error": false, "result": "x"}\nnot json\n' + notice + "\n"
+    )
+    events = _run_examples().read_events(capture)
+    assert events == [
+        {"type": "result", "is_error": False, "result": "x"},
+        {"type": "runner", "bg_stopped": notice},
     ]
 
 

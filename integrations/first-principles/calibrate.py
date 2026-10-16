@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agent_router.contracts.integration import variables_for_catalog
 from agent_router.core.catalog import MAIN_AGENT, load_catalog
 from agent_router.deciders.embedders import Model2VecEmbedder
 from agent_router.evaluate import DEFAULT_GRID, grid_search, load_cases, write_calibration
@@ -23,7 +24,8 @@ HERE = Path(__file__).resolve().parent
 
 
 def main() -> int:
-    catalog = load_catalog(HERE / "catalog.yaml")
+    path = HERE / "catalog.yaml"
+    catalog = load_catalog(path, variables=variables_for_catalog(path))
     cases = load_cases(HERE / "eval_set.yaml", split="cal")
     embedder = Model2VecEmbedder()
     embedder.load()

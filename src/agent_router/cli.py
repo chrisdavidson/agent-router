@@ -1,5 +1,5 @@
 """``agent-router`` command line: route, eval, calibrate, calibrate-cascade, demo, run, hook,
-mcp.
+mcp, doctor.
 
 ``--backend`` defaults to ``default_backend()``: the local -> Jev cascade when a Jev API key
 is set, else the offline local classifier (``hook`` defaults to local; see ``cmd_hook``).
@@ -21,6 +21,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from agent_router.contracts.integration import (
+    IntegrationError,
+    integration_dir,
+    load_integration,
+    resolve,
+    skip_patterns,
+    variables,
+    variables_for_catalog,
+)
 from agent_router.core.types import HookPoint, RouterEvent
 
 EMBEDDERS = ("model2vec", "hashing")
@@ -44,9 +53,24 @@ def _catalog(args: argparse.Namespace):
 
     path = getattr(args, "catalog", None) or os.environ.get("AGENT_ROUTER_CATALOG", "").strip()
     try:
-        return load_catalog(path or DEFAULT_CATALOG)
-    except (OSError, CatalogError) as exc:
+        return load_catalog(path or DEFAULT_CATALOG, variables=_catalog_variables(args, path))
+    except (OSError, CatalogError, IntegrationError) as exc:
         raise CliError(f"cannot load catalog {path or DEFAULT_CATALOG}: {exc}") from exc
+
+
+def _state_root() -> Path:
+    from agent_router.adapters.claude_code import state_root
+
+    return state_root()
+
+
+def _catalog_variables(args: argparse.Namespace, path: str | Path | None) -> dict[str, str] | None:
+    """Catalog variables from the integration manifest, when this catalog belongs to one
+    (``AGENT_ROUTER_INTEGRATION``, or a ``descriptor.json`` next to the catalog)."""
+    ctx = getattr(args, "integration_context", None)
+    if ctx is not None:
+        return variables(*ctx[:2])
+    return variables_for_catalog(path or None, state_root=_state_root())
 
 
 def _apply_calibration_env() -> None:
@@ -120,6 +144,9 @@ def _router(
             config = replace(config, threshold=threshold)
         if audit_path is not None:
             config = replace(config, audit_path=audit_path)
+        extra = frozenset(getattr(args, "never_block", ()) or ())
+        if extra:
+            config = replace(config, never_block_agents=config.never_block_agents | extra)
     except ValueError as exc:
         raise CliError(f"invalid AGENT_ROUTER_* setting or flag: {exc}") from exc
     return Router(catalog, router.decider, config, AuditLog(config.audit_path), suggested)
@@ -404,6 +431,31 @@ def cmd_run(args: argparse.Namespace) -> int:
 # --- hook / mcp (Claude Code plugin) ---------------------------------------------------------
 
 
+def _derive_integration(args: argparse.Namespace) -> dict[str, Any] | None:
+    """When ``AGENT_ROUTER_INTEGRATION`` names an integration directory, resolve its manifest
+    once and derive what the integration no longer types: the catalog variables (kept on
+    ``args``) and the default skip patterns (an explicit environment value wins). Returns the
+    record of how the manifest was found, for the session state."""
+    directory = integration_dir(None)
+    if directory is None:
+        return None
+    integ = load_integration(directory)
+    resolved = resolve(integ, state_root=_state_root())
+    args.integration_context = (integ, resolved.manifest)
+    skip_input, skip_prompt = skip_patterns(integ, resolved.manifest)
+    if not os.environ.get("AGENT_ROUTER_SKIP_INPUT", "").strip():
+        os.environ["AGENT_ROUTER_SKIP_INPUT"] = skip_input
+    if not os.environ.get("AGENT_ROUTER_SKIP_PROMPT", "").strip():
+        os.environ["AGENT_ROUTER_SKIP_PROMPT"] = skip_prompt
+    return resolved.record()
+
+
+def _never_block(args: argparse.Namespace) -> frozenset[str]:
+    """Agent types the router must never deny: the integrated plugin's agent (from its manifest)."""
+    context = getattr(args, "integration_context", None)
+    return frozenset({context[1].agent_type}) if context and context[1].agent_type else frozenset()
+
+
 def cmd_hook(args: argparse.Namespace) -> int:
     """One Claude Code command hook: hook JSON on stdin, hook JSON on stdout, always exit 0.
 
@@ -418,13 +470,17 @@ def cmd_hook(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
     out: dict[str, Any] = {}
     try:
+        recorded = _derive_integration(args)
         if not args.backend:
             args.backend = os.environ.get("AGENT_ROUTER_BACKEND", "").strip() or "local"
+        args.never_block = _never_block(args)
         payload = json.load(sys.stdin)
         if isinstance(payload, dict):
             out = handle(
                 payload,
                 lambda audit, seed: _router(args, env=True, audit_path=audit, suggested=seed),
+                integration=recorded,
+                never_block=args.never_block,
             )
     except Exception as exc:  # a hook must never break the host session
         print(f"agent-router hook: failing open: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -434,15 +490,41 @@ def cmd_hook(args: argparse.Namespace) -> int:
 
 
 def cmd_mcp(args: argparse.Namespace) -> int:
-    from agent_router.adapters.mcp_stdio import TOOLS, build_server
+    from agent_router.adapters.mcp_stdio import build_server, default_tools
 
-    tools = args.tools.split(",") if args.tools else list(TOOLS)
+    tools = args.tools.split(",") if args.tools else list(default_tools())
     try:
         server = build_server(Path(args.root or os.getcwd()), [t.strip() for t in tools])
     except ValueError as exc:
         raise CliError(str(exc)) from exc
     server.run()
     return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Check an integration install, one PASS / WARN / FAIL line per check; exit 1 on any FAIL."""
+    from agent_router import doctor
+
+    checks = doctor.run_checks(doctor.find_integration(args.integration))
+    bad = doctor.failed(checks)
+    if args.json:
+        _print_json({"ok": not bad, "checks": [c.record() for c in checks]})
+    else:
+        for check in checks:
+            print(check.line())
+    return 1 if bad else 0
+
+
+def _version() -> str:
+    """The installed package version, else the one the source tree declares."""
+    from importlib import metadata
+
+    try:
+        return metadata.version("agent-router")
+    except metadata.PackageNotFoundError:
+        from agent_router import __version__
+
+        return __version__
 
 
 def _json_obj(text: str) -> dict[str, Any]:
@@ -480,6 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="agent-router",
         description="Route agent steps to MIT catalog alternatives with a Jev-spec decider.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("route", help="route one step and show the decision")
@@ -569,9 +652,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_hook)
 
     p = sub.add_parser("mcp", help="serve the catalog tools as a stdio MCP server")
-    p.add_argument("--tools", help="comma-separated subset (default: all)")
+    p.add_argument(
+        "--tools",
+        help=(
+            "comma-separated subset (default: the catalog tools, plus route, verify_summary and "
+            "doctor when AGENT_ROUTER_INTEGRATION is set)"
+        ),
+    )
     p.add_argument("--root", help="directory the file tools are confined to (default: cwd)")
     p.set_defaults(func=cmd_mcp)
+
+    p = sub.add_parser(
+        "doctor", help="check an integration install (binary, manifest, schema, MCP, hooks, state)"
+    )
+    p.add_argument(
+        "--integration",
+        required=True,
+        help="integration directory, or a bare name under <checkout>/integrations/",
+    )
+    p.add_argument("--json", action="store_true", help="print JSON")
+    p.set_defaults(func=cmd_doctor)
     return parser
 
 

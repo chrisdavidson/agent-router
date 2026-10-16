@@ -12,9 +12,14 @@ it untouched. It adds two checkpoints that plugin does not have:
    figure"), it gets a note pointing at an exact calculator this plugin serves
    (`mcp__plugin_agent-router-fp_agent_router__calc`: exact fractions and big integers, and a
    list of expressions in one call). The note is offered only when the call is one expression the calculator can run (`fits:
-   calc_expression`). Scripts with variables, loops or `math.log` are skipped as `does not fit`
-   without reaching the classifier. In the 28 example runs, all 16 notes had fired on such
-   scripts or on text commands.
+   calc_expression`). A short straight-line python script (variables, `print`, `math.log`,
+   `pi`) gets a second entry, `exact-calc-script`, pointing at `calc_script` (`fits:
+   calc_script`: a `python3 - <<'EOF'` / `cat <<EOF | python3` heredoc or a multi-statement
+   `python3 -c` whose body the calculator's script evaluator runs; no loops, functions, lists
+   or imports other than `math`). Anything else is skipped as `does not fit` without reaching
+   the classifier. In the 28 example runs, all 16 notes had fired on scripts the calculator
+   could not run or on text commands; [`CALC-SCRIPT-COVERAGE.md`](CALC-SCRIPT-COVERAGE.md)
+   measures how many of the agent's interpreter calls the two entries could take.
 
 Both are advisory: the model may ignore a note, and nothing is ever blocked.
 
@@ -32,14 +37,53 @@ writes (any call naming the `.first-principles` directory is skipped before the 
 
 ## Use it
 
+Two ways to install the router; the plugin directory is the same in both.
+
+**From a checkout** (development):
+
 ```bash
 make install                              # in this repo, once
 claude --plugin-dir ~/Projects/first-principles-skill/first-principles \
        --plugin-dir ~/Projects/agent-router/integrations/first-principles/plugin
 ```
 
-The hook finds `agent-router` in this repo's `.venv` (override with `AGENT_ROUTER_BIN`). If it
-cannot run, it prints `{}` and the session carries on unchanged (fail open).
+**As a tool** (`uv tool install` puts `agent-router` on your `PATH`):
+
+```bash
+uv tool install git+https://github.com/chrisdavidson/agent-router@<branch>
+# or, from a local clone, so edits take effect without reinstalling:
+uv tool install --editable ~/Projects/agent-router
+```
+
+then start Claude Code with the same two `--plugin-dir` flags (the integration's `plugin/`
+directory still comes from a clone of this repo).
+
+The scripts in `plugin/bin/` (`hook`, `trace`, `mcp`) find the router through `bin/_resolve.sh`,
+first match wins:
+
+1. `AGENT_ROUTER_BIN` / `AGENT_ROUTER_PYTHON` (final: if set to something unusable the script
+   does not try another);
+2. the checkout's `.venv` (`make install`);
+3. `agent-router` on `PATH`; `trace` runs the interpreter on that script's shebang line when it
+   is an absolute, executable python, else `python3`.
+
+The checkout comes before `PATH` on purpose: the plugin directory always sits in a checkout, so
+a stale `uv tool install` must not silently outrank the code next to the hooks. If nothing
+resolves, `hook` and `trace` print `{}` (fail open) and `mcp` exits non-zero with a message on
+stderr.
+
+To read the first-principles manifest, schema and examples from a working tree instead of the
+plugin cache, set `FP_PLUGIN_ROOT` to that tree (`~/Projects/first-principles-skill/first-principles`);
+Claude Code's Agent tool otherwise runs the installed copy, which can be older.
+
+**When something seems off, run `agent-router doctor --integration first-principles` first.** It
+prints one `PASS` / `WARN` / `FAIL` line per check: which router binary won and its version, the
+Python version, the descriptor, where the plugin root and manifest came from (and whether that
+is the possibly stale cache), the summary schema and its version, the catalog and calibration,
+the decider backend and whether the embedding model is available offline, an MCP `initialize` +
+`tools/list` round trip with the calculator, the `hooks.json` wiring against the manifest, the
+state directory, file locking and the `timeout` binary. It exits 1 only if a check FAILs; add
+`--json` for machine-readable output.
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -47,15 +91,72 @@ cannot run, it prints `{}` and the session carries on unchanged (fail open).
 | `AGENT_ROUTER_THRESHOLD` | calibrated (`calibration.json`) | higher = fewer notes |
 | `AGENT_ROUTER_DISABLED` | unset | `1` turns every checkpoint off |
 | `AGENT_ROUTER_STATE_DIR` | `$XDG_STATE_HOME/agent-router` | per-session state and audit log |
-| `AGENT_ROUTER_SKIP_INPUT` | `\.first-principles\b` | tool calls matching this are never routed |
-| `AGENT_ROUTER_SKIP_PROMPT` | `^\s*/first-principles:` | prompts matching this get no delegation note: they already launch the agent |
+| `AGENT_ROUTER_SKIP_INPUT` | derived from the manifest: the report directory, escaped, then `(?!\w)` | tool calls matching this are never routed |
+| `AGENT_ROUTER_SKIP_PROMPT` | derived: `^\s*(?:<command prefix>\|/<this plugin's name>:)` | prompts matching this get no delegation note: they already launch the agent, or come from this plugin's own commands |
+| `FP_PLUGIN_ROOT` | unset | the first-principles plugin tree to read the manifest, schema and examples from (see [`MANIFEST.md`](MANIFEST.md)) |
 
 Hook cost: about 0.45 s per routed call (prompt, `Agent`, and `Bash` inside the agent). A
 `Bash` call on the main thread is answered by the shell script in milliseconds, without Python.
 Notes are once per turn per entry, so an analysis gets at most one calculator note.
 
+The MCP server (`bin/mcp`) also serves three read-only tools for a conductor, as structured
+calls instead of shell commands: `route` (the decision `agent-router route --json` prints, with
+this integration's catalog, manifest variables and calibration; advisory, nothing is audited),
+`verify_summary(path)` (the report's `contract_status`, violations, the schema used, the
+decisions read from the summary block and an excerpt of its `## Answer` section; the path must
+be inside the working directory) and `doctor` (the checks of `agent-router doctor`). They are
+served only because `bin/mcp` exports `AGENT_ROUTER_INTEGRATION`; a bare `agent-router mcp`
+serves the catalog tools and `calc_script`. A failure is a tool error, never a crash, and none
+of them can block anything.
+
 Every checkpoint is logged to `<state dir>/audit/<session>.jsonl` (same format as the rest of
 agent-router, plus `agent_type`, `agent_id` and `tool_use_id`).
+
+## Conductor
+
+`/agent-router-fp:analyze <question>` runs one analysis end to end, so the steps around the agent
+are the same every time. The skill (`plugin/skills/analyze/SKILL.md`) sequences them; the
+deterministic parts live in `conduct.py` (run through `plugin/bin/conduct`), which the MCP tools
+`route` and `verify_summary` share logic with.
+
+1. **Health**: the `doctor` checks. A `FAIL` stops the run; a cache-sourced plugin root is
+   reported once as a possibly stale copy.
+2. **Preflight**: `route` on the question. Not a first-principles question: it says so and stops,
+   unless you insist.
+3. **Compose**: the delegating prompt follows the agent's Input Contract (the question verbatim
+   as the problem statement; domain, key constraints and known ground truths only if you give
+   them) plus one line naming the calculator tools when the plugin serves them. It adds no other
+   instruction. `compose` also leaves a hand-off record under `<state dir>/conductor/`, so the
+   trace marks that run's `delegation` record `launched_by: conductor`.
+4. **Delegate**: one `Agent` call with the composed prompt, verbatim.
+5. **Verify**: the analysis is read against the published summary contract.
+6. **Report**: the Answer excerpt, conclusion and confidence, whether the Self-Audit Gate
+   cleared, `contract_status`, the ground truths not read at source, and the paths to the
+   analysis, its reader report and the trace.
+
+It never blocks and never edits: the analysis is only read, a non-valid contract is reported as
+it is, and the agent is not re-run. The delegation nudge stays silent for prompts that start with
+`/agent-router-fp:`, so the run is not delegated twice.
+
+```bash
+claude --plugin-dir ~/Projects/first-principles-skill/first-principles \
+       --plugin-dir ~/Projects/agent-router/integrations/first-principles/plugin
+# then, in the session:
+/agent-router-fp:analyze Is a four-day school week a good idea, or do we just assume five days?
+```
+
+In print mode (`claude -p "/agent-router-fp:analyze ..."`) the host runs the agent in the
+background and stops it 10 minutes after the main session's last turn. The conductor waits for
+the agent, so a run under 10 minutes is unaffected (the first live run took 6.3), but a longer
+analysis is killed half-written. Set `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` (milliseconds, `0` =
+no limit) for print-mode runs; `run_examples.py` sets it to its own `--timeout`. Interactive
+sessions are not affected.
+
+Other `conduct.py` sub-commands (`plugin/bin/conduct <sub-command>`): `preflight "<q>"`,
+`compose "<q>" [--mode focused-<technique>] [--domain D] [--constraint C] [--ground-truth G]`,
+`verify <analysis>`, `latest-analysis [--cwd DIR]`, `doctor`, and `record-root <plugin dir>`, which writes
+`<state dir>/integration/<plugin>.root` so hooks and the trace on this machine read that tree
+instead of the plugin cache (the same effect as `FP_PLUGIN_ROOT`, without the environment).
 
 ## Decision trace
 
@@ -78,7 +179,7 @@ the agent is answered by the shell script in about 5 ms; a traced call takes abo
 | `source` | a `WebFetch` or `WebSearch` inside the agent (checking a ground truth) | the host or query, the reply's size, and `outcome`: `ok`, or `reported_missing` when the reply says the page did not have it |
 | `tool_loaded` | the agent loads deferred tools (`ToolSearch`) | the query; `calc` when it loads the calculator |
 | `tool_failed` | a call fails | tool, what it was, the error (e.g. a source that could not be fetched) |
-| `run_end` | the agent stops | duration, final message, report revisions and restarts, the finished report (`analysis_text`, `analysis_sha256`) parsed into `decisions`, `sources` (source checks: ok, reported missing, failed, and the hosts that failed), and `routing` (below) |
+| `run_end` | the agent stops | duration, final message, report revisions and restarts, the finished report (`analysis_text`, `analysis_sha256`) parsed into `decisions`, `sources` (source checks: ok, reported missing, failed, and the hosts that failed), and `routing` (below). `decisions` come from the report's structured-summary block when `contract.contract_status` is `valid` or `unsupported_version` (`decisions_source: block`; `decisions_verified` is false for the latter), else from prose (`decisions_source: prose`). A run the delivery guard stops more than once writes one `run_end` per stop, each with `stop_attempt` and `stop_hook_active`; `--report`, the demo and anything else read the last one per `agent_id` |
 
 `routing` joins the run to the router's audit log, by `tool_use_id` where the audit has it. It
 holds:
@@ -156,25 +257,28 @@ reference (second-order thinking, Phase 2 inversion).
 
 | File | What |
 |---|---|
-| `catalog.yaml` | the two entries agent-router may point at (each scoped to one agent context, with its own threshold), plus the `none` exemplars |
+| `MANIFEST.md`, `manifest.fallback.json`, `descriptor.json` | the integration manifest format, the pinned copy used when the plugin publishes none, and this integration's descriptor |
+| `catalog.yaml` | the two entries agent-router may point at (each scoped to one agent context, with its own threshold), plus the `none` exemplars. Targets are `${...}` variables filled from the manifest |
 | `eval_set.yaml` | `cal` cases written for this integration; `test` holdout = first-principles' own routing catalog (13 P, 20 N) plus Bash calls inside the agent |
 | `calibration.json`, `calibrate.py` | classifier parameters, then one threshold per entry, all fit on the `cal` split only |
 | `plugin/` | the Claude Code plugin: hooks, `.mcp.json`, `bin/hook`, `bin/mcp`, `bin/trace` |
+| `measure_calc_fit.py`, `CALC-SCRIPT-COVERAGE.md` | offline: how many recorded interpreter calls `calc_expression` / `calc_script` accept, and whether the calculator's figures agree with the real output |
+| `conduct.py`, `plugin/skills/analyze/` | the conductor: helper sub-commands and the `/agent-router-fp:analyze` skill |
 | `trace.py` | the decision trace: hook handler, analysis parser, `--replay`, `--report` |
 | `battery.py` | live A/B: first-principles' routing catalog with and without this plugin |
-| `run_examples.py` | runs first-principles' 14 worked examples through the agent and tabulates every router decision |
+| `run_examples.py` | runs the plugin's worked examples (read from `<plugin root>/<examples_dir>`) through the agent and tabulates every router decision |
 
 ## Measuring it
 
 - **Offline:** `agent-router eval --catalog catalog.yaml --cases eval_set.yaml --skip-input
   '\.first-principles\b'` scores the catalog on the `test` holdout with the local
   classifier and `calibration.json`. `calibrate.py` re-fits the calibration on the `cal` split.
-- **Live A/B:** `.venv/bin/python integrations/first-principles/battery.py` runs
+- **Live A/B:** `.venv/bin/python integrations/first-principles/battery.py --fp-repo <checkout>` runs
   first-principles' routing catalog with and without this plugin, one fresh `claude -p`
   session per prompt, scored with first-principles' own `detect_routing`. It costs tokens; a
   delegated session is stopped at the delegation.
-- **Worked examples:** `.venv/bin/python integrations/first-principles/run_examples.py` runs
-  first-principles' 14 worked examples through the agent and writes a per-example summary
+- **Worked examples:** `.venv/bin/python integrations/first-principles/run_examples.py [--plugin-root PATH]` runs
+  the plugin's worked examples (`--fp-repo` is a deprecated alias) through the agent and writes a per-example summary
   and a table of every router decision to a local output folder. Each run gets a status:
   - `complete`
   - `partial`: it ended, but its report lacks a section 1–6 or the gate

@@ -6,9 +6,15 @@ local decider looks for calibration at a path that does not exist, so it uses th
 Jev API keys are removed for every test not marked ``live``.
 """
 
+import os
+
 import pytest
 
 from agent_router.deciders import local
+
+# The plugin cache is the user's real one unless told otherwise; a test must not find (or miss)
+# a manifest in it. Set at import so modules that resolve a manifest while being collected see it.
+os.environ.setdefault("AGENT_ROUTER_PLUGIN_CACHE", "/nonexistent/plugin-cache")
 
 
 @pytest.fixture(scope="session", autouse=True)
