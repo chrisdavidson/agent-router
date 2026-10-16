@@ -37,7 +37,8 @@ writes (any call naming the `.first-principles` directory is skipped before the 
 
 ## Use it
 
-Two ways to install the router; the plugin directory is the same in both.
+Three ways to load the plugin. The first two load it from a clone of this repo with
+`--plugin-dir`; the third installs it from this repo's marketplace.
 
 **From a checkout** (development):
 
@@ -58,7 +59,23 @@ uv tool install --editable ~/Projects/agent-router
 then start Claude Code with the same two `--plugin-dir` flags (the integration's `plugin/`
 directory still comes from a clone of this repo).
 
-The scripts in `plugin/bin/` (`hook`, `trace`, `mcp`) find the router through `bin/_resolve.sh`,
+**From the marketplace.** The repo root has a `.claude-plugin/marketplace.json` listing
+`agent-router-fp`:
+
+```bash
+claude plugin marketplace add ~/Projects/agent-router    # or chrisdavidson/agent-router
+claude plugin install agent-router-fp@agent-router
+export AGENT_ROUTER_FP_INTEGRATION=~/Projects/agent-router/integrations/first-principles
+```
+
+An installed plugin is a copy of `plugin/` only, in the Claude plugin cache, without
+`conduct.py`, `trace.py`, the catalog or the manifest next to it. `AGENT_ROUTER_FP_INTEGRATION`
+tells the scripts where the checkout's integration directory is. They read it only when the
+directory above `plugin/` lacks `conduct.py`, so a `--plugin-dir` run always uses the code it
+sits in. The router is still found from that checkout (its `.venv`, else `PATH`; see below).
+
+The scripts in `plugin/bin/` (`hook`, `trace`, `mcp`, `conduct`, `handoff-hook`) find the
+integration directory and the router through `bin/_resolve.sh`,
 first match wins:
 
 1. `AGENT_ROUTER_BIN` / `AGENT_ROUTER_PYTHON` (final: if set to something unusable the script
@@ -67,8 +84,9 @@ first match wins:
 3. `agent-router` on `PATH`; `trace` runs the interpreter on that script's shebang line when it
    is an absolute, executable python, else `python3`.
 
-The checkout comes before `PATH` on purpose: the plugin directory always sits in a checkout, so
-a stale `uv tool install` must not silently outrank the code next to the hooks. If nothing
+The checkout comes before `PATH` on purpose: the integration directory always sits in a checkout
+(the plugin's own, or the one `AGENT_ROUTER_FP_INTEGRATION` names), so a stale `uv tool install`
+must not silently outrank the code next to the hooks. If nothing
 resolves, `hook` and `trace` print `{}` (fail open) and `mcp` exits non-zero with a message on
 stderr.
 
@@ -93,6 +111,7 @@ state directory, file locking and the `timeout` binary. It exits 1 only if a che
 | `AGENT_ROUTER_STATE_DIR` | `$XDG_STATE_HOME/agent-router` | per-session state and audit log |
 | `AGENT_ROUTER_SKIP_INPUT` | derived from the manifest: the report directory, escaped, then `(?!\w)` | tool calls matching this are never routed |
 | `AGENT_ROUTER_SKIP_PROMPT` | derived: `^\s*(?:<command prefix>\|/<this plugin's name>:)` | prompts matching this get no delegation note: they already launch the agent, or come from this plugin's own commands |
+| `AGENT_ROUTER_FP_INTEGRATION` | unset | the checkout's `integrations/first-principles` directory, for a marketplace install only (see [Use it](#use-it)) |
 | `FP_PLUGIN_ROOT` | unset | the first-principles plugin tree to read the manifest, schema and examples from (see [`MANIFEST.md`](MANIFEST.md)) |
 
 Hook cost: about 0.45 s per routed call (prompt, `Agent`, and `Bash` inside the agent). A
@@ -271,13 +290,29 @@ Replaying the 28 example captures with their reports removed gives decisions for
 
 **In the demo.** The **Trace** tab shows each run: a summary card, a timeline of what the agent
 did with the router's notes placed where they fired, and the decisions parsed from its report.
-It reads the `trace/` folder next to `--audit-dir`:
+Start it before or during a run, from the checkout:
 
 ```bash
-.venv/bin/agent-router demo --catalog integrations/first-principles/catalog.yaml \
-  --audit-dir ~/.local/state/agent-router/audit
+make trace                     # the hooks' state root ($AGENT_ROUTER_STATE_DIR, else XDG state)
+make trace STATE=integrations/first-principles/runs/structured-summary-live/state   # a saved set
 # open http://127.0.0.1:8765/#trace
 ```
+
+`make trace` is `agent-router demo --catalog integrations/first-principles/catalog.yaml
+--state-dir <root>`, which reads `<root>/audit` and `<root>/trace`.
+
+- **Live.** With **Follow live** on (the default), the tab re-reads the trace every 3 seconds while
+  it is on screen, and opens a run as soon as it starts. A run you picked by hand keeps the view
+  while it is still going. Open sections and the scroll position survive each refresh. Mid-run,
+  the card shows elapsed time, sections written, references opened and source checks so far, and
+  the decisions column lists the report's headings as they are written. Decisions themselves
+  are read when the agent stops.
+- **Session labels.** Each session is named by, in order: the hand-off's `description` (the main
+  session's few-word name for the task, recorded from this version on); the user's prompt from
+  the audit log, without a leading slash command; the report's title. Each label also shows
+  whether the session is `● running`, `◌ unfinished` (an open run with nothing new for 10 minutes)
+  or `✓` finished, how long ago it was last active, and the conclusion's confidence. Hover a
+  label to see the full question.
 
 Not observable from outside the agent, so not traced: the Step 0 mode choice (unless the
 report states it), the Phase 1–4 reasoning itself, and techniques applied without opening a
@@ -291,7 +326,8 @@ reference (second-order thinking, Phase 2 inversion).
 | `catalog.yaml` | the two entries agent-router may point at (each scoped to one agent context, with its own threshold), plus the `none` exemplars. Targets are `${...}` variables filled from the manifest |
 | `eval_set.yaml` | `cal` cases written for this integration; `test` holdout = first-principles' own routing catalog (13 P, 20 N) plus Bash calls inside the agent |
 | `calibration.json`, `calibrate.py` | classifier parameters, then one threshold per entry, all fit on the `cal` split only |
-| `plugin/` | the Claude Code plugin: hooks, `.mcp.json`, `bin/hook`, `bin/mcp`, `bin/trace`, `bin/handoff-hook` |
+| `plugin/` | the Claude Code plugin: hooks, `.mcp.json`, `bin/hook`, `bin/mcp`, `bin/trace`, `bin/handoff-hook`, `bin/conduct`. Listed in the repo's `.claude-plugin/marketplace.json` |
+| `handoff/` | the structured-summary hand-off to first-principles and its 9.16 report (the contract the trace reads) |
 | `measure_calc_fit.py`, `CALC-SCRIPT-COVERAGE.md` | offline: how many recorded interpreter calls `calc_expression` / `calc_script` accept, and whether the calculator's figures agree with the real output |
 | `conduct.py`, `plugin/skills/analyze/` | the conductor: helper sub-commands and the `/agent-router-fp:analyze` skill |
 | `trace.py` | the decision trace: hook handler, analysis parser, `--replay`, `--report` |

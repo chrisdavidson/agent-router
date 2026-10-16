@@ -117,7 +117,11 @@ The demo has four tabs:
 - **Trace** shows an integration's decision trace for a session: a summary (conclusion, gate
   bands, delegation and calculator notes), a timeline of what the agent did with the router's notes
   placed where they fired, and the decisions parsed from its report. It reads `--trace-dir`
-  (default: `trace/` next to `--audit-dir`). See `integrations/first-principles/README.md`.
+  (default: `trace/` next to `--audit-dir`); `--state-dir <root>` sets both to `<root>/audit` and
+  `<root>/trace`. While open, the tab re-reads the trace every 3 seconds, so it follows a run as it
+  happens (**Follow live**). Each session is labelled by the hand-off's description, else the
+  user's prompt, else the report title, with its status (running, unfinished or finished).
+  `make trace` starts it on the hooks' state root. See `integrations/first-principles/README.md`.
 
 | Live agent | Replay |
 |---|---|
@@ -139,6 +143,7 @@ The demo has four tabs:
 | `calibrate` | Re-fits the local decider and rewrites `calibration.json` |
 | `calibrate-cascade` | Paid: calls Jev once per cal case |
 | `run` | Starts the demo server |
+| `trace` | Starts the demo on the first-principles hooks' state, following runs live (`STATE=` for a saved set) |
 | `route` | Routes one step |
 
 Extras are optional:

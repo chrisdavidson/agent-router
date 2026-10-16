@@ -17,6 +17,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   ways. `conduct.py report [--markdown]` is the skill's report step. The trace's `run_end` records
   `launched_by` (`conductor` / `router-hook`), resolved after the run because hooks on one event
   run in parallel. `doctor` fails the wiring check when either half of the pair is missing.
+- **Live Trace tab.** The demo's Trace tab follows a run as it happens: with **Follow live** on it
+  re-reads `/api/trace/sessions` every 3 seconds and opens a new run when it starts, keeping open
+  sections and scroll position. Mid-run the card shows elapsed time, sections, references and
+  source checks so far. Session summaries are cached on file size and mtime.
+- **Session labels.** Each trace session is named by the hand-off's `description` (now recorded
+  in the trace's `delegation` record, at most 120 characters), else the user's first prompt from
+  the audit log, else the report title, and shows `running` / `unfinished` (open, quiet for 10
+  minutes) / `finished`, last activity and the conclusion's confidence.
+- **`agent-router demo --state-dir <root>`** reads `<root>/audit` and `<root>/trace`
+  (`--audit-dir` / `--trace-dir` win). **`make trace`** runs it on the hooks' state root
+  (`$AGENT_ROUTER_STATE_DIR`, else `$XDG_STATE_HOME/agent-router`), or `STATE=<dir>`.
+- **Marketplace install.** `.claude-plugin/marketplace.json` lists `agent-router-fp`, so
+  `claude plugin install agent-router-fp@agent-router` works. An installed copy finds the
+  checkout's integration directory through `AGENT_ROUTER_FP_INTEGRATION`, read only when the
+  plugin does not sit in a checkout (`plugin/bin/_resolve.sh`, `AR_INTEG`).
 
 ### Changed
 
