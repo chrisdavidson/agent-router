@@ -300,7 +300,119 @@ def test_trace_sessions_default_to_the_folder_beside_the_audit_log(
     (row,) = body["sessions"]
     assert row["session"] == "s1" and row["records"] == 3
     assert row["runs"] == 1 and row["finished"] == 1
-    assert row["title"] == "First-Principles Analysis — test"
+    assert row["label"] == "test" and row["label_source"] == "report"
+    assert row["status"] == "finished" and row["size"] > 0
+
+
+def _prompt(text: str) -> dict:
+    return {"ts": "2026-09-29T09:59:00+00:00", "point": "prompt", "text": text}
+
+
+@pytest.mark.parametrize(
+    ("delegation", "prompt", "label", "source"),
+    [
+        # the main session's own name for the task wins
+        (
+            {"description": "Size an off-grid cabin"},
+            "/fp:analyze Whatever",
+            "Size an off-grid cabin",
+            "delegation",
+        ),
+        # else the user's words, slash command stripped, first paragraph only
+        (
+            {},
+            "/first-principles:first-principles-analysis Size the cabin array?\n\nAnalyse it.",
+            "Size the cabin array?",
+            "prompt",
+        ),
+        ({}, "Plain question about batteries", "Plain question about batteries", "prompt"),
+        # too short to tell sessions apart: the report title instead
+        ({}, "/fp:go ok", "test", "report"),
+        ({}, None, "test", "report"),
+    ],
+)
+def test_trace_sessions_are_labelled_by_what_was_asked(
+    client: TestClient, audit_dir: Path, delegation, prompt, label, source
+) -> None:
+    trace_dir = audit_dir.parent / "trace"
+    trace_dir.mkdir()
+    _write_audit(
+        trace_dir,
+        "s1",
+        [
+            _trace("delegation", agent_id=None, prompt_chars=10, **delegation),
+            _trace("run_start"),
+            _trace("section_written", headings=["First-Principles Analysis — test", "1. X"]),
+        ],
+    )
+    if prompt is not None:
+        _write_audit(audit_dir, "s1", [_prompt(prompt), _rec()])
+    (row,) = client.get("/api/trace/sessions").json()["sessions"]
+    assert (row["label"], row["label_source"]) == (label, source)
+    # the question line under the label is the user's words whenever they were usable
+    assert row["question"] == {"/fp:analyze Whatever": "Whatever"}.get(
+        prompt, label if source == "prompt" else None
+    )
+
+
+def test_trace_label_comes_from_the_finished_reports_h1_and_is_clipped(
+    client: TestClient, audit_dir: Path
+) -> None:
+    trace_dir = audit_dir.parent / "trace"
+    trace_dir.mkdir()
+    title = "First-Principles Analysis: " + "why " * 60
+    _write_audit(
+        trace_dir,
+        "s1",
+        [
+            _trace("run_start"),
+            _trace("section_written", headings=["1. Problem Essence"]),
+            _trace(
+                "run_end",
+                analysis_text=f"# {title}\n\n## 1. Problem Essence\n",
+                decisions={"conclusion": {"confidence": "HIGH"}},
+            ),
+        ],
+    )
+    (row,) = client.get("/api/trace/sessions").json()["sessions"]
+    assert row["label"].startswith("why why") and row["label"].endswith("…")
+    assert len(row["label"]) == server.LABEL_CHARS and row["confidence"] == "HIGH"
+
+
+def test_trace_status_follows_a_run_as_it_happens(client: TestClient, audit_dir: Path) -> None:
+    """Delegated -> running -> finished, re-read as the file grows (the summary cache is keyed
+    on the file's size and mtime); an open run that goes quiet reads as unfinished."""
+    import os
+    import time
+
+    trace_dir = audit_dir.parent / "trace"
+    trace_dir.mkdir()
+    path = trace_dir / "s1.jsonl"
+
+    def append(rec: dict) -> dict:
+        with path.open("a") as fh:
+            fh.write(json.dumps(rec) + "\n")
+        (row,) = client.get("/api/trace/sessions").json()["sessions"]
+        return row
+
+    row = append(_trace("delegation", agent_id=None, prompt_chars=10))
+    assert row["status"] == "running" and row["runs"] == 0  # handed off, agent not started
+    row = append(_trace("run_start"))
+    assert row["status"] == "running" and row["runs"] == 1 and row["finished"] == 0
+    old = time.time() - server.RUN_STALE_AFTER - 5
+    os.utime(path, (old, old))
+    (row,) = client.get("/api/trace/sessions").json()["sessions"]
+    assert row["status"] == "unfinished"  # no stop, and nothing new for a long while
+    row = append(_trace("run_end", duration_s=3.0))
+    assert row["status"] == "finished" and row["finished"] == 1 and row["records"] == 3
+    body = client.get("/api/trace/s1").json()
+    assert body["status"] == "finished" and len(body["records"]) == 3  # the full trace too
+
+
+def test_trace_status_is_a_pure_function_of_the_summary_and_the_clock() -> None:
+    assert server.trace_status({"open": False}, mtime=0, now=10**9) == "finished"
+    assert server.trace_status({"open": True}, mtime=100, now=101) == "running"
+    assert server.trace_status({"open": True}, mtime=0, now=server.RUN_STALE_AFTER) == "unfinished"
 
 
 def test_trace_session_includes_the_routers_decisions(client: TestClient, audit_dir: Path) -> None:
@@ -780,3 +892,16 @@ def test_trace_tab_script_renders_contract_status_decisions_source_and_the_last_
     assert "end.decisions_source" in js and "end.stop_attempt" in js
     assert '["Contract", contractCell(end)]' in js
     assert '["Decisions from", decisionsCell(end)]' in js
+
+
+def test_trace_tab_script_follows_a_live_run() -> None:
+    """Same reason: pin the polling loop, its guards, and the state a refresh must keep."""
+    js = (server.STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    html = (server.STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    assert 'id="trace-follow" checked' in html and 'id="trace-live"' in html
+    assert "setInterval(" in js and "TRACE_POLL_MS" in js and "pollTrace()" in js
+    assert '$("#view-trace").hidden' in js and 'document.visibilityState !== "visible"' in js
+    # reload only on change, and keep open <details> and the run being viewed
+    assert "was.size !== now.size" in js and "loadTrace(sel.value, { keep: true })" in js
+    assert "restoreDetails(root, prev.open[i])" in js
+    assert "s.label ||" in js and "STATUS_MARK[s.status]" in js

@@ -3,9 +3,9 @@
 # verify, record-root, latest-analysis) with the interpreter bin/_resolve.sh picks. Prints one
 # JSON object; on a resolution failure prints a JSON error and exits 1. Never blocks anything.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
 # shellcheck source=_resolve.sh
 . "$here/_resolve.sh" 2>/dev/null || { echo '{"error": "cannot load bin/_resolve.sh"}'; exit 1; }
+integ="$AR_INTEG"   # integrations/first-principles (see _resolve.sh)
 ar_resolve_python || { printf '{"error": "no interpreter: %s"}\n' "${AR_ERR//\"/\'}"; exit 1; }
 export AGENT_ROUTER_INTEGRATION="$integ"
 export AGENT_ROUTER_MODE=advisory

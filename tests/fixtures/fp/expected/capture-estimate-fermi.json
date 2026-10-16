@@ -1,6 +1,7 @@
 [
   {
     "agent_id": null,
+    "description": "First-principles TES cost estimate",
     "kind": "delegation",
     "launched_by": null,
     "prompt_chars": 368,

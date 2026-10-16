@@ -651,7 +651,7 @@ function initReplay() {
 /* Decision traces from an integration's record-only hooks (integrations/first-principles/
    trace.py): what the agent did, what it decided, and where the router's notes landed. */
 
-const trace = { data: null, runs: [], index: 0 };
+const trace = { data: null, runs: [], index: 0, sessions: null, pinned: false, timer: null };
 const BAND_TONE = { Rigorous: "suggest", Sound: "gated", "Hand-wavy": "enforce", Absent: "enforce" };
 const CONF_TONE = { HIGH: "suggest", MEDIUM: "gated", LOW: "enforce" };
 const VERDICT_TONE = { Accept: "native", Challenge: "gated", Discard: "enforce" };
@@ -675,28 +675,111 @@ const oneLine = (cmd, n = 90) => {
 };
 const minutes = (s) => (s == null ? "–" : s >= 90 ? `${(s / 60).toFixed(1)} min` : `${Math.round(s)} s`);
 
+const TRACE_POLL_MS = 3000;
+const STATUS_MARK = { running: "● running", unfinished: "◌ unfinished", finished: "✓" };
+const since = (ts) => {
+  const s = (Date.now() - when(ts)) / 1000;
+  if (!Number.isFinite(s)) return "";
+  if (s < 60) return `${Math.max(0, Math.round(s))} s ago`;
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return new Date(when(ts)).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
+
+/** One picker line: whether it is still running, what was asked, when, and how sure it ended. */
+function sessionOption(s) {
+  const what = s.label || `session ${s.session.slice(0, 8)}`;
+  const runs = s.runs > 1 ? ` · ${s.finished}/${s.runs} runs` : "";
+  const conf = s.status === "finished" && s.confidence ? ` · ${s.confidence}` : "";
+  return el("option", { value: s.session, title: s.question || s.session },
+    `${STATUS_MARK[s.status] || ""} ${what} · ${since(s.last_at)}${runs}${conf}`);
+}
+
 async function loadTraceSessions(select) {
   let body = { sessions: [] };
   try { body = await api("/api/trace/sessions"); } catch { /* shown as empty */ }
+  trace.sessions = new Map(body.sessions.map((s) => [s.session, s]));
   const sel = $("#trace-select");
-  sel.replaceChildren(...body.sessions.map((s) => el("option", { value: s.session },
-    `${s.session.slice(0, 8)}: ${s.finished} of ${s.runs} run${s.runs === 1 ? "" : "s"} finished${s.title ? `, “${s.title.slice(0, 70)}”` : ""}`)));
+  sel.replaceChildren(...body.sessions.map(sessionOption));
   const none = body.sessions.length === 0;
   $("#trace-empty").hidden = !none;
   $("#trace-body").hidden = none;
+  renderLiveLine();
   if (none) {
+    trace.data = null;
     $("#trace-empty").replaceChildren(
       el("p", { text: "No decision traces yet." }),
-      el("p", { class: "small-print", text: `Looking in ${body.trace_dir || "the trace folder"}. The first-principles integration's hooks write one trace per session; trace.py --replay makes one from a saved run.` }));
+      el("p", { class: "small-print", text: `Looking in ${body.trace_dir || "the trace folder"}. The first-principles integration's hooks write one trace per session; trace.py --replay makes one from a saved run. With Follow live on, a run appears here as soon as it starts.` }));
     return;
   }
-  sel.value = select && body.sessions.some((s) => s.session === select) ? select : body.sessions[0].session;
+  sel.value = select && trace.sessions.has(select) ? select : body.sessions[0].session;
   await loadTrace(sel.value);
 }
 
-async function loadTrace(session) {
+/** Re-read the picker; reload the shown session only if its trace grew, and switch to a session
+    that started since the last look. Never steals the view from a run the user picked by hand
+    while that run is still going. */
+async function pollTrace() {
+  let body;
+  try { body = await api("/api/trace/sessions"); } catch { return; }
+  const before = trace.sessions || new Map();
+  trace.sessions = new Map(body.sessions.map((s) => [s.session, s]));
+  const sel = $("#trace-select");
+  const shown = sel.value;
+  const fresh = body.sessions.find((s) => !before.has(s.session) && s.status === "running");
+  const shownLive = (before.get(shown) || {}).status === "running";
+  const target = fresh && !(trace.pinned && shownLive) ? fresh.session : shown;
+  sel.replaceChildren(...body.sessions.map(sessionOption));
+  if (!body.sessions.length) { if (before.size) loadTraceSessions(); return; }
+  if (!trace.data) { await loadTraceSessions(target); return; }
+  sel.value = trace.sessions.has(target) ? target : body.sessions[0].session;
+  const now = trace.sessions.get(sel.value);
+  const was = before.get(sel.value);
+  if (sel.value !== trace.data.session) {
+    trace.pinned = false;
+    await loadTrace(sel.value);
+  } else if (!was || was.size !== now.size || was.mtime !== now.mtime) {
+    await loadTrace(sel.value, { keep: true });
+  } else {
+    renderLiveLine();
+  }
+}
+
+function renderLiveLine() {
+  const line = $("#trace-live");
+  const s = trace.data && trace.sessions && trace.sessions.get(trace.data.session);
+  const follow = $("#trace-follow").checked;
+  if (!s || (s.status === "finished" && !follow)) { line.hidden = true; return; }
+  line.hidden = false;
+  const running = s.status === "running";
+  const text = running
+    ? `Running · last activity ${since(s.last_at)}${follow ? " · updating every few seconds" : " · Follow live is off"}`
+    : s.status === "unfinished"
+      ? `No new activity since ${since(s.last_at)}: the run ended without a stop event (killed, crashed or print mode ended)`
+      : "Following: a run that starts will open here";
+  line.replaceChildren(el("span", { class: `live-dot${running && follow ? "" : " idle"}` }), el("span", { text }));
+}
+
+/** The open/closed state of every <details>, keyed so it survives a re-render. */
+function detailsKey(d) {
+  const li = d.closest("[data-key]");
+  if (li) return li.dataset.key;
+  const sum = d.querySelector("summary");
+  return (sum ? sum.textContent : "").replace(/\s*\(.*$/, "");
+}
+const detailsState = (root) => new Map($$("details", root).map((d) => [detailsKey(d), d.open]));
+function restoreDetails(root, saved) {
+  $$("details", root).forEach((d) => { const k = detailsKey(d); if (saved.has(k)) d.open = saved.get(k); });
+}
+
+async function loadTrace(session, { keep = false } = {}) {
   const data = await api(`/api/trace/${encodeURIComponent(session)}`);
+  const prev = keep && trace.data && trace.data.session === session
+    ? { index: trace.index, last: trace.index === trace.runs.length - 1,
+      open: [$("#trace-timeline"), $("#trace-decisions")].map(detailsState) }
+    : null;
   trace.data = data;
+  if (trace.sessions) { const { records: _r, audit: _a, ...row } = data; trace.sessions.set(session, row); }
   const byRun = new Map();
   let handoff = []; // the main session's Agent call(s) that start the next run
   for (const r of data.records) {
@@ -705,6 +788,8 @@ async function loadTrace(session) {
     if (!byRun.has(key)) { byRun.set(key, handoff); handoff = []; }
     byRun.get(key).push(r);
   }
+  // delegated, agent not started yet: show the hand-off as a run of its own
+  if (handoff.length) byRun.set("pending", handoff);
   trace.runs = [...byRun.entries()].map(([id, recs]) => ({
     id, recs, start: recs.find((r) => r.kind === "run_start"),
     // a delivery guard that refuses the stop makes one run_end per attempt: the last one is the run's end
@@ -716,7 +801,11 @@ async function loadTrace(session) {
     type: "button", class: r.end ? "suggest" : "gated", onclick: () => showRun(i),
     "aria-label": `Run ${i + 1}${r.end ? "" : ", not finished"}`,
   }, `Run ${i + 1}`))));
-  showRun(0);
+  // following a live session: stay on the newest run; otherwise stay where the user was
+  const last = trace.runs.length - 1;
+  showRun(prev ? Math.min(prev.last ? last : prev.index, last) : 0);
+  if (prev) [$("#trace-timeline"), $("#trace-decisions")].forEach((root, i) => restoreDetails(root, prev.open[i]));
+  renderLiveLine();
 }
 
 /** The router's notes that fired inside this run (or, for the prompt, just before it). */
@@ -794,8 +883,18 @@ function renderTraceSummary(run) {
   const rt = end.routing || {};
   const concl = d.conclusion || {};
   const conf = concl.confidence;
+  const status = (trace.sessions && trace.sessions.get(trace.data.session) || {}).status;
+  const lastRec = run.recs.at(-1);
+  const open = !run.end && status === "running" && trace.index === trace.runs.length - 1;
+  const ran = run.start && lastRec ? clock((when(lastRec.ts) - when(run.start.ts)) / 1000) : null;
+  const headline = run.end ? (concl.recommended || "Finished; no recommendation found in the report")
+    : !run.start ? (open ? "Delegated; waiting for the agent to start" : "Delegated; the agent never started")
+      : open ? `Running: ${ran} in, ${run.recs.filter((r) => r.kind === "section_written").length} sections written so far`
+        : "Run not finished (no SubagentStop recorded)";
+  const question = trace.data.question
+    ? el("p", { class: "trace-question" }, el("b", { text: "Asked: " }), trace.data.question) : null;
   const head = el("div", { class: "verdict" },
-    el("h3", { text: run.end ? (concl.recommended || "Finished; no recommendation found in the report") : "Run not finished (no SubagentStop yet)" }),
+    el("h3", { text: headline }),
     conf ? el("span", { class: `pill ${CONF_TONE[conf] || "native"}`, text: `Confidence ${conf}` }) : null);
   const deleg = rt.delegation || null;
   const delegText = !deleg ? "–" : deleg.action === "suggest"
@@ -827,6 +926,13 @@ function renderTraceSummary(run) {
     ["Failed calls", end.tool_failures ?? run.recs.filter((r) => r.kind === "tool_failed").length],
     ["Source checks", end.sources ? `${end.sources.ok} ok, ${end.sources.reported_missing} without the content, ${end.sources.failed} failed${Object.keys(end.sources.failed_hosts || {}).length ? ` (${Object.keys(end.sources.failed_hosts).join(", ")})` : ""}` : "–"],
   ];
+  if (!run.end) { // mid-run: only what the hooks have recorded so far
+    const src = run.recs.filter((r) => r.kind === "source");
+    const ok = src.filter((r) => r.outcome === "ok").length;
+    stats.splice(0, stats.length,
+      ["Elapsed", ran || "–"], ...stats.filter(([k]) => ["Sections written", "References opened", "Calculator", "Failed calls"].includes(k)),
+      ["Source checks", src.length ? `${ok} ok, ${src.length - ok} not ok, so far` : "–"]);
+  }
   const grid = el("div", { class: "stats" }, ...stats.map(([k, v]) => el("div", { class: "stat" },
     el("span", { class: "stat-k", text: k }), el("span", { class: "stat-v" }, v))));
   const foot = el("p", { class: "small-print" },
@@ -836,7 +942,7 @@ function renderTraceSummary(run) {
     ? el("div", { class: "actions" }, el("button", { type: "button", class: "secondary",
       onclick: () => openReplay(trace.data.session), text: `Step through the router's ${trace.data.audit.length} checkpoints` }))
     : null;
-  box.replaceChildren(head, grid, foot, links);
+  box.replaceChildren(...[question, head, grid, foot, links].filter(Boolean));
 }
 
 /** A shell call that runs an interpreter (``math`` in traces before 2026-09-30). */
@@ -939,7 +1045,11 @@ function renderTraceTimeline(run) {
     ...items.map((x) => ({ ...x, node: () => (x.group && x.group.length > 1 ? groupItem(x.group, t0) : traceItem(x.rec, t0)) })),
     ...routerMarks(run).map((r) => ({ ts: when(r.ts), order: 0, node: () => routerItem(r, t0) })),
   ].sort((a, b) => a.ts - b.ts || a.order - b.order);
-  $("#trace-timeline").replaceChildren(...all.map((x) => x.node()));
+  $("#trace-timeline").replaceChildren(...all.map((x) => {
+    const n = x.node();
+    n.dataset.key = x.rec ? `${x.rec.ts}|${x.rec.kind}` : `router|${x.ts}`;
+    return n;
+  }));
 }
 
 function section(title, open, ...kids) {
@@ -950,7 +1060,12 @@ function renderDecisions(run) {
   const box = $("#trace-decisions");
   const d = (run.end || {}).decisions;
   if (!d) {
-    box.replaceChildren(el("p", { class: "muted", text: run.end ? "The report file could not be read when the agent stopped." : "Decisions are read from the report when the agent stops." }));
+    const heads = run.recs.filter((r) => r.kind === "section_written").flatMap((r) => r.headings || []);
+    box.replaceChildren(
+      el("p", { class: "muted", text: run.end ? "The report file could not be read when the agent stopped." : "Decisions are read from the report when the agent stops." }),
+      ...(run.end || !heads.length ? [] : [section(`Report so far (${heads.length} headings)`, true,
+        el("ol", { class: "dlist" }, ...heads.map((h) => el("li", { text: h }))))]),
+    );
     return;
   }
   const out = [];
@@ -990,8 +1105,16 @@ function renderDecisions(run) {
 }
 
 function initTrace() {
-  $("#trace-select").addEventListener("change", (e) => loadTrace(e.target.value));
+  $("#trace-select").addEventListener("change", (e) => { trace.pinned = true; loadTrace(e.target.value); });
   $("#trace-refresh").addEventListener("click", () => loadTraceSessions($("#trace-select").value));
+  $("#trace-follow").addEventListener("change", () => { renderLiveLine(); if ($("#trace-follow").checked) pollTrace(); });
+  // poll only while the Trace tab is on screen with Follow live on; a hidden browser tab skips
+  trace.timer = setInterval(() => {
+    if ($("#view-trace").hidden || !$("#trace-follow").checked || document.visibilityState !== "visible") return;
+    if (trace.polling) return;
+    trace.polling = true;
+    pollTrace().finally(() => { trace.polling = false; });
+  }, TRACE_POLL_MS);
 }
 
 /* -- tabs & boot ---------------------------------------------------------------- */

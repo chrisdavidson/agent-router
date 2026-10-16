@@ -153,8 +153,10 @@
         <span class="field-label">Traced session</span>
         <select id="trace-select"></select>
       </label>
+      <label class="follow" title="Re-read the trace every few seconds and switch to a run that starts"><input type="checkbox" id="trace-follow" checked> Follow live</label>
       <button type="button" class="secondary" id="trace-refresh">Refresh</button>
     </div>
+    <p class="trace-live small-print" id="trace-live" aria-live="polite" hidden></p>
     <div id="trace-empty" class="empty" hidden></div>
     <div id="trace-body" hidden>
       <ol class="step-pills run-pills" id="run-pills" aria-label="Agent runs in this session" hidden></ol>

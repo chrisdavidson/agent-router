@@ -969,6 +969,8 @@ def _delegation(
     prompt = str(inp.get("prompt") or "")
     return {
         "kind": "delegation",
+        # the main session's few-word name for the task: the demo's session label
+        **({"description": _trunc(inp["description"], 120)} if inp.get("description") else {}),
         "prompt_chars": len(prompt),
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         "prompt_names_calc": bool(
