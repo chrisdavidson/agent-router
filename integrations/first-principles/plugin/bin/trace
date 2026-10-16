@@ -3,8 +3,8 @@
 # Hook JSON on stdin, always '{}' on stdout: record-only, it never steers the agent.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
-repo="$(dirname "$(dirname "$integ")")"
-py="${AGENT_ROUTER_PYTHON:-$repo/.venv/bin/python}"
+# shellcheck source=_resolve.sh
+. "$here/_resolve.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
 # shellcheck source=_failopen.sh
 . "$here/_failopen.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
 payload="$(cat)"
@@ -16,10 +16,13 @@ payload="$(cat)"
 agent="${FP_AGENT_TYPE:-first-principles:first-principles}"
 agent_re='"agent_type"[[:space:]]*:[[:space:]]*"'"$agent"'"'
 handoff_re='"subagent_type"[[:space:]]*:[[:space:]]*"'"$agent"'"'
-if [ -n "$AGENT_ROUTER_DISABLED" ] || [ ! -x "$py" ] \
-  || ! [[ $payload =~ $agent_re || $payload =~ $handoff_re ]]; then
+if [ -n "$AGENT_ROUTER_DISABLED" ] || ! [[ $payload =~ $agent_re || $payload =~ $handoff_re ]]; then
   echo '{}'
   exit 0
 fi
+# Which interpreter: AGENT_ROUTER_PYTHON, the checkout .venv, the python behind `agent-router` on
+# PATH, else python3 (_resolve.sh). None runnable: answer {} (fail open).
+ar_resolve_python || { echo '{}'; exit 0; }
+py="$AR_PY"
 FAILOPEN_EMPTY_ONLY=1   # record-only (D-08): nothing but {} ever reaches the host
 fail_open_run "$py" "$integ/trace.py"

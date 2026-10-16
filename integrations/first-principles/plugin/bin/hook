@@ -3,13 +3,8 @@
 # Hook JSON on stdin, hook JSON on stdout. Fails open: prints {} whenever it cannot route.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
-repo="$(dirname "$(dirname "$integ")")"
-bin="${AGENT_ROUTER_BIN:-$repo/.venv/bin/agent-router}"
-if [ ! -x "$bin" ]; then
-  cat >/dev/null
-  echo '{}'
-  exit 0
-fi
+# shellcheck source=_resolve.sh
+. "$here/_resolve.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
 # shellcheck source=_failopen.sh
 . "$here/_failopen.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
 payload="$(cat)"
@@ -22,6 +17,10 @@ if [[ $payload =~ $bash_re ]] && ! [[ $payload =~ $agent_re ]]; then
   echo '{}'
   exit 0
 fi
+# Which router: AGENT_ROUTER_BIN, the checkout .venv, else `agent-router` on PATH (_resolve.sh).
+# None of them runnable: answer {} (fail open).
+ar_resolve_bin || { echo '{}'; exit 0; }
+bin="$AR_BIN"
 export AGENT_ROUTER_CATALOG="${AGENT_ROUTER_CATALOG:-$integ/catalog.yaml}"
 export AGENT_ROUTER_CALIBRATION="${AGENT_ROUTER_CALIBRATION:-$integ/calibration.json}"
 export AGENT_ROUTER_MODE=advisory

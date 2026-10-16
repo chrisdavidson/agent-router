@@ -1,5 +1,5 @@
 """``agent-router`` command line: route, eval, calibrate, calibrate-cascade, demo, run, hook,
-mcp.
+mcp, doctor.
 
 ``--backend`` defaults to ``default_backend()``: the local -> Jev cascade when a Jev API key
 is set, else the offline local classifier (``hook`` defaults to local; see ``cmd_hook``).
@@ -501,6 +501,32 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Check an integration install, one PASS / WARN / FAIL line per check; exit 1 on any FAIL."""
+    from agent_router import doctor
+
+    checks = doctor.run_checks(doctor.find_integration(args.integration))
+    bad = doctor.failed(checks)
+    if args.json:
+        _print_json({"ok": not bad, "checks": [c.record() for c in checks]})
+    else:
+        for check in checks:
+            print(check.line())
+    return 1 if bad else 0
+
+
+def _version() -> str:
+    """The installed package version, else the one the source tree declares."""
+    from importlib import metadata
+
+    try:
+        return metadata.version("agent-router")
+    except metadata.PackageNotFoundError:
+        from agent_router import __version__
+
+        return __version__
+
+
 def _json_obj(text: str) -> dict[str, Any]:
     try:
         value = json.loads(text)
@@ -536,6 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="agent-router",
         description="Route agent steps to MIT catalog alternatives with a Jev-spec decider.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("route", help="route one step and show the decision")
@@ -628,6 +655,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tools", help="comma-separated subset (default: all)")
     p.add_argument("--root", help="directory the file tools are confined to (default: cwd)")
     p.set_defaults(func=cmd_mcp)
+
+    p = sub.add_parser(
+        "doctor", help="check an integration install (binary, manifest, schema, MCP, hooks, state)"
+    )
+    p.add_argument(
+        "--integration",
+        required=True,
+        help="integration directory, or a bare name under <checkout>/integrations/",
+    )
+    p.add_argument("--json", action="store_true", help="print JSON")
+    p.set_defaults(func=cmd_doctor)
     return parser
 
 

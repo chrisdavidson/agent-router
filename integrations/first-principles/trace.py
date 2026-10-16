@@ -91,11 +91,11 @@ APPEND: re.Pattern[str]
 MANIFEST: Any  # the resolved manifest (agent_router.contracts.manifest.Manifest)
 INTEGRATION: dict[str, Any]  # how the manifest was found: source, plugin_root, version, warnings
 
-# The summary-block contract. Schema versions the reader accepts; a block of another version is
-# read but marked unverified. What the publisher emits is the manifest's ``summary.schema_version``;
-# what this reader accepts stays here, owned by the router.
-ACCEPTED_SCHEMA_VERSIONS = {1}
-PINNED_SCHEMA = HERE / "contract" / "summary-schema.json"
+# The summary-block contract. Schema versions the reader accepts (a block of another version is
+# read but marked unverified) and the pinned schema: both come from descriptor.json, set by
+# configure(). What the publisher emits is the manifest's ``summary.schema_version``.
+ACCEPTED_SCHEMA_VERSIONS: set[int]
+PINNED_SCHEMA: Path
 
 
 def _glob_regex(glob: str, directory: str) -> str:
@@ -113,6 +113,7 @@ def configure() -> None:
     after changing the environment. ``INTEGRATION`` is how the manifest was found."""
     global AGENT, CALC_TOOL, SUMMARY_HEADING, OUTPUT_GLOB, DELEGATE_ENTRY, CALC_ENTRY
     global REPORT_DIR, REPORT_PATH, APPEND, INTEGRATION, MANIFEST
+    global ACCEPTED_SCHEMA_VERSIONS, PINNED_SCHEMA
     from agent_router.contracts import integration as integ_mod
 
     integ = integ_mod.load_integration(HERE)
@@ -122,6 +123,10 @@ def configure() -> None:
     AGENT = man.agent_type
     CALC_TOOL = integ.calc_tool
     DELEGATE_ENTRY, CALC_ENTRY = integ.delegate_entry, integ.calc_entry
+    ACCEPTED_SCHEMA_VERSIONS, PINNED_SCHEMA = (
+        set(integ.accepted_schema_versions),
+        integ.pinned_schema,
+    )
     SUMMARY_HEADING = man.heading
     OUTPUT_GLOB = man.output_glob
     d = re.escape(man.output_dir)
@@ -391,24 +396,18 @@ def parse_analysis(text: str) -> dict[str, Any]:
 
 
 def schema_location() -> tuple[Path, str]:
-    """The field table to read the block against, and where it came from: ``env``
-    (AGENT_ROUTER_FP_SCHEMA, used as given), ``plugin_root`` (the manifest's schema path under
-    the resolved plugin root, when that file exists), else the ``pinned`` copy shipped here.
-    The root is resolved afresh on each call; the cheap lookups are the point of a manifest."""
-    env = os.environ.get("AGENT_ROUTER_FP_SCHEMA", "").strip()
-    if env:
-        return Path(env), "env"
+    """The field table to read the block against, and where it came from: ``env`` (the
+    descriptor's ``schema_env``, used as given), ``plugin_root`` (the manifest's schema path
+    under the resolved plugin root, when that file exists), else the ``pinned`` copy shipped
+    here. The root is resolved afresh on each call; the cheap lookups are the point of a
+    manifest. The resolution itself is ``contracts.integration.schema_location`` (shared with
+    ``agent-router doctor``)."""
     try:
         from agent_router.contracts import integration as integ_mod
 
-        resolved = integ_mod.resolve(integ_mod.load_integration(HERE), state_root=state_root())
-        if resolved.plugin_root is not None:
-            cand = resolved.plugin_root / resolved.manifest.schema
-            if cand.is_file():
-                return cand, "plugin_root"
+        return integ_mod.schema_location(integ_mod.load_integration(HERE), state_root=state_root())
     except Exception:  # fail open: the pinned copy
-        pass
-    return PINNED_SCHEMA, "pinned"
+        return PINNED_SCHEMA, "pinned"
 
 
 def _l(v: Any) -> list[Any]:

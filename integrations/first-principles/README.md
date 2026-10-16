@@ -32,14 +32,53 @@ writes (any call naming the `.first-principles` directory is skipped before the 
 
 ## Use it
 
+Two ways to install the router; the plugin directory is the same in both.
+
+**From a checkout** (development):
+
 ```bash
 make install                              # in this repo, once
 claude --plugin-dir ~/Projects/first-principles-skill/first-principles \
        --plugin-dir ~/Projects/agent-router/integrations/first-principles/plugin
 ```
 
-The hook finds `agent-router` in this repo's `.venv` (override with `AGENT_ROUTER_BIN`). If it
-cannot run, it prints `{}` and the session carries on unchanged (fail open).
+**As a tool** (`uv tool install` puts `agent-router` on your `PATH`):
+
+```bash
+uv tool install git+https://github.com/chrisdavidson/agent-router@<branch>
+# or, from a local clone, so edits take effect without reinstalling:
+uv tool install --editable ~/Projects/agent-router
+```
+
+then start Claude Code with the same two `--plugin-dir` flags (the integration's `plugin/`
+directory still comes from a clone of this repo).
+
+The scripts in `plugin/bin/` (`hook`, `trace`, `mcp`) find the router through `bin/_resolve.sh`,
+first match wins:
+
+1. `AGENT_ROUTER_BIN` / `AGENT_ROUTER_PYTHON` (final: if set to something unusable the script
+   does not try another);
+2. the checkout's `.venv` (`make install`);
+3. `agent-router` on `PATH`; `trace` runs the interpreter on that script's shebang line when it
+   is an absolute, executable python, else `python3`.
+
+The checkout comes before `PATH` on purpose: the plugin directory always sits in a checkout, so
+a stale `uv tool install` must not silently outrank the code next to the hooks. If nothing
+resolves, `hook` and `trace` print `{}` (fail open) and `mcp` exits non-zero with a message on
+stderr.
+
+To read the first-principles manifest, schema and examples from a working tree instead of the
+plugin cache, set `FP_PLUGIN_ROOT` to that tree (`~/Projects/first-principles-skill/first-principles`);
+Claude Code's Agent tool otherwise runs the installed copy, which can be older.
+
+**When something seems off, run `agent-router doctor --integration first-principles` first.** It
+prints one `PASS` / `WARN` / `FAIL` line per check: which router binary won and its version, the
+Python version, the descriptor, where the plugin root and manifest came from (and whether that
+is the possibly stale cache), the summary schema and its version, the catalog and calibration,
+the decider backend and whether the embedding model is available offline, an MCP `initialize` +
+`tools/list` round trip with the calculator, the `hooks.json` wiring against the manifest, the
+state directory, file locking and the `timeout` binary. It exits 1 only if a check FAILs; add
+`--json` for machine-readable output.
 
 | Setting | Default | Meaning |
 |---|---|---|

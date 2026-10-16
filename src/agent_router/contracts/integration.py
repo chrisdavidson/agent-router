@@ -18,6 +18,10 @@ Descriptor keys (all strings; unknown keys are ignored)::
     own_plugin_json      the router-side plugin's ``plugin.json``, relative to the directory
     delegate_entry       catalog entry id of the "delegate to the agent" checkpoint
     calc_entry           catalog entry id of the exact-calculator checkpoint
+    schema_env           environment variable that may name a summary schema file outright
+    pinned_schema        the pinned summary schema, relative to the directory
+    accepted_schema_versions   list of integers: the summary-schema versions the reader accepts
+                         (what the publisher emits is the manifest's ``summary.schema_version``)
 
 Catalog variables (``${name}`` in a catalog file, see ``core.catalog.load_catalog``):
 
@@ -67,6 +71,9 @@ class Integration:
     own_plugin_name: str
     delegate_entry: str
     calc_entry: str
+    schema_env: str
+    pinned_schema: Path
+    accepted_schema_versions: frozenset[int]
 
     @property
     def calc_tool(self) -> str:
@@ -99,6 +106,13 @@ def load_integration(directory: str | Path) -> Integration:
         raise IntegrationError(f"cannot read the plugin name from {plugin_json}: {exc}") from exc
     if not isinstance(own, str) or not own:
         raise IntegrationError(f"{plugin_json}: name must be a non-empty string")
+    versions = data.get("accepted_schema_versions")
+    if (
+        not isinstance(versions, list)
+        or not versions
+        or not all(isinstance(v, int) and not isinstance(v, bool) for v in versions)
+    ):
+        raise IntegrationError(f"{path}: accepted_schema_versions must be a list of integers")
     return Integration(
         dir=root,
         expected_plugin=_text(data, "expected_plugin", path),
@@ -107,6 +121,9 @@ def load_integration(directory: str | Path) -> Integration:
         own_plugin_name=own,
         delegate_entry=_text(data, "delegate_entry", path),
         calc_entry=_text(data, "calc_entry", path),
+        schema_env=_text(data, "schema_env", path),
+        pinned_schema=root / _text(data, "pinned_schema", path),
+        accepted_schema_versions=frozenset(versions),
     )
 
 
@@ -159,6 +176,28 @@ def resolve(
     )
 
 
+def schema_location(
+    integ: Integration,
+    *,
+    env: Mapping[str, str] | None = None,
+    state_root: Path | None = None,
+) -> tuple[Path, str]:
+    """The summary field table to read a block against, and where it came from: ``env``
+    (the descriptor's ``schema_env``, used as given), ``plugin_root`` (the manifest's schema path
+    under the resolved plugin root, when that file exists), else the ``pinned`` copy shipped
+    with the integration. Never raises for a bad manifest; the root is resolved afresh."""
+    env = os.environ if env is None else env
+    named = env.get(integ.schema_env, "").strip()
+    if named:
+        return Path(named), "env"
+    resolved = resolve(integ, env=env, state_root=state_root)
+    if resolved.plugin_root is not None:
+        cand = resolved.plugin_root / resolved.manifest.schema
+        if cand.is_file():
+            return cand, "plugin_root"
+    return integ.pinned_schema, "pinned"
+
+
 def variables(integ: Integration, manifest: Manifest) -> dict[str, str]:
     return {
         "fp.plugin_name": manifest.plugin_name,
@@ -208,6 +247,7 @@ __all__ = [
     "integration_dir",
     "load_integration",
     "resolve",
+    "schema_location",
     "skip_patterns",
     "variables",
     "variables_for_catalog",

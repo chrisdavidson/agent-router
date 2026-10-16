@@ -47,7 +47,7 @@ import os
 import re
 import time
 import zlib
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -75,8 +75,8 @@ RouterFactory = Callable[[Path | None, set[tuple[str, int, str]]], Router]
 """Builds the router for one hook call from (audit path or None, suggested-key seed)."""
 
 
-def state_root() -> Path:
-    env = os.environ
+def state_root(env: Mapping[str, str] | None = None) -> Path:
+    env = os.environ if env is None else env
     if env.get("AGENT_ROUTER_STATE_DIR", "").strip():
         return Path(env["AGENT_ROUTER_STATE_DIR"].strip())
     base = env.get("XDG_STATE_HOME", "").strip() or str(Path.home() / ".local" / "state")

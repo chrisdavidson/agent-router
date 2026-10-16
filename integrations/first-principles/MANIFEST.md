@@ -33,7 +33,7 @@ from the pinned copy in this directory, [`manifest.fallback.json`](manifest.fall
 | `output.glob` | string | the report files, relative to the agent's cwd; `*` matches one or more path characters |
 | `summary.schema` | string | the summary-block field table, relative to the plugin root |
 | `summary.heading` | string | the heading that opens the summary block |
-| `summary.schema_version` | integer | the schema version the publisher emits. The set the router **accepts** is the router's, `ACCEPTED_SCHEMA_VERSIONS` in `trace.py`; it is deliberately not in the manifest |
+| `summary.schema_version` | integer | the schema version the publisher emits. The set the router **accepts** is the router's, `accepted_schema_versions` in `descriptor.json`; it is deliberately not in the manifest |
 | `examples_dir` | string | the worked examples, relative to the plugin root |
 | `capabilities_used` | list of strings, optional | router capabilities the plugin makes use of (e.g. `exact-arithmetic`) |
 

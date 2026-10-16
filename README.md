@@ -157,6 +157,8 @@ We measured the gatekeeper on 64 test steps it had never seen:
 - **[Other agent harnesses](docs/adapters.md)**: how to connect Codex CLI and Gemini CLI.
 - **[With the first-principles plugin](integrations/first-principles/README.md)**: a Claude Code
   plugin that nudges delegation to the first-principles agent and gives it an exact calculator.
+  `agent-router doctor --integration first-principles` checks an install (binary, manifest,
+  schema, MCP server, hooks, state directory) and says what is wrong.
 - **[Research](docs/research.md)**: the papers and projects this design builds on, including TypeSafe's
   Jev and Tenjin.
 
