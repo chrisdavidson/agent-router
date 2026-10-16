@@ -145,9 +145,16 @@ claude --plugin-dir ~/Projects/first-principles-skill/first-principles \
 /agent-router-fp:analyze Is a four-day school week a good idea, or do we just assume five days?
 ```
 
+In print mode (`claude -p "/agent-router-fp:analyze ..."`) the host runs the agent in the
+background and stops it 10 minutes after the main session's last turn. The conductor waits for
+the agent, so a run under 10 minutes is unaffected (the first live run took 6.3), but a longer
+analysis is killed half-written. Set `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` (milliseconds, `0` =
+no limit) for print-mode runs; `run_examples.py` sets it to its own `--timeout`. Interactive
+sessions are not affected.
+
 Other `conduct.py` sub-commands (`plugin/bin/conduct <sub-command>`): `preflight "<q>"`,
 `compose "<q>" [--mode focused-<technique>] [--domain D] [--constraint C] [--ground-truth G]`,
-`verify <analysis>`, `latest-analysis [--cwd DIR]`, and `record-root <plugin dir>`, which writes
+`verify <analysis>`, `latest-analysis [--cwd DIR]`, `doctor`, and `record-root <plugin dir>`, which writes
 `<state dir>/integration/<plugin>.root` so hooks and the trace on this machine read that tree
 instead of the plugin cache (the same effect as `FP_PLUGIN_ROOT`, without the environment).
 

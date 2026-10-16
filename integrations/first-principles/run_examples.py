@@ -155,6 +155,20 @@ def inline_report(events: list[dict]) -> str | None:
     return None
 
 
+def _async_launch(event: dict, block: dict) -> bool:
+    """Whether a tool result is only the acknowledgement that a background agent started. The
+    host marks it in the event's ``tool_use_result`` (``status: async_launched``), not in the
+    block's text, so a check of the text alone took the launch for the agent's hand-back."""
+    meta = event.get("tool_use_result")
+    if isinstance(meta, dict) and meta.get("status") == "async_launched":
+        return True
+    text = json.dumps(block.get("content"), default=str)
+    return "async_launched" in text or "Async agent launched" in text
+
+
+BG_STOPPED = "Background tasks still running"
+
+
 def completeness(events: list[dict], files: list[Path]) -> tuple[str, list[str]]:
     """``complete``, ``partial`` (the run ended but its analysis is unfinished) or ``failed``,
     with what is missing. A run cut short (a spend limit, a timeout) can still exit with a
@@ -179,9 +193,7 @@ def completeness(events: list[dict], files: list[Path]) -> tuple[str, list[str]]
         for e in events
         if e.get("type") == "user" and not e.get("parent_tool_use_id")
         for b in (e.get("message") or {}).get("content") or []
-        if isinstance(b, dict)
-        and b.get("type") == "tool_result"
-        and "async_launched" not in json.dumps(b.get("content"), default=str)
+        if isinstance(b, dict) and b.get("type") == "tool_result" and not _async_launch(e, b)
     } | {
         e.get("tool_use_id")
         for e in events
@@ -189,6 +201,9 @@ def completeness(events: list[dict], files: list[Path]) -> tuple[str, list[str]]
     }
     started = bool(calls)
     handed_back = bool(calls & returned)
+    if any(e.get("type") == "runner" and e.get("bg_stopped") for e in events):
+        # print mode stops background agents a fixed time after the main session's last turn
+        problems.append("the CLI stopped the background agent (print-mode wait ceiling)")
     if started and not handed_back:
         problems.append("the agent did not hand back")
     inline = inline_report(events)
@@ -206,7 +221,9 @@ def completeness(events: list[dict], files: list[Path]) -> tuple[str, list[str]]
             problems.append("no Self-Audit Gate")
     if not problems:
         return "complete", []
-    ran = files and not any(p.startswith(("no analysis", "no result")) for p in problems)
+    ran = files and not any(
+        p.startswith(("no analysis", "no result", "the CLI stopped")) for p in problems
+    )
     return ("partial" if ran else "failed"), problems
 
 
@@ -227,13 +244,21 @@ def read_own_example(events: list[dict], name: str) -> bool:
     )
 
 
-def summarize(name: str, workdir: Path, capture: Path, state: Path) -> dict:
+def read_events(capture: Path) -> list[dict]:
+    """The capture's JSON events, plus a ``runner`` event for the CLI's plain-text notice that
+    it stopped a background agent (written to the same stream, outside the JSON)."""
     events = []
     for line in capture.read_text(errors="replace").splitlines():
         try:
             events.append(json.loads(line))
         except ValueError:
-            continue
+            if line.startswith(BG_STOPPED):
+                events.append({"type": "runner", "bg_stopped": line.strip()})
+    return events
+
+
+def summarize(name: str, workdir: Path, capture: Path, state: Path) -> dict:
+    events = read_events(capture)
     session = next((e.get("session_id") for e in events if e.get("session_id")), None)
     tool_uses = [
         b
@@ -312,6 +337,13 @@ def run_example(name: str, prompt: str, out: Path, args, plugin_root: Path) -> d
         argv += ["--model", args.model]
     argv.append(prompt)
     env = {**os.environ, "AGENT_ROUTER_STATE_DIR": str(state)}
+    # print mode stops a background agent 10 minutes after the main session's last turn, which
+    # killed both analyses of the 2026-10-15 rerun mid-way; wait for it up to this run's own
+    # timeout instead (an explicit setting wins)
+    env.setdefault(
+        "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS",
+        str(int(args.timeout * 1000)) if args.timeout else "0",
+    )
     start = time.monotonic()
     print(f"[start] {name}", flush=True)
     with capture.open("w") as fh:

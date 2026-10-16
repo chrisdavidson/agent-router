@@ -890,6 +890,46 @@ def test_run_examples_marks_a_killed_run_failed(tmp_path):
     ]
 
 
+def test_run_examples_fails_a_backgrounded_agent_the_cli_stopped(tmp_path):
+    """The 2026-10-15 rerun: the Agent call returned only its async-launch acknowledgement,
+    the main session ended its turn, and print mode stopped the agent ten minutes later with
+    sections 1-6 written and the file never assembled. Both runs read as "partial: no gate"."""
+    agent = {"type": "tool_use", "id": "ag", "name": "Agent", "input": {"subagent_type": FP}}
+    ack = {
+        "type": "tool_result",
+        "tool_use_id": "ag",
+        "content": "Async agent launched successfully.",
+    }
+    events = [
+        {"type": "assistant", "message": {"content": [agent]}},
+        {
+            "type": "user",
+            "message": {"content": [ack]},
+            "tool_use_result": {"isAsync": True, "status": "async_launched"},
+        },
+        {"type": "result", "is_error": False, "result": "it is still running"},
+        {"type": "runner", "bg_stopped": "Background tasks still running 10m after ..."},
+    ]
+    head = ANALYSIS[: ANALYSIS.index("## Self-Audit")] if "## Self-Audit" in ANALYSIS else ANALYSIS
+    status, problems = _run_examples().completeness(events, _report(tmp_path, head))
+    assert status == "failed"
+    assert "the agent did not hand back" in problems
+    assert "the CLI stopped the background agent (print-mode wait ceiling)" in problems
+
+
+def test_run_examples_reads_the_clis_stop_notice_from_the_capture(tmp_path):
+    capture = tmp_path / "run.jsonl"
+    notice = 'Background tasks still running 10m after the last turn (subagent "x"); stopping them.'
+    capture.write_text(
+        '{"type": "result", "is_error": false, "result": "x"}\nnot json\n' + notice + "\n"
+    )
+    events = _run_examples().read_events(capture)
+    assert events == [
+        {"type": "result", "is_error": False, "result": "x"},
+        {"type": "runner", "bg_stopped": notice},
+    ]
+
+
 def test_hook_skips_prompts_that_already_launch_first_principles(tmp_path):
     """The launcher already delegates; a note there can change nothing (10 of 28 runs)."""
     out = _hook(
