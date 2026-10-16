@@ -87,6 +87,9 @@ def _safe_name(session: str) -> str:
     return _UNSAFE.sub("_", session)[:128] or "unknown"
 
 
+safe_name = _safe_name  # public: the conductor's hand-off hook reads the same session file
+
+
 def load_state(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))

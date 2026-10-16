@@ -626,13 +626,21 @@ def test_the_static_host_config_agrees_with_the_fallback_manifest():
     for event in ("SubagentStart", "SubagentStop"):
         assert [g["matcher"] for g in hooks[event]] == [AGENT]
     for event in ("PostToolUse", "PostToolUseFailure"):
-        (group,) = hooks[event]
+        (group,) = [g for g in hooks[event] if "bin/trace" in g["hooks"][0]["command"]]
         assert integ.calc_tool in group["matcher"].split("|")
         assert integ.calc_script_tool in group["matcher"].split("|")
-    script = (PLUGIN / "bin" / "trace").read_text()
-    (default,) = re.findall(r'FP_AGENT_TYPE:-([^}"]+)\}', script)
-    assert default == AGENT
-    assert script.count(AGENT) == 1  # the one default, nowhere else
+    for name in ("trace", "handoff-hook"):
+        script = (PLUGIN / "bin" / name).read_text()
+        (default,) = re.findall(r'FP_AGENT_TYPE:-([^}"]+)\}', script)
+        assert default == AGENT
+        assert script.count(AGENT) == 1  # the one default, nowhere else
+    handoff = [
+        (event, g["matcher"])
+        for event, groups in hooks.items()
+        for g in groups
+        if g["hooks"][0]["command"].endswith("/bin/handoff-hook")
+    ]
+    assert handoff == [("PreToolUse", "Agent"), ("PostToolUse", "Agent")]
 
 
 def test_the_trace_fast_path_follows_fp_agent_type(tmp_path):

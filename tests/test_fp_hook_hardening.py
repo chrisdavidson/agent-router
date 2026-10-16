@@ -486,16 +486,20 @@ def test_state_keys_written_by_others_are_preserved(tmp_path):
 
 def _wiring_violations(hooks_json: dict) -> list[str]:
     """Commands wired where they could block the first-principles agent, other than the router
-    hook at UserPromptSubmit/PreToolUse and the record-only trace."""
+    hook at UserPromptSubmit/PreToolUse, the hand-off hook at PreToolUse/PostToolUse (steering:
+    updatedInput or additionalContext only, its source scanned below) and the record-only
+    trace."""
     bad = []
     for event, groups in hooks_json["hooks"].items():
         for group in groups:
             for h in group["hooks"]:
                 cmd = Path(h.get("command", "")).name
-                if h.get("type") != "command" or cmd not in ("hook", "trace"):
+                if h.get("type") != "command" or cmd not in ("hook", "trace", "handoff-hook"):
                     bad.append(f"{event}: unexpected hook {h}")
                 elif cmd == "hook" and event not in ("UserPromptSubmit", "PreToolUse"):
                     bad.append(f"{event}: router hook wired to a blocking-capable event")
+                elif cmd == "handoff-hook" and event not in ("PreToolUse", "PostToolUse"):
+                    bad.append(f"{event}: hand-off hook wired to a blocking-capable event")
     return bad
 
 
@@ -536,11 +540,21 @@ def test_only_the_router_hook_and_the_record_only_trace_are_wired():
     bad = json.loads(json.dumps(hooks))
     bad["hooks"]["Stop"] = [{"hooks": [{"type": "command", "command": "/x/other"}]}]
     assert _wiring_violations(bad)
+    bad = json.loads(json.dumps(hooks))
+    bad["hooks"]["SubagentStop"][0]["hooks"].append(
+        {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/handoff-hook"}
+    )
+    assert _wiring_violations(bad)
 
 
 def test_trace_and_contracts_have_no_deny_or_block_emission_path():
-    sources = [INTEG / "trace.py", *sorted((ROOT / "src/agent_router/contracts").glob("*.py"))]
-    assert len(sources) >= 4
+    sources = [
+        INTEG / "trace.py",
+        INTEG / "conduct.py",  # the hand-off hook's logic
+        ROOT / "src/agent_router/integration_tools.py",
+        *sorted((ROOT / "src/agent_router/contracts").glob("*.py")),
+    ]
+    assert len(sources) >= 6
     for src in sources:
         assert _emission_paths(src.read_text()) == [], src
     # the scanner can fail: it flags each way of emitting a deny or a block

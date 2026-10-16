@@ -40,8 +40,15 @@ def _load(name, file):
 conduct = _load("fp_conduct", "conduct.py")
 
 
+CLEAN_CHECKS = {
+    "health": {"ran": True, "ok": True, "flagged": []},
+    "preflight": {"ran": True, "delegate": True, "score": 0.98, "threshold": 0.6},
+}
+
+
 @pytest.fixture(autouse=True)
 def _env(monkeypatch, tmp_path):
+    monkeypatch.setattr(conduct, "run_checks", lambda question: CLEAN_CHECKS)
     monkeypatch.setenv("AGENT_ROUTER_INTEGRATION", str(INTEG))
     monkeypatch.setenv("AGENT_ROUTER_EMBEDDER", "hashing")
     monkeypatch.setenv("AGENT_ROUTER_PLUGIN_CACHE", "")  # the pinned fallback manifest
@@ -149,6 +156,7 @@ def test_compose_golden_with_the_calculator(capsys, tmp_path):
         "sha256": hashlib.sha256(prompt.encode()).hexdigest(),
         "agent_type": AGENT,
         "launcher": FALLBACK["launcher"],
+        "checks": CLEAN_CHECKS,
     }
 
 
@@ -233,7 +241,9 @@ def test_compose_rejects_bad_input(capsys, argv):
 def test_compose_writes_the_handoff_record(capsys, tmp_path):
     _code, out = _run(capsys, "compose", QUESTION)
     rec = json.loads((_state(tmp_path) / "conductor" / f"{out['sha256']}.json").read_text())
-    assert set(rec) == {"sha256", "composed_at", "question_sha256"}
+    assert set(rec) == {"sha256", "composed_at", "question_sha256", "launcher", "checks"}
+    assert rec["checks"] == CLEAN_CHECKS
+    assert rec["launcher"] == "conductor"
     assert rec["sha256"] == out["sha256"]
     assert rec["question_sha256"] == hashlib.sha256(QUESTION.encode()).hexdigest()
     assert datetime.fromisoformat(rec["composed_at"]).tzinfo is not None
@@ -479,15 +489,17 @@ def test_skill_tool_names_equal_the_derived_names():
     }
     assert set(derived) <= served  # the MCP server really serves what the skill calls
     used = set(re.findall(r"mcp__plugin_[A-Za-z0-9_-]+", body))
-    assert used == set(derived.values())
+    assert used == {derived["verify_summary"]}  # health and preflight now run inside compose
     # the calculator names the compose step relies on follow the same rule
     assert integ.calc_tool == f"mcp__plugin_{plugin_name}_{integ_mod.MCP_SERVER}__calc"
 
 
 def test_skill_sequences_the_helper_and_forbids_editing():
     _meta, body = _skill()
-    for sub in ("compose", "latest-analysis", "record-root", "preflight", "verify"):
+    for sub in ("compose", "report --markdown --handoff", "verify_summary"):
         assert sub in body
+    # the skill and the hand-off hook give the main session the same instruction for the report
+    assert conduct.SHOW_VERBATIM in " ".join(body.split())
     for phrase in ("never edit", "at most once", "character for character", "Add no instructions"):
         assert phrase.lower() in body.lower()
     assert "${CLAUDE_PLUGIN_ROOT}/bin/conduct" in body and (PLUGIN / "bin" / "conduct").is_file()

@@ -1,12 +1,13 @@
 {
-  "description": "agent-router checkpoints (advisory, fail open) and a record-only trace of the first-principles agent's decisions. See integrations/first-principles/README.md.",
+  "description": "agent-router checkpoints (advisory, fail open), the hand-off hooks that give a plain-prompt run the conductor's prompt and report (steering, never blocking), and a record-only trace of the first-principles agent's decisions. See integrations/first-principles/README.md.",
   "hooks": {
     "UserPromptSubmit": [
       {"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/hook", "timeout": 15}]}
     ],
     "PreToolUse": [
       {"matcher": "Agent|Bash", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/hook", "timeout": 15}]},
-      {"matcher": "Agent", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
+      {"matcher": "Agent", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]},
+      {"matcher": "Agent", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/handoff-hook", "timeout": 15}]}
     ],
     "SubagentStart": [
       {"matcher": "first-principles:first-principles", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
@@ -15,6 +16,7 @@
       {"matcher": "first-principles:first-principles", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
     ],
     "PostToolUse": [
+      {"matcher": "Agent", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/handoff-hook", "timeout": 15}]},
       {"matcher": "Bash|Read|ToolSearch|WebFetch|WebSearch|mcp__plugin_agent-router-fp_agent_router__calc|mcp__plugin_agent-router-fp_agent_router__calc_script", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
     ],
     "PostToolUseFailure": [

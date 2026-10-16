@@ -4,6 +4,34 @@ All notable changes to this fork (`chrisdavidson/agent-router`) are documented h
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Route parity.** A first-principles run started from a plain prompt now ends like one started
+  with `/agent-router-fp:analyze`: the same delegating prompt and the same report. New hand-off
+  hooks (`plugin/bin/handoff-hook` -> `conduct.py hook`, steering only, never a deny or a block)
+  rewrite the main session's `Agent` prompt to the composed one at `PreToolUse`, and at
+  `PostToolUse` hand the main session the rendered report, or, for a background run, the report
+  command to run when it finishes. One renderer (`integration_tools.render_report`) serves both
+  ways. `conduct.py report [--markdown]` is the skill's report step. The trace's `run_end` records
+  `launched_by` (`conductor` / `router-hook`), resolved after the run because hooks on one event
+  run in parallel. `doctor` fails the wiring check when either half of the pair is missing.
+
+### Changed
+
+- **Neither way of starting a run stops it** (chosen 2026-10-16). `compose` runs the `doctor`
+  checks and the router's preflight, time-bounded, and keeps them in the hand-off record;
+  `conduct report --handoff <sha256>` shows whatever is not clean ("Install health", "Router
+  preflight: ... analysed anyway", or "Run checks: not recorded"). The conductor skill no longer
+  stops on a `doctor` FAIL or a declined preflight, so it and a plain-prompt run behave alike.
+
+### Fixed
+
+- The MCP `verify_summary` result now carries the paths of the analysis, its reader report and
+  the trace (only the CLI had them), plus `report_markdown`.
+- A cut Answer excerpt is marked: `answer_truncated` in the result, and a note in the report.
+
 ## [0.2.0] — 2026-10-16
 
 A robust, loosely coupled integration with the first-principles plugin (works with

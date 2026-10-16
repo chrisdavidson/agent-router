@@ -924,9 +924,11 @@ HANDOFF_TTL_S = 3600  # a conductor hand-off record older than this is not recog
 
 
 def _launched_by(prompt: str, root: Path | None, now: datetime) -> dict[str, Any]:
-    """Whether ``prompt`` is one the conductor composed: ``conduct.py compose`` leaves
+    """Whether ``prompt`` is one ``conduct.py compose`` wrote: it leaves
     ``<state>/conductor/<sha256 of the prompt>.json`` (CONDUCT-05). A record written within
-    the last hour counts; a missing, unreadable or expired one means ``launched_by: null``."""
+    the last hour counts, and its ``launcher`` names who composed it (``conductor``, or
+    ``router-hook`` for a plain-prompt run the hand-off hook rewrote); a missing, unreadable
+    or expired one means ``launched_by: null``."""
     sha = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     rec = _read_json(root / "conductor" / f"{sha}.json") if root is not None else None
     composed = _when(rec.get("composed_at")) if isinstance(rec, dict) else None
@@ -940,7 +942,9 @@ def _launched_by(prompt: str, root: Path | None, now: datetime) -> dict[str, Any
         and composed is not None
         and 0 <= (now - composed).total_seconds() <= HANDOFF_TTL_S
     ):
-        return {"launched_by": "conductor", "composed_sha256": sha}
+        launcher = rec.get("launcher")  # records before the hand-off hook carry none
+        launcher = launcher if launcher in ("conductor", "router-hook") else "conductor"
+        return {"launched_by": launcher, "composed_sha256": sha}
     return {"launched_by": None}
 
 
@@ -966,10 +970,30 @@ def _delegation(
     return {
         "kind": "delegation",
         "prompt_chars": len(prompt),
+        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         "prompt_names_calc": bool(
             re.search(r"\bcalc(?:ulator)?\b|" + re.escape(CALC_TOOL), prompt, re.I)
         ),
         **_launched_by(prompt, root, _when(now) or datetime.now(UTC)),
+    }
+
+
+def _rewritten(handoff: dict[str, Any] | None, root: Path | None) -> dict[str, Any] | None:
+    """The delegation as the agent got it. The hand-off hook (``conduct.py hook``) may rewrite
+    the prompt at PreToolUse while this trace records the original in parallel; it leaves
+    ``<state>/conductor/from-<sha256 of the original>.json``, read here at the run's end."""
+    if handoff is None or handoff.get("launched_by") or root is None:
+        return handoff
+    sha = handoff.get("prompt_sha256")
+    rec = _read_json(root / "conductor" / f"from-{sha}.json") if isinstance(sha, str) else None
+    if not isinstance(rec, dict) or rec.get("original_sha256") != sha:
+        return handoff
+    return {
+        **handoff,
+        "launched_by": "router-hook",
+        "composed_sha256": rec.get("composed_sha256"),
+        "prompt_names_calc": bool(rec.get("prompt_names_calc")),
+        "rewritten": True,
     }
 
 
@@ -1013,6 +1037,7 @@ def handle(
             if r.get("kind") == "delegation"
             and (start is None or (_when(r.get("ts")) or start) <= start)
         ]
+        handoff = _rewritten(handoffs[-1] if handoffs else None, root)
         end = _when(now) if now else datetime.now(UTC)
         path, text, source, exact = _analysis(run, str(payload.get("cwd") or ""), payload)
         derived = derive_decisions(text, run)
@@ -1043,7 +1068,8 @@ def handle(
             "integration": INTEGRATION,
             "stop_attempt": stops + 1,
             "stop_hook_active": bool(payload.get("stop_hook_active")),
-            "routing": _routing(audit, run, handoffs[-1] if handoffs else None, start, end),
+            "launched_by": handoff.get("launched_by") if handoff else None,
+            "routing": _routing(audit, run, handoff, start, end),
         }
     else:
         return None

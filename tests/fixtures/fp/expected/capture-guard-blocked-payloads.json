@@ -5,6 +5,7 @@
     "launched_by": null,
     "prompt_chars": 33,
     "prompt_names_calc": false,
+    "prompt_sha256": "eedee91a4657f5912f786560e48822c198f48774802fec01b9da3cdd1017b7dd",
     "session": "guard-session-0001",
     "tool_name": "Agent",
     "tool_use_id": "toolu_guard_agent",
@@ -114,6 +115,7 @@
       ]
     },
     "kind": "run_end",
+    "launched_by": null,
     "references_read": [],
     "report_restarts": 0,
     "report_revisions": 0,
@@ -242,6 +244,7 @@
       ]
     },
     "kind": "run_end",
+    "launched_by": null,
     "references_read": [],
     "report_restarts": 0,
     "report_revisions": 0,
@@ -371,6 +374,7 @@
       ]
     },
     "kind": "run_end",
+    "launched_by": null,
     "references_read": [],
     "report_restarts": 0,
     "report_revisions": 0,
