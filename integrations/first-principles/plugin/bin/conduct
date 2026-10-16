@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# agent-router-fp conductor helper: runs integrations/<name>/conduct.py (preflight, compose,
+# verify, record-root, latest-analysis) with the interpreter bin/_resolve.sh picks. Prints one
+# JSON object; on a resolution failure prints a JSON error and exits 1. Never blocks anything.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
+# shellcheck source=_resolve.sh
+. "$here/_resolve.sh" 2>/dev/null || { echo '{"error": "cannot load bin/_resolve.sh"}'; exit 1; }
+ar_resolve_python || { printf '{"error": "no interpreter: %s"}\n' "${AR_ERR//\"/\'}"; exit 1; }
+export AGENT_ROUTER_INTEGRATION="$integ"
+export AGENT_ROUTER_MODE=advisory
+export HF_HUB_DISABLE_PROGRESS_BARS=1
+exec "$AR_PY" "$integ/conduct.py" "$@"

@@ -2,6 +2,7 @@
   {
     "agent_id": null,
     "kind": "delegation",
+    "launched_by": null,
     "prompt_chars": 368,
     "prompt_names_calc": false,
     "session": "93ec2541-5e41-46f0-a55e-540adc12b291",

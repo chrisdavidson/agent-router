@@ -2,6 +2,7 @@
   {
     "agent_id": null,
     "kind": "delegation",
+    "launched_by": null,
     "prompt_chars": 33,
     "prompt_names_calc": false,
     "session": "guard-session-0001",

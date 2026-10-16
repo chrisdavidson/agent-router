@@ -920,10 +920,43 @@ def _routing(
     }
 
 
-def _delegation(payload: dict[str, Any]) -> dict[str, Any] | None:
+HANDOFF_TTL_S = 3600  # a conductor hand-off record older than this is not recognised
+
+
+def _launched_by(prompt: str, root: Path | None, now: datetime) -> dict[str, Any]:
+    """Whether ``prompt`` is one the conductor composed: ``conduct.py compose`` leaves
+    ``<state>/conductor/<sha256 of the prompt>.json`` (CONDUCT-05). A record written within
+    the last hour counts; a missing, unreadable or expired one means ``launched_by: null``."""
+    sha = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    rec = _read_json(root / "conductor" / f"{sha}.json") if root is not None else None
+    composed = _when(rec.get("composed_at")) if isinstance(rec, dict) else None
+    if composed is not None and composed.tzinfo is None:
+        composed = composed.replace(tzinfo=UTC)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    if (
+        isinstance(rec, dict)
+        and rec.get("sha256") == sha
+        and composed is not None
+        and 0 <= (now - composed).total_seconds() <= HANDOFF_TTL_S
+    ):
+        return {"launched_by": "conductor", "composed_sha256": sha}
+    return {"launched_by": None}
+
+
+def _read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _delegation(
+    payload: dict[str, Any], root: Path | None = None, now: str | None = None
+) -> dict[str, Any] | None:
     """The main session's Agent call that starts a first-principles run: whether its prompt
     already tells the agent to use the calculator (it does in half the example runs, which
-    would otherwise be credited to the router's note)."""
+    would otherwise be credited to the router's note), and whether the conductor composed it."""
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if payload.get("agent_type") or payload.get("tool_name") not in ("Agent", "Task"):
         return None
@@ -936,6 +969,7 @@ def _delegation(payload: dict[str, Any]) -> dict[str, Any] | None:
         "prompt_names_calc": bool(
             re.search(r"\bcalc(?:ulator)?\b|" + re.escape(CALC_TOOL), prompt, re.I)
         ),
+        **_launched_by(prompt, root, _when(now) or datetime.now(UTC)),
     }
 
 
@@ -944,10 +978,10 @@ def handle(
 ) -> dict[str, Any] | None:
     """Append the record for one hook payload; returns it (None when nothing is recorded)."""
     event = str(payload.get("hook_event_name") or "")
-    delegation = _delegation(payload) if event == "PreToolUse" else None
+    root = root if root is not None else state_root()
+    delegation = _delegation(payload, root, now) if event == "PreToolUse" else None
     if payload.get("agent_type") != AGENT and delegation is None:
         return None
-    root = root if root is not None else state_root()
     session = _safe(str(payload.get("session_id") or ""))
     trace = root / "trace" / f"{session}.jsonl"
     rec: dict[str, Any] | None

@@ -112,6 +112,45 @@ of them can block anything.
 Every checkpoint is logged to `<state dir>/audit/<session>.jsonl` (same format as the rest of
 agent-router, plus `agent_type`, `agent_id` and `tool_use_id`).
 
+## Conductor
+
+`/agent-router-fp:analyze <question>` runs one analysis end to end, so the steps around the agent
+are the same every time. The skill (`plugin/skills/analyze/SKILL.md`) sequences them; the
+deterministic parts live in `conduct.py` (run through `plugin/bin/conduct`), which the MCP tools
+`route` and `verify_summary` share logic with.
+
+1. **Health**: the `doctor` checks. A `FAIL` stops the run; a cache-sourced plugin root is
+   reported once as a possibly stale copy.
+2. **Preflight**: `route` on the question. Not a first-principles question: it says so and stops,
+   unless you insist.
+3. **Compose**: the delegating prompt follows the agent's Input Contract (the question verbatim
+   as the problem statement; domain, key constraints and known ground truths only if you give
+   them) plus one line naming the calculator tools when the plugin serves them. It adds no other
+   instruction. `compose` also leaves a hand-off record under `<state dir>/conductor/`, so the
+   trace marks that run's `delegation` record `launched_by: conductor`.
+4. **Delegate**: one `Agent` call with the composed prompt, verbatim.
+5. **Verify**: the analysis is read against the published summary contract.
+6. **Report**: the Answer excerpt, conclusion and confidence, whether the Self-Audit Gate
+   cleared, `contract_status`, the ground truths not read at source, and the paths to the
+   analysis, its reader report and the trace.
+
+It never blocks and never edits: the analysis is only read, a non-valid contract is reported as
+it is, and the agent is not re-run. The delegation nudge stays silent for prompts that start with
+`/agent-router-fp:`, so the run is not delegated twice.
+
+```bash
+claude --plugin-dir ~/Projects/first-principles-skill/first-principles \
+       --plugin-dir ~/Projects/agent-router/integrations/first-principles/plugin
+# then, in the session:
+/agent-router-fp:analyze Is a four-day school week a good idea, or do we just assume five days?
+```
+
+Other `conduct.py` sub-commands (`plugin/bin/conduct <sub-command>`): `preflight "<q>"`,
+`compose "<q>" [--mode focused-<technique>] [--domain D] [--constraint C] [--ground-truth G]`,
+`verify <analysis>`, `latest-analysis [--cwd DIR]`, and `record-root <plugin dir>`, which writes
+`<state dir>/integration/<plugin>.root` so hooks and the trace on this machine read that tree
+instead of the plugin cache (the same effect as `FP_PLUGIN_ROOT`, without the environment).
+
 ## Decision trace
 
 `bin/trace` runs on `SubagentStart` / `SubagentStop` for `first-principles:first-principles`,
@@ -217,6 +256,7 @@ reference (second-order thinking, Phase 2 inversion).
 | `calibration.json`, `calibrate.py` | classifier parameters, then one threshold per entry, all fit on the `cal` split only |
 | `plugin/` | the Claude Code plugin: hooks, `.mcp.json`, `bin/hook`, `bin/mcp`, `bin/trace` |
 | `measure_calc_fit.py`, `CALC-SCRIPT-COVERAGE.md` | offline: how many recorded interpreter calls `calc_expression` / `calc_script` accept, and whether the calculator's figures agree with the real output |
+| `conduct.py`, `plugin/skills/analyze/` | the conductor: helper sub-commands and the `/agent-router-fp:analyze` skill |
 | `trace.py` | the decision trace: hook handler, analysis parser, `--replay`, `--report` |
 | `battery.py` | live A/B: first-principles' routing catalog with and without this plugin |
 | `run_examples.py` | runs the plugin's worked examples (read from `<plugin root>/<examples_dir>`) through the agent and tabulates every router decision |
