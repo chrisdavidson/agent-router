@@ -23,7 +23,8 @@ through a quoted heredoc so it stays verbatim:
    from the plugin cache, tell the user once that a stale installed copy of the agent may run, and
    that `FP_PLUGIN_ROOT=<plugin dir>` or `"${CLAUDE_PLUGIN_ROOT}/bin/conduct" record-root <plugin dir>`
    fixes it; then continue.
-2. **Preflight.** Call `mcp__plugin_agent-router-fp_agent_router__route` with the question
+2. **Preflight.** Call `mcp__plugin_agent-router-fp_agent_router__route` with `text` set to the
+   question
    (fallback: `"${CLAUDE_PLUGIN_ROOT}/bin/conduct" preflight`). If it does not choose the
    first-principles agent, say this is not a first-principles question and stop, unless the user's
    text insists on an analysis.

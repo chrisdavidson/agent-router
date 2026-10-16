@@ -279,8 +279,11 @@ def test_the_tools_answer_json_over_mcp_and_errors_become_tool_errors(tmp_path):
         "tool",
         "tool_input_json",
         "agent_type",
+        "question",
     }
-    assert tools["route"].input_schema["required"] == ["text"]
+    # either `text` or `question` names the step, so neither is schema-required; the tool
+    # itself rejects a call with neither (test_mcp_route_accepts_question_as_another_name_for_text)
+    assert "required" not in tools["route"].input_schema
     assert tools["verify_summary"].input_schema["required"] == ["path"]
 
     res = _call(server, "verify_summary", {"path": ".first-principles/live-estimate-fermi.md"})

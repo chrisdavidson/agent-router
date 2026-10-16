@@ -427,3 +427,19 @@ def test_sdk_parity_serves_calc_script(tmp_path):
     assert res["content"][0]["text"] == "x ** 10 = 1024"
     res = asyncio.run(tools["calc_script"].handler({"script": "while 1: pass"}))
     assert res["is_error"] is True and "while loop" in res["content"][0]["text"]
+
+
+def test_mcp_route_accepts_question_as_another_name_for_text(tmp_path, monkeypatch):
+    # a live conductor run first called route with `question` and had to retry
+    from agent_router import integration_tools as it
+    from agent_router.adapters import mcp_stdio
+
+    monkeypatch.setenv("AGENT_ROUTER_INTEGRATION", str(INTEG))
+    seen = []
+    monkeypatch.setattr(it, "route", lambda step, *rest: seen.append(step) or {"action": "native"})
+    server = mcp_stdio.build_server(tmp_path, ["route"])
+    asyncio.run(server.call_tool("route", {"question": "why five days?"}))
+    asyncio.run(server.call_tool("route", {"text": "why four days?"}))
+    assert seen == ["why five days?", "why four days?"]
+    with pytest.raises(Exception, match="text"):
+        asyncio.run(server.call_tool("route", {}))

@@ -168,19 +168,24 @@ def build_server(root: Path, tools: Iterable[str] = TOOLS) -> Any:
         @_expected
         @_as_json
         def route_tool(
-            text: str,
+            text: str | None = None,
             point: str = "prompt",
             tool: str | None = None,
             tool_input_json: str | dict[str, Any] | None = None,
             agent_type: str | None = None,
+            question: str | None = None,
         ) -> str:
             """Routing decision for one step, as JSON (what `agent-router route --json` prints):
             action, entry_id, choice, probabilities, confidence, reason, hint, threshold.
             `point` is prompt, tool or skill; for a tool step give `tool` (e.g. Bash) and its
             input as a JSON object (or its JSON text) in `tool_input_json`; `agent_type` is the
             subagent making the call (entries are scoped to one), omitted on the main thread.
-            Read-only and advisory."""
-            return it.route(text, point, tool, tool_input_json, agent_type)
+            Read-only and advisory. `question` is accepted as another name for `text` (a live
+            conductor run first called it that and had to retry)."""
+            if text is None and question is None:  # "" is valid: a tool step has no prompt text
+                raise ValueError("give the step to route as `text`")
+            step = text if text is not None else question
+            return it.route(step, point, tool, tool_input_json, agent_type)
 
     if "verify_summary" in wanted:
 
