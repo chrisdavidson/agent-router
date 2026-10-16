@@ -1,6 +1,6 @@
 ---
 name: analyze
-description: Runs one complete first-principles analysis of a question as a conducted workflow. Checks the install, asks the router whether the question belongs to the first-principles agent, composes the delegating prompt, hands it to that agent once, then reads the finished analysis against the published summary contract and reports the answer, confidence, gate result, contract status and file paths. Never edits, re-scores or re-runs the analysis. Invoked only as a slash command.
+description: Runs one complete first-principles analysis of a question as a conducted workflow. Composes the delegating prompt (recording the install checks and the router's preflight, which never stop the run), hands it to the first-principles agent once, then reads the finished analysis against the published summary contract and shows the same rendered report a plain-prompt run ends with (answer, confidence, gate result, contract status and file paths). Never edits, re-scores or re-runs the analysis. Invoked only as a slash command.
 argument-hint: <question to analyze from first principles>
 disable-model-invocation: true
 ---
@@ -10,44 +10,36 @@ disable-model-invocation: true
 The question is: $ARGUMENTS
 
 You sequence the run. The first-principles agent owns the analysis; you never edit, rewrite,
-re-score or "fix" it, and you run the agent at most once per invocation. Nothing here blocks.
-Stop at a step only where it says so.
+re-score or "fix" it, and you run the agent at most once per invocation. Nothing here blocks or
+stops the run: install problems and an out-of-scope question are recorded at compose time and
+shown in the report, exactly as for a run started from a plain prompt.
 
 Helper: `"${CLAUDE_PLUGIN_ROOT}/bin/conduct"` prints one JSON object. Pass the question
 through a quoted heredoc so it stays verbatim:
 `"${CLAUDE_PLUGIN_ROOT}/bin/conduct" compose "$(cat <<'Q'` ... `Q` `)"`.
 
-1. **Health.** Call the MCP tool `mcp__plugin_agent-router-fp_agent_router__doctor`. If it is
-   unavailable, run `"${CLAUDE_PLUGIN_ROOT}/bin/conduct" doctor` with Bash. If any
-   check is `FAIL`, show the failing lines and stop. If the plugin root is a `WARN` saying it came
-   from the plugin cache, tell the user once that a stale installed copy of the agent may run, and
-   that `FP_PLUGIN_ROOT=<plugin dir>` or `"${CLAUDE_PLUGIN_ROOT}/bin/conduct" record-root <plugin dir>`
-   fixes it; then continue.
-2. **Preflight.** Call `mcp__plugin_agent-router-fp_agent_router__route` with `text` set to the
-   question
-   (fallback: `"${CLAUDE_PLUGIN_ROOT}/bin/conduct" preflight`). If it does not choose the
-   first-principles agent, say this is not a first-principles question and stop, unless the user's
-   text insists on an analysis.
-3. **Compose.** Run `"${CLAUDE_PLUGIN_ROOT}/bin/conduct" compose` with the question (add
+1. **Compose.** Run `"${CLAUDE_PLUGIN_ROOT}/bin/conduct" compose` with the question (add
    `--mode focused-<technique>` only if the user asked for one technique). Use Bash, not an MCP
-   tool: it also writes the hand-off record the trace uses. Read `agent_type` and `prompt` from
-   its output.
-4. **Delegate.** Call the Agent tool with `subagent_type` set to the composed `agent_type` and
-   `prompt` set to the composed `prompt`, character for character. Add no instructions.
-5. **Verify.** Take the analysis path from the agent's final message, or from
-   `"${CLAUDE_PLUGIN_ROOT}/bin/conduct" latest-analysis`. Call
-   `mcp__plugin_agent-router-fp_agent_router__verify_summary` with that path (fallback:
-   `"${CLAUDE_PLUGIN_ROOT}/bin/conduct" verify <path>`, which also lists the reader report and
-   trace paths). No analysis file: say so and report the agent's final message as it is.
-6. **Report** to the user, from the verification result and nothing re-derived:
-   - the Answer excerpt;
-   - the conclusion and its confidence;
-   - whether the Self-Audit Gate cleared;
-   - `contract_status`, and when it is not `valid` one line on what that means: the summary block
-     could not be read or did not match the published schema, so the figures above are unverified;
-   - the number of ground truths not read at source;
-   - paths: the analysis, its reader report (`report-<UTC>.md` / `.pdf` beside it, if present) and
-     the trace directory.
+   tool: it also runs the install checks and the router's preflight and writes the hand-off
+   record the trace and the report use. Read `agent_type`, `prompt` and `sha256` from its output.
+   Say nothing about its `checks`; the report carries them.
+2. **Delegate.** Call the Agent tool with `subagent_type` set to the composed `agent_type` and
+   `prompt` set to the composed `prompt`, character for character. Add no instructions. If the
+   agent runs in the background, wait for its completion notification before step 3; report
+   nothing about the analysis before then.
+3. **Report.** Run
+   `"${CLAUDE_PLUGIN_ROOT}/bin/conduct" report --markdown --handoff <sha256> <analysis path>`
+   with Bash, taking the path from the agent's final message (leave it out and the newest
+   analysis in the working directory is used). If Bash is unavailable, call
+   `mcp__plugin_agent-router-fp_agent_router__verify_summary` with the path and `handoff` set to
+   the `sha256`, and use its `report_markdown`. Your reply about the analysis is this report exactly as given, with
+   nothing before or after it: do not summarise, reword, re-derive or add to it, and do not edit
+   or re-run the analysis.
 
-   If the contract is not valid, report it as it is. Do not repair the analysis or run the agent
-   again.
+   The report is the same one a run started from a plain prompt ends with: the Answer (marked
+   when it is cut), the conclusion and its confidence, whether the Self-Audit Gate cleared, the
+   ground truths not read at source, the `contract_status` (with what it means when it is not
+   `valid`), any install check or router preflight that was not clean, and the paths of the
+   analysis, its reader report and the trace. If it says no analysis file was found, show the
+   agent's final message unchanged after it. If the contract is not valid, report it as it is.
+   Do not repair the analysis or run the agent again.

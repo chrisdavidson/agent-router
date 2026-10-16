@@ -77,3 +77,35 @@ a hand-back. Re-reading the two failed captures with the fix gives `failed` with
 ## Total live cost
 
 $1.35 (VERIFY-01) + $2.95 (failed first attempt) + $3.57 (rerun) = **$7.87**.
+
+## Route parity: conductor vs plain prompt (2026-10-16)
+
+Branch `feat/route-parity`. The same question as VERIFY-01, three runs per route, run one at a
+time and alternating (Route 1 `/agent-router-fp:analyze <q>`, Route 2 the plain question), with
+`sonnet`, both plugins from their working trees via `--plugin-dir`, an isolated state dir per
+run and `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=1800000`. These are recorded observations, N = 3
+per route, not gates.
+
+| Run | Route | Prompt sha256 | Launcher (record / trace) | Reply = report | Contract | Confidence | Gate | Ground truths (not read at source) | Assumptions | Chains | Agent s | Cost |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| v1a | 1 | `6f87bae330…` | conductor / conductor | exact | valid | MEDIUM | cleared | 4 (3) | 11 | 4 | 725 | $1.91 |
+| v1b | 1 | `6f87bae330…` | conductor / conductor | exact | valid | LOW | cleared | 8 (1) | 10 | 4 | 724 | $1.88 |
+| v1c | 1 | `6f87bae330…` | conductor / conductor | exact | valid | MEDIUM | cleared | 6 (3) | 10 | 4 | 526 | $1.51 |
+| v2a | 2 | `6f87bae330…` | router-hook / router-hook | blank line only | valid | MEDIUM | cleared | 5 (1) | 13 | 5 | 753 | $2.02 |
+| v2b | 2 | `6f87bae330…` | router-hook / router-hook | exact | valid | MEDIUM | cleared | 7 (1) | 15 | 5 | 613 | $1.63 |
+| v2c | 2 | `6f87bae330…` | router-hook / router-hook | exact | valid | MEDIUM | cleared | 7 (5) | 11 | 4 | 551 | $1.69 |
+
+- **Same input:** all six agents got the byte-identical prompt. In Route 2 the main session
+  wrote three different prompts of its own, and the hand-off hook replaced each one.
+- **Same output form:** the reply equalled `conduct report` exactly in 5 of 6 runs. In `v2a`
+  the model collapsed a double blank line the renderer left after a cut Answer; every word
+  matched. The renderer no longer emits that double blank.
+- **Analysis variation:** the counts and the trial designs vary as much within a route as across
+  the two routes. With identical prompts and agent, the route cannot be the cause; this is the
+  agent's own run-to-run spread. Every recommendation took the same direction: no outright
+  switch; measure first, then a gated trial.
+- An earlier pair before the wording fix (`r2`) added a lead-in sentence and a caveats list
+  around the report. That led to the "nothing before or after it" instruction both routes now
+  share; `r2b` and v2a–v2c followed it.
+- **Total live cost of this section:** $1.85 (r2) + $1.51 (r1) + $1.95 (r2b) + $10.64 (v runs)
+  = **$15.95**.

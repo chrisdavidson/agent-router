@@ -548,8 +548,10 @@ def wiring_problems(
 ) -> list[str]:
     """What is wrong with the plugin's static host config: hooks.json commands that are not
     executable files, matchers that no longer name the manifest's agent / calculator, a trace
-    script whose fast-path default is another agent, and a missing or non-executable MCP
-    command."""
+    script whose fast-path default is another agent, a missing hand-off hook
+    (``bin/handoff-hook`` on both PreToolUse and PostToolUse of the ``Agent`` call: without
+    either half a plain-prompt run does not get the conductor's prompt or report), and a missing
+    or non-executable MCP command."""
     problems: list[str] = []
     root_var = "${CLAUDE_PLUGIN_ROOT}"
     path = plugin / "hooks" / "hooks.json"
@@ -560,12 +562,19 @@ def wiring_problems(
     except (OSError, ValueError, KeyError, TypeError) as exc:
         return [f"cannot read {path}: {exc}"]
     commands: set[str] = set()
+    handoff: set[str] = set()
     for event, groups in hooks.items():
         for group in groups if isinstance(groups, list) else []:
+            names = set()
             for hook in group.get("hooks", []):
                 cmd = str(hook.get("command", ""))
                 commands.add(cmd)
+                names.add(Path(cmd).name)
             matcher = group.get("matcher")
+            if "handoff-hook" in names:
+                if "Agent" in str(matcher).split("|"):
+                    handoff.add(event)
+                continue  # the hand-off pair is checked below, not as a trace group
             if event in ("SubagentStart", "SubagentStop") and matcher != agent_type:
                 problems.append(f"{event} matcher {matcher!r} is not the agent type {agent_type!r}")
             if event in ("PostToolUse", "PostToolUseFailure") and calc_tool not in str(
@@ -578,6 +587,9 @@ def wiring_problems(
                 and calc_script_tool not in str(matcher).split("|")
             ):
                 problems.append(f"{event} matcher lacks the script tool {calc_script_tool}")
+    for event in ("PreToolUse", "PostToolUse"):
+        if event not in handoff:
+            problems.append(f"bin/handoff-hook is not wired on {event} for the Agent tool")
     try:
         mcp = json.loads((plugin / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         commands.update(str(s.get("command", "")) for s in mcp.values())
@@ -587,13 +599,15 @@ def wiring_problems(
         target = Path(cmd.replace(root_var, str(plugin)))
         if not _is_exe(target):
             problems.append(f"command {cmd} is not an executable file ({target})")
-    trace = plugin / "bin" / "trace"
-    try:
-        defaults = re.findall(r"FP_AGENT_TYPE:-([^}\"]+)\}", trace.read_text(encoding="utf-8"))
-    except OSError:
-        defaults = []
-    if defaults and defaults != [agent_type]:
-        problems.append(f"bin/trace fast-path default {defaults} is not {agent_type!r}")
+    for name in ("trace", "handoff-hook"):
+        script = plugin / "bin" / name
+        try:
+            text = script.read_text(encoding="utf-8")
+            defaults = re.findall(r"FP_AGENT_TYPE:-([^}\"]+)\}", text)
+        except OSError:
+            defaults = []
+        if defaults and defaults != [agent_type]:
+            problems.append(f"bin/{name} fast-path default {defaults} is not {agent_type!r}")
     return problems
 
 

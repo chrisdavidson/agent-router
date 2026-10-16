@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# agent-router-fp hand-off hooks: give a run started from a plain prompt the conductor's shape.
+# PreToolUse on the main session's Agent call to the first-principles agent: its prompt becomes
+# the one the conductor composes (updatedInput). PostToolUse on that call: the main session is
+# handed the same report the conductor skill shows. Steering only, never a deny or a block (D-02):
+# conduct.py hook emits updatedInput or additionalContext, else {}. Fails open: {} on any error.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
+# shellcheck source=_resolve.sh
+. "$here/_resolve.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
+# shellcheck source=_failopen.sh
+. "$here/_failopen.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
+payload="$(cat)"
+# Fast path: only the main session's Agent call to the integrated agent is handled. The agent
+# type is a literal here for the same reason as in bin/trace; FP_AGENT_TYPE overrides it.
+agent="${FP_AGENT_TYPE:-first-principles:first-principles}"
+handoff_re='"subagent_type"[[:space:]]*:[[:space:]]*"'"$agent"'"'
+if [ -n "$AGENT_ROUTER_DISABLED" ] || ! [[ $payload =~ $handoff_re ]]; then
+  echo '{}'
+  exit 0
+fi
+ar_resolve_python || { echo '{}'; exit 0; }
+export AGENT_ROUTER_INTEGRATION="$integ"
+export AGENT_ROUTER_MODE=advisory
+FAILOPEN_PY="$AR_PY"
+fail_open_run "$AR_PY" "$integ/conduct.py" hook

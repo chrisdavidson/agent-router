@@ -192,13 +192,15 @@ def build_server(root: Path, tools: Iterable[str] = TOOLS) -> Any:
         @server.tool(name="verify_summary")
         @_expected
         @_as_json
-        def verify_summary_tool(path: str) -> str:
+        def verify_summary_tool(path: str, handoff: str | None = None) -> str:
             """Check an analysis file against the plugin's published summary contract. Returns
             JSON: contract_status, violations, the schema (path, source, version), the
             decisions read from the block (run_mode, conclusion, gate, unverified ground
-            truths, assumption counts) and the report's Answer section excerpt. Read-only; `path`
-            must be inside the working directory."""
-            return it.verify_summary(path, root=root)
+            truths, assumption counts), the report's Answer section excerpt, the paths of the
+            analysis, its reader report and the trace, and `report_markdown`, the rendered report.
+            `handoff` (the composed prompt's sha256) adds that run's recorded install and routing
+            checks. Read-only; `path` must be inside the working directory."""
+            return it.verify_summary(path, root=root, handoff=handoff)
 
     if "doctor" in wanted:
 

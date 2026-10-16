@@ -103,7 +103,9 @@ The MCP server (`bin/mcp`) also serves three read-only tools for a conductor, as
 calls instead of shell commands: `route` (the decision `agent-router route --json` prints, with
 this integration's catalog, manifest variables and calibration; advisory, nothing is audited),
 `verify_summary(path)` (the report's `contract_status`, violations, the schema used, the
-decisions read from the summary block and an excerpt of its `## Answer` section; the path must
+decisions read from the summary block, an excerpt of its `## Answer` section with
+`answer_truncated` when it is cut, the paths of the analysis, its reader report and the trace,
+and `report_markdown`, the rendered report both ways of starting a run end with; the path must
 be inside the working directory) and `doctor` (the checks of `agent-router doctor`). They are
 served only because `bin/mcp` exports `AGENT_ROUTER_INTEGRATION`; a bare `agent-router mcp`
 serves the catalog tools and `calc_script`. A failure is a tool error, never a crash, and none
@@ -119,20 +121,21 @@ are the same every time. The skill (`plugin/skills/analyze/SKILL.md`) sequences 
 deterministic parts live in `conduct.py` (run through `plugin/bin/conduct`), which the MCP tools
 `route` and `verify_summary` share logic with.
 
-1. **Health**: the `doctor` checks. A `FAIL` stops the run; a cache-sourced plugin root is
-   reported once as a possibly stale copy.
-2. **Preflight**: `route` on the question. Not a first-principles question: it says so and stops,
-   unless you insist.
-3. **Compose**: the delegating prompt follows the agent's Input Contract (the question verbatim
+1. **Compose**: the delegating prompt follows the agent's Input Contract (the question verbatim
    as the problem statement; domain, key constraints and known ground truths only if you give
    them) plus one line naming the calculator tools when the plugin serves them. It adds no other
-   instruction. `compose` also leaves a hand-off record under `<state dir>/conductor/`, so the
-   trace marks that run's `delegation` record `launched_by: conductor`.
-4. **Delegate**: one `Agent` call with the composed prompt, verbatim.
-5. **Verify**: the analysis is read against the published summary contract.
-6. **Report**: the Answer excerpt, conclusion and confidence, whether the Self-Audit Gate
-   cleared, `contract_status`, the ground truths not read at source, and the paths to the
-   analysis, its reader report and the trace.
+   instruction. `compose` also runs the `doctor` checks and the router's preflight on the
+   question (each time-bounded) and leaves both, with the prompt's hash, in a hand-off record
+   under `<state dir>/conductor/`, so the trace marks that run `launched_by: conductor`. Neither
+   check stops the run: what is not clean is shown in the report.
+2. **Delegate**: one `Agent` call with the composed prompt, verbatim.
+3. **Report**: `conduct report --markdown --handoff <sha256> <analysis>` reads the analysis against the published
+   summary contract and renders one report, which the skill shows verbatim: the Answer excerpt
+   (marked when it is cut at 1,500 characters), conclusion and confidence, whether the
+   Self-Audit Gate cleared, the ground truths not read at source, `contract_status` (with what
+   it means when it is not `valid`), any install check or router preflight that was not clean
+   ("analysed anyway"), and the paths to the analysis, its reader report and the trace. A
+   background run is reported once its completion notification arrives.
 
 It never blocks and never edits: the analysis is only read, a non-valid contract is reported as
 it is, and the agent is not re-run. The delegation nudge stays silent for prompts that start with
@@ -145,6 +148,32 @@ claude --plugin-dir ~/Projects/first-principles-skill/first-principles \
 /agent-router-fp:analyze Is a four-day school week a good idea, or do we just assume five days?
 ```
 
+### The same run from a plain prompt
+
+You do not need the slash command. Ask the question in plain words and, when the router routes
+it to the agent, the hand-off hooks (`plugin/bin/handoff-hook`, steering only, never a deny or a
+block) give the run the conductor's shape, so both ways end in the same prompt and the same
+report:
+
+- **Same prompt** (`PreToolUse` on the main session's `Agent` call): the prompt is rewritten
+  (`updatedInput`) to the one `compose` builds. The question is your prompt verbatim when the
+  router routed this turn's prompt, as the skill passes its argument verbatim; otherwise the
+  main session's own prompt. A prompt `compose` already wrote is left alone. The hand-off record
+  says `launcher: router-hook`, and the trace's `run_end` carries `launched_by`.
+- **Same report** (`PostToolUse` on that call): a foreground run is handed the rendered report
+  with the instruction to show it verbatim; a background run (the host's default) is handed the
+  `conduct report --markdown --since <launch>` command to run when the completion notification
+  arrives. Both are the report the skill shows, from the same renderer. A conductor run is left
+  to the skill, so it is reported once.
+
+Install problems and out-of-scope questions are handled the same way too: neither route stops.
+Both record the `doctor` checks and the router's preflight at compose time and show whatever is
+not clean in the report, so a question the router would not have routed reads "analysed anyway"
+whichever way it was started. One limit is inherent: if the install is so broken that the hooks
+cannot run at all, a plain-prompt run proceeds without them, and its report is then the main
+session's own; `doctor` fails the hooks wiring check when either half of the hand-off pair is
+missing. A report whose run has no hand-off record says "Run checks: not recorded".
+
 In print mode (`claude -p "/agent-router-fp:analyze ..."`) the host runs the agent in the
 background and stops it 10 minutes after the main session's last turn. The conductor waits for
 the agent, so a run under 10 minutes is unaffected (the first live run took 6.3), but a longer
@@ -154,7 +183,8 @@ sessions are not affected.
 
 Other `conduct.py` sub-commands (`plugin/bin/conduct <sub-command>`): `preflight "<q>"`,
 `compose "<q>" [--mode focused-<technique>] [--domain D] [--constraint C] [--ground-truth G]`,
-`verify <analysis>`, `latest-analysis [--cwd DIR]`, `doctor`, and `record-root <plugin dir>`, which writes
+`verify <analysis>`, `report [<analysis>] [--since EPOCH] [--markdown]`, `latest-analysis [--cwd DIR]`,
+`hook` (the hand-off hooks: hook JSON on stdin), `doctor`, and `record-root <plugin dir>`, which writes
 `<state dir>/integration/<plugin>.root` so hooks and the trace on this machine read that tree
 instead of the plugin cache (the same effect as `FP_PLUGIN_ROOT`, without the environment).
 
@@ -261,7 +291,7 @@ reference (second-order thinking, Phase 2 inversion).
 | `catalog.yaml` | the two entries agent-router may point at (each scoped to one agent context, with its own threshold), plus the `none` exemplars. Targets are `${...}` variables filled from the manifest |
 | `eval_set.yaml` | `cal` cases written for this integration; `test` holdout = first-principles' own routing catalog (13 P, 20 N) plus Bash calls inside the agent |
 | `calibration.json`, `calibrate.py` | classifier parameters, then one threshold per entry, all fit on the `cal` split only |
-| `plugin/` | the Claude Code plugin: hooks, `.mcp.json`, `bin/hook`, `bin/mcp`, `bin/trace` |
+| `plugin/` | the Claude Code plugin: hooks, `.mcp.json`, `bin/hook`, `bin/mcp`, `bin/trace`, `bin/handoff-hook` |
 | `measure_calc_fit.py`, `CALC-SCRIPT-COVERAGE.md` | offline: how many recorded interpreter calls `calc_expression` / `calc_script` accept, and whether the calculator's figures agree with the real output |
 | `conduct.py`, `plugin/skills/analyze/` | the conductor: helper sub-commands and the `/agent-router-fp:analyze` skill |
 | `trace.py` | the decision trace: hook handler, analysis parser, `--replay`, `--report` |

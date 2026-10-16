@@ -191,23 +191,210 @@ def block_decisions(block: Any) -> dict[str, Any] | None:
     }
 
 
-def answer_excerpt(text: str, limit: int = ANSWER_CHARS) -> str | None:
-    """The report's ``## Answer`` section (to the next ``##`` heading), cut at ``limit``."""
+def answer_section(text: str) -> str | None:
+    """The report's whole ``## Answer`` section (to the next ``##`` heading), or None."""
     m = _ANSWER_HEADING.search(text)
     if not m:
         return None
     rest = text[m.end() :]
     nxt = _NEXT_SECTION.search(rest)
     body = (rest[: nxt.start()] if nxt else rest).strip()
+    return body or None
+
+
+def answer_excerpt(text: str, limit: int = ANSWER_CHARS) -> str | None:
+    """The report's ``## Answer`` section (to the next ``##`` heading), cut at ``limit``."""
+    body = answer_section(text)
     return body[:limit] if body else None
 
 
-def verify_summary(path: str, *, root: Path | str | None = None) -> dict[str, Any]:
+def reader_report_paths(analysis: Path) -> dict[str, str | None]:
+    """The reader reports the agent writes beside its analysis: ``analysis-<UTC>.md`` becomes
+    ``report-<UTC>.md`` and ``report-<UTC>.pdf``. Each is the path when the file exists."""
+    name = analysis.name
+    stamp = name[len("analysis-") : -len(".md")] if name.startswith("analysis-") else None
+    if not stamp or not name.endswith(".md"):
+        return {"md": None, "pdf": None}
+    found: dict[str, str | None] = {}
+    for ext in ("md", "pdf"):
+        cand = analysis.parent / f"report-{stamp}.{ext}"
+        found[ext] = str(cand) if cand.is_file() else None
+    return found
+
+
+# --- the report a conductor shows ----------------------------------------------------------------
+#
+# One renderer for every way a run is started (the conductor skill, or a plain prompt the
+# router's hand-off hooks recognise), so the user reads the same report either way. Every line
+# comes from the verification result; nothing is re-derived from the prose.
+
+NOT_VALID_NOTE = (
+    "the summary block could not be read or did not match the published schema, so the "
+    "figures above are unverified"
+)
+
+
+def _item(label: str, value: Any) -> str:
+    """One bullet; a multi-line value's later lines are indented so they stay inside it."""
+    head, *rest = str(value).strip().split("\n")
+    return "\n".join([f"- **{label}:** {head}", *(f"  {r}" if r.strip() else "" for r in rest)])
+
+
+def check_lines(checks: Any) -> list[str]:
+    """Report lines for the run checks recorded at compose time, only for what is not clean:
+    install checks that did not all pass, a preflight that did not route the question to the
+    agent, a check that could not run, or no record at all. A clean run adds nothing."""
+    if not isinstance(checks, dict):
+        return []
+    if checks.get("missing"):
+        return [
+            "- **Run checks:** not recorded (no hand-off record for this run's prompt), so the "
+            "install and routing checks are unknown"
+        ]
+    out = []
+    health = checks.get("health") if isinstance(checks.get("health"), dict) else {}
+    if not health.get("ran"):
+        out.append(f"- **Install health:** not checked ({health.get('error') or 'unknown'})")
+    else:
+        flagged = [c for c in health.get("flagged") or [] if isinstance(c, dict)]
+        if flagged:
+            items = "; ".join(
+                f"{c.get('status')} {c.get('name')}: {c.get('detail')}" for c in flagged
+            )
+            verdict = "FAIL" if not health.get("ok") else "warnings"
+            out.append(f"- **Install health ({verdict}):** {items}")
+    pre = checks.get("preflight") if isinstance(checks.get("preflight"), dict) else {}
+    if not pre.get("ran"):
+        out.append(f"- **Router preflight:** not run ({pre.get('error') or 'unknown'})")
+    elif pre.get("delegate") is not True:
+        score, threshold = pre.get("score"), pre.get("threshold")
+        nums = (
+            f" (score {score:.2f}, threshold {threshold:.2f})"
+            if isinstance(score, (int, float)) and isinstance(threshold, (int, float))
+            else ""
+        )
+        out.append(
+            "- **Router preflight:** the router would not have routed this question to the "
+            f"agent{nums}; it was analysed anyway"
+        )
+    return out
+
+
+def _title(plugin_name: Any) -> str:
+    return f"## {plugin_name} analysis: result" if plugin_name else "## Analysis: result"
+
+
+def _gate_line(decisions: Mapping[str, Any]) -> str:
+    cleared = decisions.get("gate_cleared")
+    text = {True: "cleared", False: "not cleared"}.get(cleared, "not stated in the summary block")
+    if decisions.get("fix_repeat") is True:
+        text += " (after a Fix/Repeat pass)"
+    return text
+
+
+def render_report(result: Mapping[str, Any]) -> str:
+    """The Markdown report of one verified analysis, from ``verify_summary``'s result."""
+    decisions = result.get("decisions") if isinstance(result.get("decisions"), dict) else None
+    status = str(result.get("contract_status"))
+    plugin = result.get("plugin") if isinstance(result.get("plugin"), dict) else {}
+    lines = [_title(plugin.get("name")), ""]
+    excerpt = result.get("answer_excerpt")
+    lines.append("**Answer**")
+    lines.append("")
+    if excerpt:
+        lines.append(str(excerpt).rstrip())  # a cut can end mid-gap; no run of blank lines
+        if result.get("answer_truncated"):
+            lines.append("")
+            lines.append(
+                f"*(The Answer is cut at {ANSWER_CHARS:,} characters here; the full text is in "
+                "the analysis.)*"
+            )
+    else:
+        lines.append("*(The analysis has no `## Answer` section.)*")
+    lines.append("")
+    if decisions is not None:
+        conclusion = (
+            decisions.get("conclusion") if isinstance(decisions.get("conclusion"), dict) else {}
+        )
+        recommended = conclusion.get("recommended") or "not stated in the summary block"
+        confidence = conclusion.get("confidence") or "not stated in the summary block"
+        unverified = [str(g) for g in decisions.get("unverified_ground_truths") or []]
+        lines.append(_item("Conclusion", recommended))
+        lines.append(f"- **Confidence:** {confidence}")
+        lines.append(f"- **Self-Audit Gate:** {_gate_line(decisions)}")
+        lines.append(
+            f"- **Ground truths not read at source:** {len(unverified)}"
+            + (f" ({', '.join(unverified)})" if unverified else "")
+        )
+    else:
+        lines.append(
+            "- **Conclusion, confidence, gate, ground truths:** not available, because the "
+            "summary block could not be read"
+        )
+    contract = f"`{status}`" + ("" if status == "valid" else f": {NOT_VALID_NOTE}")
+    lines.append(f"- **Summary contract:** {contract}")
+    checks = result.get("checks")
+    lines += check_lines(checks)
+    if plugin.get("source") == "cache" and not isinstance(checks, dict):
+        lines.append(
+            f"- **Note:** the {plugin.get('name') or 'integrated'} plugin was found in the Claude "
+            "plugin cache, which can hold a stale copy of the agent"
+        )
+    paths = result.get("paths") if isinstance(result.get("paths"), dict) else {}
+    reader = paths.get("reader_report") if isinstance(paths.get("reader_report"), dict) else {}
+    found = [str(reader[k]) for k in ("md", "pdf") if reader.get(k)]
+    lines += ["", "**Files**", ""]
+    lines.append(f"- Analysis: `{paths.get('analysis')}`")
+    lines.append(
+        "- Reader report: " + (", ".join(f"`{p}`" for p in found) if found else "not found")
+    )
+    lines.append(f"- Trace: `{paths.get('trace_dir')}`")
+    return "\n".join(lines) + "\n"
+
+
+def render_missing(
+    plugin_name: str | None, final_message: str | None = None, checks: Any = None
+) -> str:
+    """The report when no analysis file exists: say so, then the agent's message as it is."""
+    out = [_title(plugin_name), "", "No analysis file was found."]
+    flagged = check_lines(checks)
+    if flagged:
+        out += ["", *flagged, ""]
+    if final_message:
+        out += ["The agent's final message, unchanged:", "", final_message.strip()]
+    return "\n".join(out) + "\n"
+
+
+HANDOFF_DIR = "conductor"
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def handoff_checks(handoff: str | None) -> dict[str, Any] | None:
+    """The run checks a hand-off record (``<state>/conductor/<handoff>.json``, written when the
+    delegating prompt was composed) carries; ``{"missing": True}`` when there is no such record,
+    None when none was asked for."""
+    if not handoff:
+        return None
+    if not _SHA256.fullmatch(handoff):
+        return {"missing": True}
+    try:
+        rec = json.loads((_state_root() / HANDOFF_DIR / f"{handoff}.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return {"missing": True}
+    checks = rec.get("checks") if isinstance(rec, dict) else None
+    return checks if isinstance(checks, dict) else {"missing": True}
+
+
+def verify_summary(
+    path: str, *, root: Path | str | None = None, handoff: str | None = None
+) -> dict[str, Any]:
     """Read the analysis at ``path`` (inside ``root``, default the working directory) against the
     plugin's published summary contract. Never raises for a bad report: that is a
-    ``contract_status``. A path outside ``root`` or unreadable is a ``ValueError``."""
+    ``contract_status``. A path outside ``root`` or unreadable is a ``ValueError``. ``handoff``
+    (the composed prompt's sha256) adds that run's recorded checks to the result and report."""
     root_path = Path(root if root is not None else os.getcwd()).resolve()
     text = read_text_inside(root_path, path)
+    analysis = (root_path / path).resolve()
     integ = _integration()
     state = _state_root()
     resolved = integ_mod.resolve(integ, state_root=state)
@@ -221,7 +408,8 @@ def verify_summary(path: str, *, root: Path | str | None = None) -> dict[str, An
     block = contract.pop("block", None)
     status = contract["contract_status"]
     usable = status in ("valid", "unsupported_version", "schema_violation")
-    return {
+    section = answer_section(text)
+    out: dict[str, Any] = {
         "contract_status": status,
         "violations": contract["violations"],
         "schema": {
@@ -232,8 +420,20 @@ def verify_summary(path: str, *, root: Path | str | None = None) -> dict[str, An
         },
         "decisions_verified": status == "valid",
         "decisions": block_decisions(block) if usable else None,
-        "answer_excerpt": answer_excerpt(text),
+        "answer_excerpt": section[:ANSWER_CHARS] if section else None,
+        "answer_truncated": bool(section) and len(section) > ANSWER_CHARS,
+        "plugin": {"name": resolved.manifest.plugin_name, **resolved.record()},
+        "paths": {
+            "analysis": str(analysis),
+            "reader_report": reader_report_paths(analysis),
+            "trace_dir": str(state / "trace"),
+        },
     }
+    checks = handoff_checks(handoff)
+    if checks is not None:
+        out["checks"] = checks
+    out["report_markdown"] = render_report(out)
+    return out
 
 
 # --- doctor ------------------------------------------------------------------------------------

@@ -279,7 +279,7 @@ def test_trace_fails_open_when_no_interpreter_resolves(lay):
 
 
 def test_the_scripts_resolve_through_the_one_helper():
-    for name in ("hook", "trace", "mcp"):
+    for name in ("hook", "trace", "mcp", "handoff-hook"):
         text = (BIN / name).read_text()
         assert "_resolve.sh" in text and ".venv" not in text.replace("checkout .venv", "")
 
