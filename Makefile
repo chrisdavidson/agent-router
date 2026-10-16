@@ -6,6 +6,8 @@ BIN     := $(VENV)/bin
 PY      := $(BIN)/python
 CLI     := $(BIN)/agent-router
 PORT    ?= 8765
+# The hooks' state root (audit/ and trace/), by the same rule as adapters/claude_code.py.
+STATE   ?= $(or $(AGENT_ROUTER_STATE_DIR),$(or $(XDG_STATE_HOME),$(HOME)/.local/state)/agent-router)
 # Offline by default. BACKEND=cascade or BACKEND=jev calls TypeSafe Jev (paid, needs a key).
 BACKEND ?= local
 Q       ?= What is 17% of 2,340 exactly?
@@ -15,7 +17,7 @@ export Q
 
 .DEFAULT_GOAL := help
 .PHONY: help venv install clean test test-model test-live bench lint format eval calibrate \
-        calibrate-cascade run route
+        calibrate-cascade run route trace
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -61,6 +63,9 @@ calibrate-cascade: ## Re-fit the cascade gate (PAID: one Jev call per cal case)
 
 run: ## Start the demo server (http://127.0.0.1:8765, override with PORT=)
 	$(CLI) demo --port $(PORT)
+
+trace: ## Trace tab over the first-principles hooks' state; follows a run live (STATE= for a saved one)
+	$(CLI) demo --port $(PORT) --catalog integrations/first-principles/catalog.yaml --state-dir "$(STATE)"
 
 route: ## Route one prompt: make route Q="..." [BACKEND=cascade]
 	$(CLI) route --backend $(BACKEND) -- "$$Q"

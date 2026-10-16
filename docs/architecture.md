@@ -150,6 +150,9 @@ Writes are locked and fail open.
 - **Trace** reads decision traces (`<session>.jsonl`) from `--trace-dir`, by default the `trace/`
   folder next to the audit folder, where an integration's record-only hooks write them
   (`integrations/first-principles/trace.py`). It interleaves the router's notes from the audit log
-  of the same session.
+  of the same session. `--state-dir <root>` sets both folders to `<root>/audit` and
+  `<root>/trace`. The tab polls `/api/trace/sessions` while it is open, so it follows a run as it
+  happens. Each session summary is cached on the file's size and mtime, so a poll re-reads only
+  what changed.
 - **Live agent timeline.** The adapter's `decision` event carries the same fields, minus `reason`.
   Its schema is in the `adapters/claude_sdk.py` docstring.

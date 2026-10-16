@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -220,6 +221,11 @@ def test_demo_has_allow_shell_and_no_host(monkeypatch):
     }
     assert cli.main(["demo", "--allow-shell"]) == 0
     assert seen["allow_shell"] is True
+    # a hook state root stands for its audit/ and trace/ folders; an explicit folder wins
+    assert cli.main(["demo", "--state-dir", "/s"]) == 0
+    assert (seen["audit_dir"], seen["trace_dir"]) == (Path("/s/audit"), Path("/s/trace"))
+    assert cli.main(["demo", "--state-dir", "/s", "--trace-dir", "/t"]) == 0
+    assert (seen["audit_dir"], seen["trace_dir"]) == (Path("/s/audit"), Path("/t"))
     with pytest.raises(SystemExit):
         cli.main(["demo", "--host", "0.0.0.0"])
 

@@ -5,9 +5,9 @@
 # handed the same report the conductor skill shows. Steering only, never a deny or a block (D-02):
 # conduct.py hook emits updatedInput or additionalContext, else {}. Fails open: {} on any error.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
 # shellcheck source=_resolve.sh
 . "$here/_resolve.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
+integ="$AR_INTEG"   # integrations/first-principles (see _resolve.sh)
 # shellcheck source=_failopen.sh
 . "$here/_failopen.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
 payload="$(cat)"

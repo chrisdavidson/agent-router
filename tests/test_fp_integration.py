@@ -778,6 +778,15 @@ def test_trace_records_whether_the_handoff_names_the_calculator(tmp_path, prompt
     assert rec["kind"] == "delegation" and rec["prompt_names_calc"] is names
 
 
+def test_trace_records_the_handoffs_description_for_the_demo_label(tmp_path):
+    payload = {"session_id": "s", "hook_event_name": "PreToolUse", "tool_name": "Agent"}
+    call = {"subagent_type": FP, "prompt": "Analyse.", "description": "Size a cabin " * 20}
+    rec = _trace().handle({**payload, "tool_input": call}, tmp_path)
+    assert rec["description"] == ("Size a cabin " * 20)[:120]
+    rec = _trace().handle({**payload, "tool_input": {"subagent_type": FP, "prompt": "x"}}, tmp_path)
+    assert "description" not in rec
+
+
 def test_trace_ignores_a_handoff_to_another_agent(tmp_path):
     call = {"subagent_type": "general-purpose", "prompt": "use the calculator"}
     payload = {"session_id": "s", "hook_event_name": "PreToolUse", "tool_name": "Agent"}

@@ -2,9 +2,9 @@
 # agent-router-fp decision trace: records what the first-principles agent decides.
 # Hook JSON on stdin, always '{}' on stdout: record-only, it never steers the agent.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
 # shellcheck source=_resolve.sh
 . "$here/_resolve.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
+integ="$AR_INTEG"   # integrations/first-principles (see _resolve.sh)
 # shellcheck source=_failopen.sh
 . "$here/_failopen.sh" 2>/dev/null || { cat >/dev/null; echo '{}'; exit 0; }
 payload="$(cat)"

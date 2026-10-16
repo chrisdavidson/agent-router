@@ -201,6 +201,104 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return out
 
 
+# -- trace session summaries -----------------------------------------------------------------
+
+RUN_STALE_AFTER = 600.0  # an unfinished run with no new record for this long is not "running"
+LABEL_CHARS = 100
+_COMMAND_RE = re.compile(r"^\s*/[\w.:-]+\s*")  # a leading slash command, e.g. the launcher's
+_GENERIC_TITLE_RE = re.compile(r"^\s*first[- ]principles analysis\s*[—–:-]?\s*", re.I)
+_H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.M)
+
+
+def _clip(text: str, n: int = LABEL_CHARS) -> str:
+    flat = " ".join(text.split())
+    return flat if len(flat) <= n else flat[: n - 1].rstrip() + "…"
+
+
+def _first_prompt(path: Path | None) -> str | None:
+    """The user's words that started the session: the audit log's first ``prompt`` record,
+    without a leading slash command, first paragraph only. Stops reading at that record."""
+    if path is None:
+        return None
+    try:
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(rec, dict) and rec.get("point") == "prompt" and rec.get("text"):
+                    text = _COMMAND_RE.sub("", str(rec["text"])).strip()
+                    para = text.split("\n\n", 1)[0].strip()
+                    return para if len(para) >= 8 else None
+    except OSError:
+        return None
+    return None
+
+
+def _report_title(records: list[dict[str, Any]]) -> str | None:
+    """The report's own title, without the generic "First-Principles Analysis —" lead."""
+    for r in reversed(records):  # the finished report's H1 first
+        if r.get("kind") == "run_end" and (m := _H1_RE.search(str(r.get("analysis_text") or ""))):
+            return _GENERIC_TITLE_RE.sub("", m.group(1), count=1).strip() or m.group(1)
+    for r in records:  # mid-run: a written section headed with the analysis title
+        for h in (r.get("headings") or [])[:1] if r.get("kind") == "section_written" else []:
+            if _GENERIC_TITLE_RE.match(str(h)):
+                return _GENERIC_TITLE_RE.sub("", str(h), count=1).strip() or None
+    return None
+
+
+def summarise_trace(records: list[dict[str, Any]], audit: Path | None) -> dict[str, Any]:
+    """What the Trace tab's session picker shows: a label a person can recognise, where it
+    came from, and whether a run is still open. Time-independent, so it can be cached."""
+    question = _first_prompt(audit)
+    description = next(
+        (
+            str(r["description"])
+            for r in records
+            if r.get("kind") == "delegation" and r.get("description")
+        ),
+        None,
+    )
+    title = _report_title(records)
+    if description:
+        label, source = description, "delegation"
+    elif question:
+        label, source = question, "prompt"
+    elif title:
+        label, source = title, "report"
+    else:
+        label, source = None, None
+    started = {r.get("agent_id") for r in records if r.get("kind") == "run_start"}
+    ended = {r.get("agent_id") for r in records if r.get("kind") == "run_end"}
+    delegated = sum(r.get("kind") == "delegation" and not r.get("agent_id") for r in records)
+    last_end = next((r for r in reversed(records) if r.get("kind") == "run_end"), {})
+    conclusion = (last_end.get("decisions") or {}).get("conclusion") or {}
+    return {
+        "label": _clip(label) if label else None,
+        "label_source": source,
+        "question": _clip(question, 400) if question else None,
+        "records": len(records),
+        "runs": len(started),
+        # one run_end per stop attempt: count each agent once
+        "finished": len(ended & started) if started else len(ended),
+        # an agent started and not stopped, or a hand-off whose agent has not started yet
+        "open": bool(started - ended) or delegated > len(started),
+        "started_at": records[0].get("ts") if records else None,
+        "last_at": records[-1].get("ts") if records else None,
+        "confidence": conclusion.get("confidence"),
+    }
+
+
+def trace_status(summary: dict[str, Any], mtime: float, now: float | None = None) -> str:
+    """``running`` while a run is open and its trace still grows, ``unfinished`` once an open run
+    has gone quiet (killed, crashed, or a print-mode session that ended), else ``finished``."""
+    if not summary.get("open"):
+        return "finished"
+    age = (time.time() if now is None else now) - mtime
+    return "running" if age < RUN_STALE_AFTER else "unfinished"
+
+
 def create_app(
     audit_dir: Path | None = None,
     *,
@@ -494,6 +592,36 @@ def create_app(
             raise HTTPException(404, f"no trace for session {name!r}")
         return path
 
+    def audit_for(session: str) -> Path | None:
+        return next(
+            (d / f"{session}.jsonl" for d in read_dirs if (d / f"{session}.jsonl").is_file()), None
+        )
+
+    # summaries keyed by (trace path) -> (signature, summary): the picker is polled every few
+    # seconds while a run is open, so a file is re-read only after it (or its audit log) changes
+    summaries: dict[Path, tuple[tuple[Any, ...], dict[str, Any]]] = {}
+
+    def session_row(path: Path) -> dict[str, Any]:
+        st = path.stat()  # before the read: a record appended after it changes the next sig
+        audit = audit_for(path.stem)
+        try:
+            audit_sig = (audit.stat().st_mtime_ns, audit.stat().st_size) if audit else None
+        except OSError:
+            audit_sig = None
+        sig = (st.st_mtime_ns, st.st_size, audit_sig)
+        cached = summaries.get(path)
+        if cached is None or cached[0] != sig:
+            cached = (sig, summarise_trace(_read_jsonl(path), audit))
+            summaries[path] = cached
+        summary = cached[1]
+        return {
+            "session": path.stem,
+            **summary,
+            "status": trace_status(summary, st.st_mtime),
+            "mtime": st.st_mtime,
+            "size": st.st_size,
+        }
+
     @app.get("/api/trace/sessions")
     def get_trace_sessions() -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
@@ -502,45 +630,19 @@ def create_app(
                 if not _SESSION_RE.match(path.stem):
                     continue
                 try:
-                    records = _read_jsonl(path)
+                    rows.append(session_row(path))
                 except OSError:
                     continue
-                title = next(
-                    (
-                        r["headings"][0]
-                        for r in records
-                        if r.get("kind") == "section_written" and r.get("headings")
-                    ),
-                    None,
-                )
-                rows.append(
-                    {
-                        "session": path.stem,
-                        "records": len(records),
-                        "runs": sum(r.get("kind") == "run_start" for r in records),
-                        # one run_end per stop attempt: count each agent once
-                        "finished": len(
-                            {
-                                r.get("agent_id") or id(r)
-                                for r in records
-                                if r.get("kind") == "run_end"
-                            }
-                        ),
-                        "title": title,
-                        "mtime": path.stat().st_mtime,
-                    }
-                )
         rows.sort(key=lambda r: r["mtime"], reverse=True)
         return {"sessions": rows, "trace_dir": str(trace_root)}
 
     @app.get("/api/trace/{session}")
     def get_trace(session: str) -> dict[str, Any]:
-        records = _read_jsonl(trace_path(session))
-        audit = next(
-            (d / f"{session}.jsonl" for d in read_dirs if (d / f"{session}.jsonl").is_file()), None
-        )
+        path = trace_path(session)
+        records = _read_jsonl(path)
+        audit = audit_for(session)
         return {
-            "session": session,
+            **session_row(path),
             "records": records,
             # the router's own decisions in the same session, to interleave with the trace
             "audit": [restore_hint(r) for r in _read_jsonl(audit)] if audit else [],
@@ -658,7 +760,7 @@ def main(
     if audit_dir is not None:
         print(f"  replaying audit logs from {audit_dir}")
     if trace_dir is not None:
-        print(f"  decision traces from {trace_dir}")
+        print(f"  decision traces from {trace_dir}: http://127.0.0.1:{port}/#trace")
     app = create_app(audit_dir, allow_shell=allow_shell, catalog=catalog, trace_dir=trace_dir)
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 

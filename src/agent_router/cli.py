@@ -382,8 +382,9 @@ def cmd_demo(args: argparse.Namespace) -> int:
         )
         return 1
     catalog = _catalog(args) if (args.catalog or os.environ.get("AGENT_ROUTER_CATALOG")) else None
-    audit_dir = Path(args.audit_dir) if args.audit_dir else None
-    trace_dir = Path(args.trace_dir) if args.trace_dir else None
+    state = Path(args.state_dir).expanduser() if args.state_dir else None
+    audit_dir = Path(args.audit_dir) if args.audit_dir else (state / "audit" if state else None)
+    trace_dir = Path(args.trace_dir) if args.trace_dir else (state / "trace" if state else None)
     server.main(  # loopback only
         port=args.port,
         allow_shell=args.allow_shell,
@@ -624,6 +625,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--trace-dir",
         help="decision-trace JSONL folder for the Trace tab (default: trace/ beside --audit-dir)",
+    )
+    p.add_argument(
+        "--state-dir",
+        help="a hook state root: its audit/ and trace/ folders, e.g. ~/.local/state/agent-router "
+        "to follow an integration's runs live (--audit-dir / --trace-dir win)",
     )
     _add_catalog(p)
     p.set_defaults(func=cmd_demo)

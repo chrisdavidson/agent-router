@@ -20,8 +20,17 @@
 # Run directly (`bash _resolve.sh`) it prints `bin <branch> <path>` and `python <branch> <path>`.
 
 _ar_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# bin -> plugin -> integrations/<name> -> integrations -> repo
-_ar_repo="$(dirname "$(dirname "$(dirname "$(dirname "$_ar_here")")")")"
+# AR_INTEG is the integration directory (conduct.py, trace.py, catalog, manifest): the one this
+# plugin directory sits in (bin -> plugin -> integrations/<name>). A marketplace install copies
+# only the plugin directory into the Claude plugin cache, where that parent holds none of it; then,
+# and only then, AGENT_ROUTER_FP_INTEGRATION names the checkout's integration directory. A
+# checkout or worktree run (--plugin-dir) always uses its own code, whatever the variable says.
+AR_INTEG="$(dirname "$(dirname "$_ar_here")")"
+if [ ! -f "$AR_INTEG/conduct.py" ] && [ -n "${AGENT_ROUTER_FP_INTEGRATION:-}" ]; then
+  AR_INTEG="$AGENT_ROUTER_FP_INTEGRATION"
+fi
+# integrations/<name> -> integrations -> repo
+_ar_repo="$(dirname "$(dirname "$AR_INTEG")")"
 
 _ar_exe() { [ -f "$1" ] && [ -x "$1" ]; }
 
