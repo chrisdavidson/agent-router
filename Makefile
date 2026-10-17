@@ -17,7 +17,7 @@ export Q
 
 .DEFAULT_GOAL := help
 .PHONY: help venv install clean test test-model test-live bench lint format eval calibrate \
-        calibrate-cascade run route trace
+        calibrate-cascade run route trace tool-gaps
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -63,6 +63,9 @@ calibrate-cascade: ## Re-fit the cascade gate (PAID: one Jev call per cal case)
 
 run: ## Start the demo server (http://127.0.0.1:8765, override with PORT=)
 	$(CLI) demo --port $(PORT)
+
+tool-gaps: ## What agents kept doing with no catalog tool (offline; writes integrations/first-principles/TOOL-GAPS.md)
+	.venv/bin/python integrations/first-principles/tool_gaps.py --write
 
 trace: ## Trace tab over the first-principles hooks' state; follows a run live (STATE= for a saved one)
 	$(CLI) demo --port $(PORT) --catalog integrations/first-principles/catalog.yaml --state-dir "$(STATE)"
