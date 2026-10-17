@@ -8,6 +8,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ### Added
 
+- **Tool-gap report over past runs.** `make tool-gaps` (`integrations/first-principles/
+  tool_gaps.py`) reads the trace hooks' records and the router's audit log from the hooks' state
+  and every saved run, puts each thing the agent did in one pattern (compute script, PDF, curl,
+  a source without the content, git, file inspection, housekeeping), joins it by `tool_use_id` to
+  what the router made of it, and writes `TOOL-GAPS.md`: the router's checkpoint outcomes, one
+  row per pattern, and the recurring needs (`--min-calls`, `--min-sessions`) as candidates for
+  new tools. Counts, hosts and construct names only, never prompt or command text; `--json`
+  writes the same figures for the candidate store that comes next. On this checkout's 71 runs:
+  multi-step compute scripts (197 calls), sources without the content (67), PDFs (42), curl
+  fetches (30) and git (22) are candidates; the router had no entry for any of them.
 - **One name and one address per session across the demo's tabs.** Replay now calls a session
   what the Trace tab does (the delegated task, else the user's words, else the report title) plus
   its short id, e.g. `First-principles LLC analysis · 12be92f6`, instead of the full id and the
