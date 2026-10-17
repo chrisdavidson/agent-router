@@ -161,14 +161,17 @@
     <div id="trace-body" hidden>
       <ol class="step-pills run-pills" id="run-pills" aria-label="Agent runs in this session" hidden></ol>
       <article class="checkpoint trace-summary" id="trace-summary" aria-live="polite"></article>
+      <!-- the same events as the log below, on the run's clock; the log is the accessible copy -->
+      <div class="trace-chart" id="trace-chart" aria-hidden="true"></div>
       <div class="trace-cols">
         <section aria-labelledby="trace-tl-h">
-          <h2 id="trace-tl-h">What the agent did</h2>
-          <ol class="timeline" id="trace-timeline"></ol>
+          <div class="pane-head"><h2 id="trace-tl-h">What the agent did</h2><span class="muted small-print" id="trace-count"></span></div>
+          <ol class="evlog trace-pane" id="trace-timeline" tabindex="0" aria-labelledby="trace-tl-h"></ol>
         </section>
         <section aria-labelledby="trace-dec-h">
-          <h2 id="trace-dec-h">What it decided</h2>
-          <div id="trace-decisions" class="decisions"></div>
+          <div class="pane-head"><h2 id="trace-dec-h">What it decided</h2></div>
+          <div class="dec-tabs" id="trace-dec-tabs" role="tablist" aria-labelledby="trace-dec-h" hidden></div>
+          <div id="trace-decisions" class="decisions trace-pane" tabindex="0"></div>
         </section>
       </div>
     </div>

@@ -905,3 +905,19 @@ def test_trace_tab_script_follows_a_live_run() -> None:
     assert "was.size !== now.size" in js and "loadTrace(sel.value, { keep: true })" in js
     assert "restoreDetails(root, prev.open[i])" in js
     assert "s.label ||" in js and "STATUS_MARK[s.status]" in js
+
+
+def test_trace_tab_is_a_time_chart_over_a_compact_log() -> None:
+    """Same reason: pin the swimlane chart, the one-line log it selects into, the folding of
+    repeated source checks, and the decisions as tabs, so the long-scroll layout cannot creep back."""
+    js = (server.STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    html = (server.STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    css = (server.STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    assert 'id="trace-chart"' in html and 'id="trace-dec-tabs" role="tablist"' in html
+    assert 'class="evlog trace-pane" id="trace-timeline"' in html
+    assert "function renderTraceChart(" in js and "function selectEvent(" in js
+    assert "LANES" in js and "laneOf(r)" in js
+    assert 'r.kind === "source"' in js and "sameAs(last.group[0], r)" in js
+    assert "trace.decTab" in js and 'role: "tab"' in js
+    assert "restoreLogScroll(prev.scroll)" in js
+    assert ".trace-pane {" in css and "overflow: auto" in css
