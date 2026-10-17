@@ -718,16 +718,31 @@ def _tool_record(payload: dict[str, Any]) -> dict[str, Any] | None:
             "command": _trunc(cmd, 200),
         }
     if tool in ("WebFetch", "WebSearch"):  # Phase 3: checking a ground truth at its source
-        text = _text_of(payload.get("tool_response"))
+        resp = payload.get("tool_response")
+        # WebFetch answers {code, codeText, bytes, result}: the page's HTTP status and size, and
+        # what a small model said about the page (the agent never sees the page itself)
+        fetched = isinstance(resp, dict) and "code" in resp
+        text = str(resp.get("result") or "") if fetched else _text_of(resp)
         url = str(inp.get("url") or "")
-        return {
+        rec: dict[str, Any] = {
             "kind": "source",
             "tool": tool,
             "host": (urlparse(url).hostname or "") if url else None,
             "target": _trunc(url or inp.get("query"), 200),
             "chars": len(text),
-            "outcome": "reported_missing" if MISSING.search(text[:600]) else "ok",
         }
+        status = resp.get("code") if fetched else None
+        if isinstance(status, int):
+            rec["status"] = status
+            rec["status_text"] = _trunc(resp.get("codeText"), 60)
+        if fetched and isinstance(resp.get("bytes"), int):
+            rec["bytes"] = resp["bytes"]
+        if isinstance(status, int) and status >= 400:
+            rec["outcome"] = "http_error"  # blocked or gone: the status says so, not the wording
+        else:
+            rec["outcome"] = "reported_missing" if MISSING.search(text[:600]) else "ok"
+        rec["excerpt"] = _trunc(text, 400)
+        return rec
     if tool == "ToolSearch":  # the agent loads deferred tools, the calculator among them
         query = str(inp.get("query") or "")
         return {"kind": "tool_loaded", "query": _trunc(query, 200), "calc": CALC_TOOL in query}
@@ -859,18 +874,26 @@ def handback_report(message: str) -> str | None:
 
 
 def _sources(run: list[dict[str, Any]]) -> dict[str, Any]:
-    """Source checks in the run: how many worked, came back without the content, or failed,
-    and the hosts that did not answer (e.g. a renamed site's old domain)."""
+    """Source checks in the run: how many worked, came back without the content, got an HTTP
+    error (403, 404, ...) or failed, and the hosts that did not answer (e.g. a renamed site's
+    old domain) or refused."""
     recs = [r for r in run if r.get("kind") == "source" or r.get("was") == "source"]
     failed = [r for r in recs if r.get("kind") == "tool_failed"]
     hosts: dict[str, int] = {}
     for r in failed:
         if r.get("host"):
             hosts[r["host"]] = hosts.get(r["host"], 0) + 1
+    http = [r for r in recs if r.get("outcome") == "http_error"]
+    http_hosts: dict[str, int] = {}
+    for r in http:
+        key = f"{r.get('host') or r.get('target')} ({r.get('status')})"
+        http_hosts[key] = http_hosts.get(key, 0) + 1
     return {
         "checks": len(recs),
         "ok": sum(1 for r in recs if r.get("outcome") == "ok"),
         "reported_missing": sum(1 for r in recs if r.get("outcome") == "reported_missing"),
+        "http_error": len(http),
+        "http_error_hosts": http_hosts,
         "failed": len(failed),
         "failed_hosts": hosts,
     }
@@ -1076,7 +1099,7 @@ def handle(
             "was": base.get("kind"),
             "error": _trunc(payload.get("error"), 200),
         }
-        for key in ("result", "outcome", "chars"):  # a failed call has no output to judge
+        for key in ("result", "outcome", "chars", "excerpt"):  # a failed call has no output
             rec.pop(key, None)
     elif event == "SubagentStop":
         agent_id = payload.get("agent_id")
@@ -1279,6 +1302,9 @@ def replay_payloads(capture: Path) -> list[tuple[dict[str, Any], str | None]]:
                         )
                     else:
                         resp = {"stdout": _text_of(body)} if c["name"] == "Bash" else body
+                        full = e.get("toolUseResult")  # WebFetch's status and size live here
+                        if c["name"] == "WebFetch" and isinstance(full, dict) and "code" in full:
+                            resp = full
                         out.append(
                             ({**p, "hook_event_name": "PostToolUse", "tool_response": resp}, ts)
                         )
