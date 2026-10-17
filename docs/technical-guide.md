@@ -114,9 +114,13 @@ The demo has four tabs:
   shows both stages.
 - **Live agent** streams a real SDK run: hooks, decisions, tool calls and the answer.
 - **Replay** steps through an audit session. `audit/sample-session.jsonl` is included.
-- **Trace** shows an integration's decision trace for a session: a summary (conclusion, gate
-  bands, delegation and calculator notes), a timeline of what the agent did with the router's notes
-  placed where they fired, and the decisions parsed from its report. It reads `--trace-dir`
+- **Trace** shows an integration's decision trace for a session: a summary (conclusion and the key
+  numbers, the other run facts folded under **More about this run**), a swimlane chart of the run
+  (agent, report, sources, compute and router lanes over the run's clock), a one-line-per-event log
+  with the router's notes placed where they fired (consecutive calculator calls, shell commands and
+  checks of one source fold into one line), and the decisions parsed from its report, one tab per
+  part. A mark in the chart selects its line in the log; the log and the decisions scroll in their
+  own panes, so the page itself stays about a screen tall. It reads `--trace-dir`
   (default: `trace/` next to `--audit-dir`); `--state-dir <root>` sets both to `<root>/audit` and
   `<root>/trace`. While open, the tab re-reads the trace every 3 seconds, so it follows a run as it
   happens (**Follow live**). Each session is labelled by the hand-off's description, else the

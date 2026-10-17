@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+### Changed
+
+- **Trace tab layout.** The tab is now about one screen instead of several: a swimlane chart of
+  the run (agent, report, sources, compute, router) over the run's clock, a one-line-per-event log
+  beside the decisions, each scrolling in its own pane, and the decisions as tabs (assumptions,
+  chains, Self-Audit Gate, ground truths, dead ends, techniques not applied, sections). Clicking a
+  mark selects its line in the log. Repeated checks of one source fold into one line, the summary
+  shows the key numbers and folds the rest under **More about this run**, and a live refresh keeps
+  the chosen tab, the selection and the log's scroll position (following the newest event when the
+  log was at its end). On a saved 57-event run the page went from about 6,500 px to about
+  1,650 px tall in a 1280×1000 window.
+
 ### Added
 
 - **Route parity.** A first-principles run started from a plain prompt now ends like one started

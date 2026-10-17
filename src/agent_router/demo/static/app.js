@@ -651,7 +651,7 @@ function initReplay() {
 /* Decision traces from an integration's record-only hooks (integrations/first-principles/
    trace.py): what the agent did, what it decided, and where the router's notes landed. */
 
-const trace = { data: null, runs: [], index: 0, sessions: null, pinned: false, timer: null };
+const trace = { data: null, runs: [], index: 0, sessions: null, pinned: false, timer: null, selected: null, decTab: "assumptions", factsOpen: false };
 const BAND_TONE = { Rigorous: "suggest", Sound: "gated", "Hand-wavy": "enforce", Absent: "enforce" };
 const CONF_TONE = { HIGH: "suggest", MEDIUM: "gated", LOW: "enforce" };
 const VERDICT_TONE = { Accept: "native", Challenge: "gated", Discard: "enforce" };
@@ -659,7 +659,11 @@ const REPORT_OP = { create: "Creates the report file", revise: "Revises the repo
 
 const chip = (text, tone = "native", title) => el("span", { class: `chip ${tone}`, title, text });
 const when = (ts) => Date.parse(ts);
-const clock = (s) => (s == null ? "" : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`);
+const clock = (s) => {
+  if (s == null) return "";
+  const r = Math.round(s); // round once, so 59.6 s reads 1:00, not 0:60
+  return `${Math.floor(r / 60)}:${String(r % 60).padStart(2, "0")}`;
+};
 /** The calculator's result text, unwrapped from its JSON envelope when it has one. */
 function calcResult(text) {
   try {
@@ -776,8 +780,9 @@ async function loadTrace(session, { keep = false } = {}) {
   const data = await api(`/api/trace/${encodeURIComponent(session)}`);
   const prev = keep && trace.data && trace.data.session === session
     ? { index: trace.index, last: trace.index === trace.runs.length - 1,
-      open: [$("#trace-timeline"), $("#trace-decisions")].map(detailsState) }
+      open: [$("#trace-timeline"), $("#trace-decisions")].map(detailsState), scroll: logScroll() }
     : null;
+  if (!prev) trace.selected = null;
   trace.data = data;
   if (trace.sessions) { const { records: _r, audit: _a, ...row } = data; trace.sessions.set(session, row); }
   const byRun = new Map();
@@ -805,7 +810,19 @@ async function loadTrace(session, { keep = false } = {}) {
   const last = trace.runs.length - 1;
   showRun(prev ? Math.min(prev.last ? last : prev.index, last) : 0);
   if (prev) [$("#trace-timeline"), $("#trace-decisions")].forEach((root, i) => restoreDetails(root, prev.open[i]));
+  if (prev) restoreLogScroll(prev.scroll);
   renderLiveLine();
+}
+
+/** Where the event log is scrolled, so a live refresh neither jumps to the top nor stops following
+    the newest event when the log was at its end. */
+function logScroll() {
+  const pane = $("#trace-timeline");
+  return { top: pane.scrollTop, end: pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 4 };
+}
+function restoreLogScroll(s) {
+  const pane = $("#trace-timeline");
+  pane.scrollTop = s.end ? pane.scrollHeight : s.top;
 }
 
 /** The router's notes that fired inside this run (or, for the prompt, just before it). */
@@ -830,6 +847,7 @@ function fixRepeat(d) {
 }
 
 function showRun(i) {
+  if (i !== trace.index) trace.selected = null;
   trace.index = i;
   const run = trace.runs[i];
   $$("#run-pills button").forEach((b, j) => (j === i ? b.setAttribute("aria-current", "step") : b.removeAttribute("aria-current")));
@@ -853,6 +871,19 @@ function calcSummary(rt) {
     parts.push(`${rt.interpreter_calls_calc_could_run} of ${plural(rt.interpreter_calls, "interpreter call")} it could run`);
   }
   return parts.join(", ");
+}
+
+/** The run facts the summary always shows; the others are under "More about this run". */
+const TRACE_KEY_STATS = ["Duration", "Elapsed", "Sections written", "Failed calls", "Source checks", "Self-Audit Gate", "Chains"];
+
+const countBy = (xs) => xs.reduce((m, x) => ({ ...m, [x]: (m[x] || 0) + 1 }), {});
+
+/** Source checks as chips: what was read, what lacked the content, what failed (hosts on hover). */
+function sourceCell(src) {
+  const hosts = Object.keys(src.failed_hosts || {});
+  return el("span", { class: "chips" }, chip(`${src.ok} ok`, "native"),
+    src.reported_missing ? chip(`${src.reported_missing} without the content`, "gated") : null,
+    src.failed ? chip(`${src.failed} failed`, "enforce", hosts.join("\n") || undefined) : null);
 }
 
 const CONTRACT_TONE = { valid: "native", unsupported_version: "gated" };
@@ -917,14 +948,14 @@ function renderTraceSummary(run) {
     ["Decisions from", decisionsCell(end)],
     ["Delegation", delegText],
     ["Calculator", calcSummary(rt)],
-    ["Self-Audit Gate", bands.length ? el("span", { class: "chips" }, ...bands.map(([n, b]) =>
-      chip(`${n} ${b}`, BAND_TONE[b], criteria[n] ? `Criterion ${n}: ${criteria[n]}` : `Criterion ${n}`))) : "–"],
+    ["Self-Audit Gate", bands.length ? el("span", { class: "chips" }, ...Object.entries(countBy(bands.map(([, b]) => b))).map(([b, n]) =>
+      chip(`${n} ${b}`, BAND_TONE[b], bands.filter(([, x]) => x === b).map(([k]) => `${k}. ${criteria[k] || "Criterion"}`).join("\n")))) : "–"],
     ["Fix/Repeat", run.end ? fixRepeat(d) : "–"],
     ["Ground truths", gt.count == null ? "–" : `${gt.count}, ${(gt.unverified || []).length} not read at source`],
     ["Chains", chains.length ? el("span", { class: "chips" }, chip(String(chains.length), "native"),
       ...Object.entries(confCount).map(([c, n]) => chip(`${n} ${c}`, CONF_TONE[c]))) : "–"],
     ["Failed calls", end.tool_failures ?? run.recs.filter((r) => r.kind === "tool_failed").length],
-    ["Source checks", end.sources ? `${end.sources.ok} ok, ${end.sources.reported_missing} without the content, ${end.sources.failed} failed${Object.keys(end.sources.failed_hosts || {}).length ? ` (${Object.keys(end.sources.failed_hosts).join(", ")})` : ""}` : "–"],
+    ["Source checks", end.sources ? sourceCell(end.sources) : "–"],
   ];
   if (!run.end) { // mid-run: only what the hooks have recorded so far
     const src = run.recs.filter((r) => r.kind === "source");
@@ -933,133 +964,222 @@ function renderTraceSummary(run) {
       ["Elapsed", ran || "–"], ...stats.filter(([k]) => ["Sections written", "References opened", "Calculator", "Failed calls"].includes(k)),
       ["Source checks", src.length ? `${ok} ok, ${src.length - ok} not ok, so far` : "–"]);
   }
-  const grid = el("div", { class: "stats" }, ...stats.map(([k, v]) => el("div", { class: "stat" },
-    el("span", { class: "stat-k", text: k }), el("span", { class: "stat-v" }, v))));
+  // the headline numbers stay in view; the rest folds away so the chart and the log start higher
+  const cell = ([k, v]) => el("div", { class: "stat" }, el("span", { class: "stat-k", text: k }), el("span", { class: "stat-v" }, v));
+  const key = (k) => TRACE_KEY_STATS.includes(k);
+  const grid = el("div", { class: "stats" }, ...stats.filter(([k]) => key(k)).map(cell));
   const foot = el("p", { class: "small-print" },
     `Session ${trace.data.session}, agent ${String(run.id).slice(0, 12)}. `,
     end.analysis ? el("code", { text: end.analysis }) : null);
-  const links = trace.data.audit && trace.data.audit.length
-    ? el("div", { class: "actions" }, el("button", { type: "button", class: "secondary",
-      onclick: () => openReplay(trace.data.session), text: `Step through the router's ${trace.data.audit.length} checkpoints` }))
-    : null;
-  box.replaceChildren(...[question, head, grid, foot, links].filter(Boolean));
+  const rest = stats.filter(([k]) => !key(k));
+  const more = el("details", { class: "facts", open: trace.factsOpen, ontoggle: (e) => { trace.factsOpen = e.target.open; } },
+    el("summary", { text: `More about this run (${rest.length})` }), el("div", { class: "stats" }, ...rest.map(cell)), foot);
+  if (trace.data.audit && trace.data.audit.length) head.append(el("button", { type: "button", class: "secondary replay-link",
+    onclick: () => openReplay(trace.data.session), text: `Step through the router's ${trace.data.audit.length} checkpoints` }));
+  box.replaceChildren(...[question, head, grid, more].filter(Boolean));
 }
 
 /** A shell call that runs an interpreter (``math`` in traces before 2026-09-30). */
 const interp = (rec) => Boolean(rec.interpreter ?? rec.math);
 
+/* The time chart's swimlanes: one row per kind of work, the router's notes on a row of their own. */
+const LANES = [["agent", "Agent"], ["report", "Report"], ["sources", "Sources"], ["compute", "Compute"], ["router", "Router"]];
+const LANE_OF = {
+  delegation: "agent", run_start: "agent", tool_loaded: "agent", run_end: "agent",
+  section_written: "report", report_op: "report", reference_read: "sources", source: "sources",
+  calc: "compute", shell: "compute",
+};
+function laneOf(rec) {
+  if (rec.kind !== "tool_failed") return LANE_OF[rec.kind] || "agent";
+  const tool = String(rec.tool_name || "");
+  if (/^Web(Fetch|Search)$/.test(tool)) return "sources";
+  if (/^(Write|Edit|MultiEdit)$/.test(tool)) return "report";
+  return /Bash|calc/.test(tool) ? "compute" : "agent";
+}
+
+/** Time since the agent started, for the log's first column. */
+function stamp(ts, t0) {
+  if (t0 == null) return "";
+  const dt = (when(ts) - t0) / 1000;
+  return dt < -0.5 ? "before" : `+${clock(Math.max(0, dt))}`;
+}
+
+/** One line of the event log: time, what happened, the detail (folded when it is long). */
+const evRow = (cls, at, kind, ...body) => el("li", { class: `ev ${cls}`.trim() },
+  el("span", { class: "ev-at", text: at }), el("span", { class: "ev-kind", text: kind }), el("div", { class: "ev-body" }, ...body));
+
 function traceItem(rec, t0) {
-  const dt = t0 == null ? 0 : (when(rec.ts) - t0) / 1000;
-  const at = t0 == null || rec.kind === "run_end" ? "" : dt < 0 ? " (before the run)" : ` +${clock(dt)}`;
-  const kind = (text, cls = "") => ({ kind: `${text}${at}`, cls });
-  let meta; let body;
+  let label; let cls = ""; let body;
   switch (rec.kind) {
     case "run_start":
-      meta = kind("Agent starts", "prompt");
+      label = "Agent starts"; cls = "prompt";
       body = el("span", { text: `first-principles run ${String(rec.agent_id || "").slice(0, 12)}` });
       break;
     case "reference_read":
-      meta = kind("Opens a reference");
+      label = "Opens a reference";
       body = el("span", {}, el("span", { class: "tool-name", text: rec.file }), ` ${rec.meaning}`);
       break;
     case "section_written":
-      meta = kind("Writes to the report", "write");
-      body = el("div", {},
+      label = "Writes to the report"; cls = "write";
+      body = el("span", {},
         el("ul", { class: "headings" }, ...(rec.headings || []).map((h) => el("li", { text: h }))),
         rec.restarts ? chip("empties the report first", "enforce") : null,
         rec.revises ? chip("also revises earlier text", "gated") : null,
         (rec.headings || []).length ? null : el("span", { class: "muted", text: `${rec.chars} characters, no heading` }));
       break;
     case "report_op":
-      meta = kind(REPORT_OP[rec.op] || "Report file", rec.op === "revise" ? "write" : "");
+      label = REPORT_OP[rec.op] || "Report file"; cls = rec.op === "revise" ? "write" : "";
       body = el("details", {}, el("summary", { text: rec.op === "revise" ? "rewrites part of the report" : "command" }), el("pre", { text: rec.command }));
       break;
     case "calc":
-      meta = kind("Exact calculator", "calc");
+      label = "Exact calculator"; cls = "calc";
       body = el("code", { text: `${rec.expression} = ${calcResult(rec.result)}` });
       break;
     case "shell":
-      meta = kind(interp(rec) ? "Runs an interpreter" : "Shell command", interp(rec) ? "math" : "");
+      label = interp(rec) ? "Runs an interpreter" : "Shell command"; cls = interp(rec) ? "math" : "";
       body = el("details", {}, el("summary", { text: oneLine(rec.command) }), el("pre", { text: rec.command }));
       break;
     case "delegation":
-      meta = kind("Main session delegates", "prompt");
+      label = "Main session delegates"; cls = "prompt";
       body = el("span", { text: `prompt of ${rec.prompt_chars} characters${rec.prompt_names_calc ? ", tells the agent to use the calculator" : ""}` });
       break;
     case "source":
-      meta = kind(rec.tool === "WebSearch" ? "Searches for a source" : "Checks a source", rec.outcome === "ok" ? "" : "gated");
+      label = rec.tool === "WebSearch" ? "Searches for a source" : "Checks a source"; cls = rec.outcome === "ok" ? "" : "gated";
       body = el("span", {}, el("code", { text: rec.host || rec.target || "" }),
         rec.outcome === "reported_missing" ? chip("page did not have it", "gated") : null);
       break;
     case "tool_loaded":
-      meta = kind("Loads tools", rec.calc ? "calc" : "");
+      label = "Loads tools"; cls = rec.calc ? "calc" : "";
       body = el("code", { text: rec.query });
       break;
     case "tool_failed":
-      meta = kind(`${rec.tool_name ? rec.tool_name.replace(/^mcp__.*__/, "") : "Call"} failed`, "err");
+      label = `${rec.tool_name ? rec.tool_name.replace(/^mcp__.*__/, "") : "Call"} failed`; cls = "err";
       body = el("span", { text: rec.error || "" });
       break;
     case "run_end":
-      meta = kind(`Agent stops after ${minutes(rec.duration_s)}${rec.stop_attempt > 1 ? ` (stop ${rec.stop_attempt})` : ""}`, "answer");
+      label = `Agent stops after ${minutes(rec.duration_s)}${rec.stop_attempt > 1 ? ` (stop ${rec.stop_attempt})` : ""}`; cls = "answer";
       body = el("details", {}, el("summary", { text: "its final message" }), el("pre", { text: rec.final_message || "" }));
       break;
     default:
-      meta = kind(rec.kind);
-      body = el("pre", { text: JSON.stringify(rec, null, 1) });
+      label = rec.kind;
+      body = el("details", {}, el("summary", { text: "record" }), el("pre", { text: JSON.stringify(rec, null, 1) }));
   }
-  return el("li", { class: `tl ${meta.cls}` }, el("div", { class: "tl-kind", text: meta.kind }), el("div", { class: "tl-body" }, body));
+  return evRow(cls, stamp(rec.ts, t0), label, body);
 }
 
 function routerItem(rec, t0) {
-  const at = t0 == null ? "" : ` +${clock((when(rec.ts) - t0) / 1000)}`;
   const name = rec.entry_id ? optionMeta(rec.entry_id).name : "an option";
   const p = rec.entry_id ? (rec.probabilities || {})[rec.entry_id] : null;
-  return el("li", { class: `tl cp ${rec.action}` },
-    el("div", { class: "tl-kind", text: `Router ${rec.action === "enforce" ? "blocks" : "note"}${at}` }),
-    el("div", { class: "tl-body" }, `Points to ${name} on the next ${rec.tool_name || "call"}: `,
-      el("b", { text: vsThreshold(p, appliedThreshold(rec)) || rec.reason })));
+  return evRow(`cp ${rec.action}`, stamp(rec.ts, t0), `Router ${rec.action === "enforce" ? "blocks" : "note"}`,
+    `Points to ${name} on the next ${rec.tool_name || "call"}: `, el("b", { text: vsThreshold(p, appliedThreshold(rec)) || rec.reason }));
 }
 
-/** Consecutive calculator calls (or plain shell calls) fold into one item. */
+/** Consecutive calculator calls, plain shell calls or checks of one source fold into one item. */
 function groupItem(recs, t0) {
-  const first = recs[0];
-  const at = t0 == null ? "" : ` +${clock((when(first.ts) - t0) / 1000)}`;
-  const calc = first.kind === "calc";
-  const label = calc ? `Exact calculator, ${recs.length} calls` : `${recs.length} shell commands`;
+  if (recs[0].kind === "source") {
+    const row = traceItem(recs[0], t0);
+    row.querySelector(".ev-kind").textContent += ` ×${recs.length}`;
+    const targets = [...new Set(recs.map((r) => r.target).filter(Boolean))];
+    if (targets.length > 1) row.querySelector(".ev-body").append(el("details", {}, el("summary", { text: `${targets.length} pages` }), el("pre", { text: targets.join("\n") })));
+    return row;
+  }
+  const calc = recs[0].kind === "calc";
+  const label = calc ? `Exact calculator ×${recs.length}` : `${recs.length} shell commands`;
   const lines = recs.map((r) => (calc ? `${r.expression} = ${calcResult(r.result)}` : oneLine(r.command)));
-  return el("li", { class: `tl ${calc ? "calc" : ""}` }, el("div", { class: "tl-kind", text: `${label}${at}` }),
-    el("div", { class: "tl-body" }, el("details", {}, el("summary", { text: lines[0].slice(0, 90) + (recs.length > 1 ? ` … and ${recs.length - 1} more` : "") }),
-      el("pre", { text: lines.join("\n") }))));
+  return evRow(calc ? "calc" : "", stamp(recs[0].ts, t0), label,
+    el("details", {}, el("summary", { text: lines[0].slice(0, 90) + (recs.length > 1 ? ` … and ${recs.length - 1} more` : "") }),
+      el("pre", { text: lines.join("\n") })));
+}
+
+/** The run's events in time order, consecutive calculator/shell calls folded, the router's notes interleaved. */
+function runItems(run) {
+  const foldable = (r) => r.kind === "calc" || r.kind === "source" || (r.kind === "shell" && !interp(r));
+  // the same source checked again and again (paging through one site) is one line, not ten
+  const sameAs = (a, r) => a.kind === r.kind && (r.kind !== "source"
+    || (a.tool === r.tool && a.outcome === r.outcome && (a.host || a.target) === (r.host || r.target)));
+  const items = [];
+  for (const r of run.recs) {
+    const last = items[items.length - 1];
+    if (foldable(r) && last && last.group && sameAs(last.group[0], r)) last.group.push(r);
+    else items.push({ ts: when(r.ts), order: 1, group: foldable(r) ? [r] : null, rec: r, lane: laneOf(r), key: `${r.ts}|${r.kind}` });
+  }
+  const marks = routerMarks(run).map((r) => ({ ts: when(r.ts), order: 0, router: r, lane: "router", key: `router|${when(r.ts)}` }));
+  return [...items, ...marks].sort((a, b) => a.ts - b.ts || a.order - b.order);
 }
 
 function renderTraceTimeline(run) {
   const t0 = run.start ? when(run.start.ts) : null;
-  const foldable = (r) => r.kind === "calc" || (r.kind === "shell" && !interp(r));
-  const items = [];
-  for (const r of run.recs) {
-    const last = items[items.length - 1];
-    if (foldable(r) && last && last.group && last.group[0].kind === r.kind) last.group.push(r);
-    else items.push({ ts: when(r.ts), order: 1, group: foldable(r) ? [r] : null, rec: r });
-  }
-  const all = [
-    ...items.map((x) => ({ ...x, node: () => (x.group && x.group.length > 1 ? groupItem(x.group, t0) : traceItem(x.rec, t0)) })),
-    ...routerMarks(run).map((r) => ({ ts: when(r.ts), order: 0, node: () => routerItem(r, t0) })),
-  ].sort((a, b) => a.ts - b.ts || a.order - b.order);
-  $("#trace-timeline").replaceChildren(...all.map((x) => {
-    const n = x.node();
-    n.dataset.key = x.rec ? `${x.rec.ts}|${x.rec.kind}` : `router|${x.ts}`;
-    return n;
-  }));
+  const list = runItems(run).map((x) => {
+    const row = x.router ? routerItem(x.router, t0)
+      : x.group && x.group.length > 1 ? groupItem(x.group, t0) : traceItem(x.rec, t0);
+    row.dataset.key = x.key;
+    return { ...x, row };
+  });
+  $("#trace-timeline").replaceChildren(...list.map((x) => x.row));
+  $("#trace-count").textContent = `${list.length} event${list.length === 1 ? "" : "s"}`;
+  renderTraceChart(run, list, t0);
+  if (trace.selected) selectEvent(trace.selected);
+}
+
+/** Swimlanes over the run's clock: each event a mark at its time, in the lane of its kind of work.
+    A mark selects its line in the log. */
+function renderTraceChart(run, list, t0) {
+  const box = $("#trace-chart");
+  if (!list.length) { box.replaceChildren(); return; }
+  const origin = t0 ?? list[0].ts;
+  const status = (trace.sessions && trace.sessions.get(trace.data.session) || {}).status;
+  const live = !run.end && status === "running" && trace.index === trace.runs.length - 1;
+  const last = Math.max(...list.map((x) => x.ts), run.end ? when(run.end.ts) : -Infinity, live ? Date.now() : -Infinity);
+  const span = Math.max(60, (last - origin) / 1000);
+  const at = (ts) => `${(Math.min(span, Math.max(0, (ts - origin) / 1000)) / span) * 100}%`;
+  const step = [15, 30, 60, 120, 300, 600, 900, 1800].find((s) => span / s <= 6) || 3600;
+  const ticks = [];
+  for (let s = 0; s <= span + 0.001; s += step) ticks.push(s);
+  const grid = () => ticks.map((s) => el("span", { class: "tc-grid", style: `left:${(s / span) * 100}%` }));
+  const rows = LANES.map(([lane, name]) => {
+    const here = list.filter((x) => x.lane === lane);
+    const marks = here.flatMap((x) => {
+      const tone = [...x.row.classList].filter((c) => c !== "ev").join(" ");
+      const tip = `${x.row.querySelector(".ev-at").textContent} ${x.row.querySelector(".ev-kind").textContent}: ${x.row.querySelector(".ev-body").textContent.slice(0, 160)}`;
+      return (x.group || [x.rec || x.router]).map((r) => el("span", {
+        class: `mk ${tone}`.trim(), style: `left:${at(when(r.ts))}`, title: tip, "data-key": x.key,
+      }));
+    });
+    const none = !here.length && lane === "router" ? el("span", { class: "tc-none", text: "no notes or blocks in this run" }) : null;
+    return [el("span", { class: "tc-lane" }, name, el("span", { class: "n", text: here.length ? String(here.length) : "" })),
+      el("div", { class: "tc-track" }, ...grid(), ...marks, none)];
+  });
+  const axis = el("div", { class: "tc-axis" }, ...ticks.map((s) => el("span", { class: "tc-tick", style: `left:${(s / span) * 100}%`, text: clock(s) })));
+  box.replaceChildren(...rows.flat(), el("span", { class: "tc-lane tc-unit", text: "min" }), axis);
+}
+
+/** Highlight one event in the chart and the log; scroll the log to it when asked. */
+function selectEvent(key, scroll = false) {
+  trace.selected = key;
+  $$("#trace-timeline .ev, #trace-chart .mk").forEach((n) => n.classList.toggle("on", n.dataset.key === key));
+  if (!scroll) return;
+  const pane = $("#trace-timeline");
+  const row = $$(".ev", pane).find((n) => n.dataset.key === key);
+  if (!row) return;
+  const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  pane.scrollTo({ top: row.offsetTop - pane.clientHeight / 3, behavior: smooth ? "smooth" : "auto" });
 }
 
 function section(title, open, ...kids) {
   return el("details", { class: "decision", open }, el("summary", { text: title }), ...kids);
 }
 
+/** What the agent decided, read from its report when it stopped: one tab per part, so a long
+    assumptions table does not push the rest off the page. */
 function renderDecisions(run) {
   const box = $("#trace-decisions");
+  const tabs = $("#trace-dec-tabs");
   const d = (run.end || {}).decisions;
   if (!d) {
+    tabs.hidden = true;
+    tabs.replaceChildren();
+    box.removeAttribute("role");
+    box.removeAttribute("aria-labelledby");
     const heads = run.recs.filter((r) => r.kind === "section_written").flatMap((r) => r.headings || []);
     box.replaceChildren(
       el("p", { class: "muted", text: run.end ? "The report file could not be read when the agent stopped." : "Decisions are read from the report when the agent stops." }),
@@ -1068,46 +1188,87 @@ function renderDecisions(run) {
     );
     return;
   }
-  const out = [];
-  if (d.re_entry) out.push(el("p", { class: `re-entry ${d.re_entry.fired ? "fired" : ""}` },
+  const notes = [];
+  if (d.re_entry) notes.push(el("p", { class: `re-entry ${d.re_entry.fired ? "fired" : ""}` },
     chip(d.re_entry.fired ? "re-entry fired" : "no re-entry", d.re_entry.fired ? "gated" : "native"), ` ${d.re_entry.disclosure}`));
-  for (const c of d.contradictions || []) out.push(el("p", { class: "re-entry" }, chip("contradiction", "enforce"), ` ${c}`));
-  if (d.run_mode) out.push(el("p", { class: "re-entry" }, chip(`mode ${d.run_mode}`, "outline"), ` ${d.run_mode_line || ""}`));
+  for (const c of d.contradictions || []) notes.push(el("p", { class: "re-entry" }, chip("contradiction", "enforce"), ` ${c}`));
+  if (d.run_mode) notes.push(el("p", { class: "re-entry" }, chip(`mode ${d.run_mode}`, "outline"), ` ${d.run_mode_line || ""}`));
   const a = d.assumptions || { rows: [] };
-  out.push(section(`Assumptions (${a.count || 0})`, true,
-    el("p", { class: "chips" }, ...Object.entries(a.by_verdict || {}).map(([v, n]) => chip(`${n} ${v}`, VERDICT_TONE[v])),
-      ...Object.entries(a.by_type || {}).map(([t, n]) => chip(`${n} ${t}`, "outline"))),
-    el("table", { class: "dtable" },
-      el("thead", {}, el("tr", {}, el("th", { text: "Assumption" }), el("th", { text: "Type" }), el("th", { text: "Verdict" }))),
-      el("tbody", {}, ...(a.rows || []).map((r) => el("tr", {}, el("td", { text: r.assumption }), el("td", { text: r.type }),
-        el("td", {}, chip(r.verdict || "?", VERDICT_TONE[r.verdict]))))))));
   const gt = d.ground_truths || {};
-  out.push(section(`Ground truths (${gt.count || 0}, ${(gt.unverified || []).length} not read at source)`, false,
-    (gt.unverified || []).length
-      ? el("p", { class: "chips" }, ...gt.unverified.map((g) => chip(g, "gated", "reported or unverified, not read at source")))
-      : el("p", { class: "muted", text: "Every ground truth was read at source." })));
-  out.push(section(`Derivation chains (${(d.chains || []).length})`, true,
-    el("ul", { class: "dlist" }, ...(d.chains || []).map((c) => el("li", {},
-      chip(c.confidence || "?", CONF_TONE[c.confidence]), " ", el("b", { text: c.id }), c.tag ? ` ${c.tag}` : "", `: ${c.title}`)))));
   const gate = d.gate || {};
-  out.push(section(`Self-Audit Gate (${gate.passes || 0} scoring pass${gate.passes === 1 ? "" : "es"})`, true,
-    el("table", { class: "dtable" }, el("tbody", {}, ...Object.entries(gate.bands || {}).map(([n, b]) => el("tr", {},
-      el("td", { text: `${n}. ${(gate.criteria || {})[n] || "Criterion"}` }), el("td", {}, chip(b, BAND_TONE[b])))))),
-    gate.result ? el("p", { class: "small-print", text: gate.result }) : null));
-  out.push(section(`Dead ends (${(d.dead_ends || []).length})`, false,
-    el("ul", { class: "dlist" }, ...(d.dead_ends || []).map((x) => el("li", { text: x })))));
-  out.push(section(`Techniques not applied (${(d.techniques_not_applied || []).length})`, false,
-    el("ul", { class: "dlist" }, ...(d.techniques_not_applied || []).map((t) => el("li", {},
-      el("b", { text: t.technique }), ` (Phase ${t.phase}): ${t.reason}`)))));
-  out.push(section(`Report sections (${(d.sections || []).length})`, false,
-    el("ol", { class: "dlist" }, ...(d.sections || []).map((h) => el("li", { text: h })))));
-  box.replaceChildren(...out);
+  const panels = [
+    ["assumptions", "Assumptions", a.count || 0, () => [
+      el("p", { class: "chips" }, ...Object.entries(a.by_verdict || {}).map(([v, n]) => chip(`${n} ${v}`, VERDICT_TONE[v])),
+        ...Object.entries(a.by_type || {}).map(([t, n]) => chip(`${n} ${t}`, "outline"))),
+      el("table", { class: "dtable" },
+        el("thead", {}, el("tr", {}, el("th", { text: "Assumption" }), el("th", { text: "Type" }), el("th", { text: "Verdict" }))),
+        el("tbody", {}, ...(a.rows || []).map((r) => el("tr", {}, el("td", { text: r.assumption }), el("td", { text: r.type }),
+          el("td", {}, chip(r.verdict || "?", VERDICT_TONE[r.verdict]))))))]],
+    ["chains", "Chains", (d.chains || []).length, () => [
+      el("ul", { class: "dlist" }, ...(d.chains || []).map((c) => el("li", {},
+        chip(c.confidence || "?", CONF_TONE[c.confidence]), " ", el("b", { text: c.id }), c.tag ? ` ${c.tag}` : "", `: ${c.title}`)))]],
+    ["gate", "Self-Audit Gate", Object.keys(gate.bands || {}).length, () => [
+      el("p", { class: "small-print muted", text: `${gate.passes || 0} scoring pass${gate.passes === 1 ? "" : "es"}` }),
+      el("table", { class: "dtable" }, el("tbody", {}, ...Object.entries(gate.bands || {}).map(([n, b]) => el("tr", {},
+        el("td", { text: `${n}. ${(gate.criteria || {})[n] || "Criterion"}` }), el("td", {}, chip(b, BAND_TONE[b])))))),
+      gate.result ? el("p", { class: "small-print", text: gate.result }) : null]],
+    ["truths", "Ground truths", gt.count || 0, () => [(gt.unverified || []).length
+      ? el("div", {}, el("p", { class: "small-print muted", text: `${gt.unverified.length} of ${gt.count || 0} not read at source:` }),
+        el("p", { class: "chips" }, ...gt.unverified.map((g) => chip(g, "gated", "reported or unverified, not read at source"))))
+      : el("p", { class: "muted", text: "Every ground truth was read at source." })]],
+    ["dead", "Dead ends", (d.dead_ends || []).length, () => [
+      el("ul", { class: "dlist" }, ...(d.dead_ends || []).map((x) => el("li", { text: x })))]],
+    ["techniques", "Not applied", (d.techniques_not_applied || []).length, () => [
+      el("ul", { class: "dlist" }, ...(d.techniques_not_applied || []).map((t) => el("li", {},
+        el("b", { text: t.technique }), ` (Phase ${t.phase}): ${t.reason}`)))]],
+    ["sections", "Sections", (d.sections || []).length, () => [
+      el("ol", { class: "dlist" }, ...(d.sections || []).map((h) => el("li", { text: h })))]],
+  ];
+  const pick = panels.find((p) => p[0] === trace.decTab) || panels[0];
+  tabs.hidden = false;
+  tabs.replaceChildren(...panels.map(([id, name, n]) => el("button", {
+    type: "button", role: "tab", id: `dtab-${id}`, "data-tab": id, "aria-controls": "trace-decisions",
+    "aria-selected": id === pick[0] ? "true" : "false", tabindex: id === pick[0] ? "0" : "-1",
+  }, name, el("span", { class: "n", text: String(n) }))));
+  box.setAttribute("role", "tabpanel");
+  box.setAttribute("aria-labelledby", `dtab-${pick[0]}`);
+  box.replaceChildren(...notes, ...pick[3]().filter(Boolean));
 }
 
 function initTrace() {
   $("#trace-select").addEventListener("change", (e) => { trace.pinned = true; loadTrace(e.target.value); });
   $("#trace-refresh").addEventListener("click", () => loadTraceSessions($("#trace-select").value));
   $("#trace-follow").addEventListener("change", () => { renderLiveLine(); if ($("#trace-follow").checked) pollTrace(); });
+  // a mark in the chart selects its line in the log; a line in the log lights its marks
+  $("#trace-chart").addEventListener("click", (e) => {
+    const mk = e.target.closest(".mk");
+    if (mk) selectEvent(mk.dataset.key, true);
+  });
+  $("#trace-timeline").addEventListener("click", (e) => {
+    const row = e.target.closest(".ev");
+    if (row && !e.target.closest("summary, pre")) selectEvent(row.dataset.key);
+  });
+  $("#trace-timeline").addEventListener("mouseover", (e) => {
+    const key = (e.target.closest(".ev") || {}).dataset?.key;
+    $$("#trace-chart .mk").forEach((m) => m.classList.toggle("hot", m.dataset.key === key));
+  });
+  $("#trace-timeline").addEventListener("mouseleave", () => $$("#trace-chart .mk.hot").forEach((m) => m.classList.remove("hot")));
+  const tabs = $("#trace-dec-tabs");
+  const pickTab = (btn) => {
+    if (!btn) return;
+    trace.decTab = btn.dataset.tab;
+    renderDecisions(trace.runs[trace.index]);
+    $(`#dtab-${trace.decTab}`).focus();
+  };
+  tabs.addEventListener("click", (e) => pickTab(e.target.closest("[role=tab]")));
+  tabs.addEventListener("keydown", (e) => { // arrow keys move between tabs, as in any tab list
+    const all = $$("[role=tab]", tabs);
+    const i = all.indexOf(document.activeElement);
+    const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: all.length - 1 }[e.key];
+    if (i < 0 || to == null) return;
+    e.preventDefault();
+    pickTab(all[(to + all.length) % all.length]);
+  });
   // poll only while the Trace tab is on screen with Follow live on; a hidden browser tab skips
   trace.timer = setInterval(() => {
     if ($("#view-trace").hidden || !$("#trace-follow").checked || document.visibilityState !== "visible") return;
