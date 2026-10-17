@@ -991,9 +991,52 @@ def test_trace_records_source_checks_and_the_hosts_that_failed(tmp_path):
         "checks": 4,
         "ok": 2,
         "reported_missing": 1,
+        "http_error": 0,
+        "http_error_hosts": {},
         "failed": 1,
         "failed_hosts": {"atb.nrel.gov": 1},
     }
+
+
+def test_trace_keeps_a_fetchs_http_status_size_and_what_the_agent_was_told(tmp_path):
+    """WebFetch answers with the page's status and size and a small model's reply; the trace
+    keeps all three, and judges a 403 by its status rather than by the reply's wording."""
+    tr = _trace()
+
+    def fetch(url, resp):
+        return tr.handle(
+            {
+                "session_id": "s",
+                "agent_type": FP,
+                "agent_id": "a1",
+                "hook_event_name": "PostToolUse",
+                "tool_name": "WebFetch",
+                "tool_input": {"url": url, "prompt": "q"},
+                "tool_response": resp,
+            },
+            tmp_path / "state",
+        )
+
+    ok = fetch(
+        "https://www.irs.gov/rp",
+        {"bytes": 106478, "code": 200, "codeText": "OK", "result": "A responsible party is X."},
+    )
+    assert (ok["status"], ok["status_text"], ok["bytes"]) == (200, "OK", 106478)
+    assert ok["outcome"] == "ok" and ok["excerpt"] == "A responsible party is X."
+    assert ok["chars"] == len("A responsible party is X.")  # the reply, not the JSON around it
+    refused = fetch(
+        "https://law.justia.com/x",
+        {"bytes": 0, "code": 403, "codeText": "Forbidden", "result": "The server returned 403."},
+    )
+    assert (refused["status"], refused["outcome"]) == (403, "http_error")
+    missing = fetch(
+        "https://www.sos.nm.gov/b",
+        {"bytes": 102811, "code": 200, "codeText": "OK", "result": "The page doesn't include it."},
+    )
+    assert missing["outcome"] == "reported_missing"
+    src = tr._sources([ok, refused, missing])
+    assert (src["ok"], src["reported_missing"], src["http_error"]) == (1, 1, 1)
+    assert src["http_error_hosts"] == {"law.justia.com (403)": 1}
 
 
 @pytest.mark.parametrize(

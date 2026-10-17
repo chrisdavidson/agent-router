@@ -139,6 +139,8 @@
       "checks": 0,
       "failed": 0,
       "failed_hosts": {},
+      "http_error": 0,
+      "http_error_hosts": {},
       "ok": 0,
       "reported_missing": 0
     },
@@ -268,6 +270,8 @@
       "checks": 0,
       "failed": 0,
       "failed_hosts": {},
+      "http_error": 0,
+      "http_error_hosts": {},
       "ok": 0,
       "reported_missing": 0
     },
@@ -398,6 +402,8 @@
       "checks": 0,
       "failed": 0,
       "failed_hosts": {},
+      "http_error": 0,
+      "http_error_hosts": {},
       "ok": 0,
       "reported_missing": 0
     },

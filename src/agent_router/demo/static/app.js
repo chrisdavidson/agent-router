@@ -887,6 +887,7 @@ function sourceCell(src) {
   const hosts = Object.keys(src.failed_hosts || {});
   return el("span", { class: "chips" }, chip(`${src.ok} ok`, "native"),
     src.reported_missing ? chip(`${src.reported_missing} without the content`, "gated") : null,
+    src.http_error ? chip(`${src.http_error} HTTP error`, "enforce", Object.keys(src.http_error_hosts || {}).join("\n") || undefined) : null,
     src.failed ? chip(`${src.failed} failed`, "enforce", hosts.join("\n") || undefined) : null);
 }
 
@@ -1058,9 +1059,11 @@ function traceItem(rec, t0) {
       body = el("span", { text: `prompt of ${rec.prompt_chars} characters${rec.prompt_names_calc ? ", tells the agent to use the calculator" : ""}` });
       break;
     case "source":
-      label = rec.tool === "WebSearch" ? "Searches for a source" : "Checks a source"; cls = rec.outcome === "ok" ? "" : "gated";
-      body = el("span", {}, el("code", { text: rec.host || rec.target || "" }),
-        rec.outcome === "reported_missing" ? chip("page did not have it", "gated") : null);
+      label = rec.tool === "WebSearch" ? "Searches for a source" : "Checks a source";
+      cls = rec.outcome === "ok" ? "" : rec.outcome === "http_error" ? "err" : "gated";
+      body = el("span", {}, el("code", { text: rec.host || rec.target || "" }), httpChip(rec),
+        rec.outcome === "reported_missing" ? chip("page did not have it", "gated") : null,
+        rec.excerpt ? el("details", {}, el("summary", { text: "what the agent was told" }), el("pre", { text: rec.excerpt })) : null);
       break;
     case "tool_loaded":
       label = "Loads tools"; cls = rec.calc ? "calc" : "";
@@ -1086,6 +1089,15 @@ function routerItem(rec, t0) {
   const p = rec.entry_id ? (rec.probabilities || {})[rec.entry_id] : null;
   return evRow(`cp ${rec.action}`, stamp(rec.ts, t0), `Router ${rec.action === "enforce" ? "blocks" : "note"}`,
     `Points to ${name} on the next ${rec.tool_name || "call"}: `, el("b", { text: vsThreshold(p, appliedThreshold(rec)) || rec.reason }));
+}
+
+/** A fetch's HTTP status and page size, e.g. "200 OK · 104 KB"; traces before 2026-10-17 have none. */
+function httpChip(rec) {
+  if (rec.status == null) return null;
+  const size = rec.bytes == null ? "" : ` · ${rec.bytes < 1024 ? `${rec.bytes} B` : `${Math.round(rec.bytes / 1024)} KB`}`;
+  const tone = rec.status < 300 ? "native" : rec.status < 400 ? "gated" : "enforce";
+  return chip(`${rec.status}${rec.status_text ? ` ${rec.status_text}` : ""}${size}`, tone,
+    rec.status < 400 ? "HTTP status and size of the page WebFetch downloaded" : "the site refused or did not have this page");
 }
 
 /** Consecutive calculator calls, plain shell calls or checks of one source fold into one item. */

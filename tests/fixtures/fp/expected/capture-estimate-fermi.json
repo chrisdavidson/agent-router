@@ -69,6 +69,7 @@
   {
     "agent_id": "replay-1",
     "chars": 612,
+    "excerpt": "# Molten-Salt Battery Summary\n\n**Definition:** Molten-salt batteries use \"molten salts as an electrolyte\" and offer high energy and power density. They exist in two main forms: non-rechargeable thermal batteries and rechargeable variants.\n\n**Key Applications:**\n- **Thermal batteries**: Military uses including nuclear weapons, proximity fuzes, and guided missiles (AIM-9 Sidewinder, Patriot, Tomahaw",
     "host": "en.wikipedia.org",
     "kind": "source",
     "outcome": "ok",
@@ -83,6 +84,7 @@
   {
     "agent_id": "replay-1",
     "chars": 612,
+    "excerpt": "# Molten Salt Storage Information from Wikipedia\n\nBased on the provided content, here are the verbatim sentences about molten salt storage specifications:\n\n**Salt Composition:**\n\"Various eutectic mixtures of different salts are used (e.g., sodium nitrate, potassium nitrate and calcium nitrate).\"\n\n**Temperature Specifications:**\n\"The salt melts at 131 °C (268 °F). It is kept liquid at 288 °C (550 °",
     "host": "en.wikipedia.org",
     "kind": "source",
     "outcome": "ok",
@@ -97,6 +99,7 @@
   {
     "agent_id": "replay-1",
     "chars": 542,
+    "excerpt": "Based on the Wikipedia article provided, I can only find one relevant specification for the solar salt mixture (60:40 sodium nitrate/potassium nitrate):\n\n\"60:40 mixture of sodium nitrate and potassium nitrate is a liquid between 260 and 550 °C (500 and 1,022 °F). It has a heat of fusion of 161 J/g, and a heat capacity of 1.53 J/(g·K).\"\n\nThe article does not provide information about the density, c",
     "host": "en.wikipedia.org",
     "kind": "source",
     "outcome": "ok",
@@ -669,6 +672,8 @@
         "atb.nrel.gov": 1,
         "www.osti.gov": 1
       },
+      "http_error": 0,
+      "http_error_hosts": {},
       "ok": 3,
       "reported_missing": 0
     },

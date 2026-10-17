@@ -8,6 +8,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ### Added
 
+- **Whether a fetch worked, in the trace.** Each `WebFetch` source record now keeps the page's
+  HTTP `status` and `status_text`, its downloaded `bytes`, and an `excerpt` of the reply the agent
+  got. A status of 400 or above is `outcome: "http_error"` (a 403 used to read as
+  `reported_missing`, and only because "403" appeared in the JSON), and the run's source checks
+  count them as `http_error` with `http_error_hosts`. The Trace tab shows the status and size as a
+  chip on each source row (e.g. `200 OK · 104 KB`, `403 Forbidden · 0 B`), the reply under "what
+  the agent was told", and an "HTTP error" chip in the summary. `chars` is now the reply's length,
+  not the length of WebFetch's whole response as JSON. Traces from before this change have no
+  status.
 - **Why each step happened, in the Trace tab.** The demo server reads the agent's own Claude Code
   transcript (`GET /api/trace/<session>/why`, `demo/why.py`) and joins it to the trace by
   `tool_use_id`. The event log puts each of the agent's messages above the calls it led to, marks
