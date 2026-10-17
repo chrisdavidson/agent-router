@@ -147,6 +147,10 @@ Writes are locked and fail open.
 - **Default location.** The demo writes to `.agent-router/audit/<session>.jsonl`. `agent-router run`
   and `route` write to `AGENT_ROUTER_AUDIT` if set, otherwise they keep records in memory.
 - **Replay** lists the demo's `.agent-router/audit/` sessions and the bundled `audit/sample-session.jsonl`.
+  Each row of `/api/audit/sessions` carries the same `label` the Trace tab uses (from the trace
+  when the session has one, else the user's first prompt) and `has_trace`; each row of
+  `/api/trace/sessions` carries `has_audit`. Both tabs keep the session in the address
+  (`#replay/<id>`, `#trace/<id>`) and link to each other.
 - **Trace** reads decision traces (`<session>.jsonl`) from `--trace-dir`, by default the `trace/`
   folder next to the audit folder, where an integration's record-only hooks write them
   (`integrations/first-principles/trace.py`). It interleaves the router's notes from the audit log

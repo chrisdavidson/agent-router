@@ -575,7 +575,7 @@ async function startLive(e) {
   on("done", () => {
     stopLive();
     if (session) {
-      liveStatus(`Session ${session} finished. `, el("a", { href: "#replay", onclick: (ev) => { ev.preventDefault(); openReplay(session); }, text: "Replay its checkpoints" }));
+      liveStatus(`Session ${session} finished. `, el("a", { href: sessionAddress("replay", session), text: "Replay its checkpoints" }));
     }
   });
 }
@@ -585,16 +585,27 @@ function initLive() {
   $("#live-stop").addEventListener("click", () => stopLive("Stopped. The server cancels the agent run."));
 }
 
+/* -- one name per session ------------------------------------------------------- */
+
+/** A session's short id: the first 8 characters of a Claude Code session id (as Claude Code
+    shows it), or a live run's whole id (``20261017-142301-a3f9c1``: its first 8 are only a date). */
+const shortId = (id) => (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(id)) ? String(id).slice(0, 8) : String(id));
+
+/** What a session is called in every tab: what it was about (the server's ``label``, the same
+    for Replay and Trace) and its short id, e.g. "First-principles LLC analysis · 12be92f6". */
+const sessionName = (s) => (s.label ? `${s.label} · ${shortId(s.session)}` : `session ${shortId(s.session)}`);
+
 /* -- replay ------------------------------------------------------------------ */
 
-const replay = { records: [], index: 0 };
+const replay = { records: [], index: 0, session: null, sessions: new Map() };
 
 async function loadSessions(select) {
   const sel = $("#session-select");
   let sessions = [];
   try { sessions = (await api("/api/audit/sessions")).sessions; } catch { sessions = []; }
-  sel.replaceChildren(...sessions.map((s) => el("option", { value: s.session },
-    `${s.session}${s.sample ? " (sample)" : ""}: ${s.records} checkpoint${s.records === 1 ? "" : "s"}${s.first_text ? `, “${s.first_text.slice(0, 48)}”` : ""}`)));
+  replay.sessions = new Map(sessions.map((s) => [s.session, s]));
+  sel.replaceChildren(...sessions.map((s) => el("option", { value: s.session, title: s.session },
+    `${sessionName(s)}${s.sample ? " (sample)" : ""} · ${since(new Date(s.mtime * 1000).toISOString())} · ${s.records} checkpoint${s.records === 1 ? "" : "s"}`)));
   $("#replay-empty").hidden = sessions.length > 0;
   $("#replay-body").hidden = sessions.length === 0;
   if (!sessions.length) return;
@@ -606,6 +617,9 @@ async function loadSession(name) {
   const data = await api(`/api/audit/${encodeURIComponent(name)}`);
   replay.records = data.records;
   replay.index = 0;
+  replay.session = name;
+  $("#replay-trace").hidden = !(replay.sessions.get(name) || {}).has_trace;
+  if (!$("#view-replay").hidden) setAddress("replay", name);
   const pills = $("#step-pills");
   pills.replaceChildren(...replay.records.map((r, i) => {
     const t = tone(toCheckpoint(r));
@@ -630,13 +644,9 @@ function showStep(i) {
   $("#step-next").disabled = replay.index === n - 1;
 }
 
-function openReplay(session) {
-  selectTab("replay");
-  loadSessions(session);
-}
-
 function initReplay() {
-  $("#session-select").addEventListener("change", (e) => loadSession(e.target.value));
+  $("#session-select").addEventListener("change", (e) => { setAddress("replay", e.target.value, true); loadSession(e.target.value); });
+  $("#replay-trace").addEventListener("click", () => go("trace", replay.session));
   $("#session-refresh").addEventListener("click", () => loadSessions($("#session-select").value));
   $("#step-prev").addEventListener("click", () => showStep(replay.index - 1));
   $("#step-next").addEventListener("click", () => showStep(replay.index + 1));
@@ -694,11 +704,10 @@ const since = (ts) => {
 
 /** One picker line: whether it is still running, what was asked, when, and how sure it ended. */
 function sessionOption(s) {
-  const what = s.label || `session ${s.session.slice(0, 8)}`;
   const runs = s.runs > 1 ? ` · ${s.finished}/${s.runs} runs` : "";
   const conf = s.status === "finished" && s.confidence ? ` · ${s.confidence}` : "";
-  return el("option", { value: s.session, title: s.question || s.session },
-    `${STATUS_MARK[s.status] || ""} ${what} · ${since(s.last_at)}${runs}${conf}`);
+  return el("option", { value: s.session, title: s.question ? `${s.session}\n${s.question}` : s.session },
+    `${STATUS_MARK[s.status] || ""} ${sessionName(s)} · ${since(s.last_at)}${runs}${conf}`);
 }
 
 async function loadTraceSessions(select) {
@@ -788,6 +797,7 @@ async function loadTrace(session, { keep = false } = {}) {
     : null;
   if (!prev) trace.selected = null;
   trace.data = data;
+  if (!$("#view-trace").hidden) setAddress("trace", session); // follow-live's switches replace, not push
   if (trace.sessions) { const { records: _r, audit: _a, ...row } = data; trace.sessions.set(session, row); }
   const byRun = new Map();
   let handoff = []; // the main session's Agent call(s) that start the next run
@@ -988,7 +998,7 @@ function renderTraceSummary(run) {
   const more = el("details", { class: "facts", open: trace.factsOpen, ontoggle: (e) => { trace.factsOpen = e.target.open; } },
     el("summary", { text: `More about this run (${rest.length})` }), el("div", { class: "stats" }, ...rest.map(cell)), foot);
   if (trace.data.audit && trace.data.audit.length) head.append(el("button", { type: "button", class: "secondary replay-link",
-    onclick: () => openReplay(trace.data.session), text: `Step through the router's ${trace.data.audit.length} checkpoints` }));
+    onclick: () => go("replay", trace.data.session), text: `Step through the router's ${trace.data.audit.length} checkpoints` }));
   const stale = staleReport(run) ? el("p", { class: "stale-report" }, chip("another run's report", "enforce"),
     ` The trace picked up ${end.analysis}, written ${new Date(end.analysis_mtime * 1000).toLocaleString()}, before this run started. Its decisions are not shown. Traces written from now on find the run's own report.`) : null;
   box.replaceChildren(...[question, head, stale, grid, more].filter(Boolean));
@@ -1463,7 +1473,7 @@ function whyPanel(run, sel) {
 }
 
 function initTrace() {
-  $("#trace-select").addEventListener("change", (e) => { trace.pinned = true; loadTrace(e.target.value); });
+  $("#trace-select").addEventListener("change", (e) => { trace.pinned = true; setAddress("trace", e.target.value, true); loadTrace(e.target.value); });
   $("#trace-refresh").addEventListener("click", () => loadTraceSessions($("#trace-select").value));
   $("#trace-follow").addEventListener("change", () => { renderLiveLine(); if ($("#trace-follow").checked) pollTrace(); });
   // a mark in the chart selects its line in the log; a line in the log lights its marks
@@ -1520,19 +1530,48 @@ function initTrace() {
 
 const TABS = { play: "Playground", live: "Live agent", replay: "Replay", trace: "Trace" };
 
-function selectTab(name) {
+/** Show a tab and, on Replay and Trace, a session (the one already shown when none is named).
+    The address follows: ``#trace/<session id>``, so refresh, back and a shared link land there. */
+function selectTab(name, { session = null, push = false } = {}) {
   for (const key of Object.keys(TABS)) {
     const on = key === name;
     $(`#tab-${key}`).setAttribute("aria-selected", on ? "true" : "false");
     $(`#view-${key}`).hidden = !on;
   }
-  if (location.hash !== `#${name}`) history.replaceState(null, "", `#${name}`);
-  if (name === "replay" && !replay.records.length) loadSessions();
-  if (name === "trace" && !trace.data) loadTraceSessions();
+  if (name === "replay" && (session ? session !== replay.session : !replay.records.length)) loadSessions(session);
+  if (name === "trace" && (session ? !trace.data || session !== trace.data.session : !trace.data)) {
+    if (session) trace.pinned = true; // a link to a session: follow-live must not switch away from it
+    loadTraceSessions(session);
+  }
+  setAddress(name, session || shownSession(name), push);
+}
+
+/** Go to a tab (and session) the way a link does: one step the back button undoes. */
+const go = (name, session = null) => selectTab(name, { session, push: true });
+
+const shownSession = (tab) => (tab === "replay" ? replay.session : tab === "trace" && trace.data ? trace.data.session : null);
+
+/** ``#replay/<id>``: the tab, then the session it shows. */
+const sessionAddress = (tab, session) => `#${tab}${session ? `/${encodeURIComponent(session)}` : ""}`;
+
+function setAddress(tab, session, push = false) {
+  const want = sessionAddress(tab, session);
+  if (location.hash !== want) history[push ? "pushState" : "replaceState"](null, "", want);
+}
+
+function readAddress() {
+  const [tab, ...rest] = location.hash.slice(1).split("/");
+  return { tab: TABS[tab] ? tab : "play", session: rest.length ? decodeURIComponent(rest.join("/")) || null : null };
+}
+
+/** Back, forward, an edited or pasted address, or a plain ``#replay/<id>`` link. */
+function followAddress() {
+  const { tab, session } = readAddress();
+  selectTab(tab, { session });
 }
 
 async function boot() {
-  for (const key of Object.keys(TABS)) $(`#tab-${key}`).addEventListener("click", () => selectTab(key));
+  for (const key of Object.keys(TABS)) $(`#tab-${key}`).addEventListener("click", () => go(key));
   const [catalog, backends] = await Promise.all([api("/api/catalog"), api("/api/backends")]);
   state.catalog = catalog;
   state.threshold = catalog.threshold;
@@ -1552,8 +1591,8 @@ async function boot() {
   initLive();
   initReplay();
   initTrace();
-  const hash = location.hash.slice(1);
-  selectTab(TABS[hash] ? hash : "play");
+  followAddress();
+  window.addEventListener("popstate", followAddress); // also fires for a plain #trace/<id> link
 }
 
 boot().catch((err) => {

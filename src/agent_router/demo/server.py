@@ -572,6 +572,25 @@ def create_app(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
+    def session_name(audit: Path) -> dict[str, Any]:
+        """The name a session goes by in every tab: its trace's label when it has a trace (the
+        delegated task, else the user's words, else the report title), else the user's words."""
+        tpath = trace_root / f"{audit.stem}.jsonl"
+        if tpath.is_file():
+            with contextlib.suppress(OSError):
+                row = session_row(tpath)
+                return {
+                    "label": row["label"],
+                    "label_source": row["label_source"],
+                    "has_trace": True,
+                }
+        question = _first_prompt(audit)
+        return {
+            "label": _clip(question) if question else None,
+            "label_source": "prompt" if question else None,
+            "has_trace": False,
+        }
+
     @app.get("/api/audit/sessions")
     def get_sessions() -> dict[str, Any]:
         seen: set[str] = set()
@@ -597,6 +616,7 @@ def create_app(
                         "mode": (first.get("thresholds") or {}).get("mode"),
                         "backend": first.get("backend"),
                         "sample": d != audit_root,
+                        **session_name(path),
                     }
                 )
         rows.sort(key=lambda r: r["mtime"], reverse=True)
@@ -642,6 +662,7 @@ def create_app(
         return {
             "session": path.stem,
             **summary,
+            "has_audit": audit is not None,  # the router's checkpoints, for the Replay tab
             "status": trace_status(summary, st.st_mtime),
             "mtime": st.st_mtime,
             "size": st.st_size,

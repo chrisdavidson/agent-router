@@ -303,7 +303,7 @@ Start it before or during a run, from the checkout:
 ```bash
 make trace                     # the hooks' state root ($AGENT_ROUTER_STATE_DIR, else XDG state)
 make trace STATE=integrations/first-principles/runs/structured-summary-live/state   # a saved set
-# open http://127.0.0.1:8765/#trace
+# open http://127.0.0.1:8765/#trace   (or #trace/<session id> for one session)
 ```
 
 `make trace` is `agent-router demo --catalog integrations/first-principles/catalog.yaml

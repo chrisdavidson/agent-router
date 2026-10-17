@@ -356,6 +356,37 @@ def test_trace_sessions_are_labelled_by_what_was_asked(
     )
 
 
+def test_replay_and_trace_call_a_session_by_the_same_name(
+    client: TestClient, audit_dir: Path
+) -> None:
+    """One session, one name: Replay borrows the trace's label (here the delegated task, not
+    the user's words) and says a trace exists; the trace says the checkpoints exist."""
+    trace_dir = audit_dir.parent / "trace"
+    trace_dir.mkdir()
+    task = {"description": "First-principles LLC analysis"}
+    _write_audit(trace_dir, "s1", [_trace("delegation", agent_id=None, **task)])
+    _write_audit(audit_dir, "s1", [_prompt("/fp:analyze Should I form an LLC?"), _rec()])
+    _write_audit(audit_dir, "s2", [_prompt("/fp:analyze Is a four-day week better?"), _rec()])
+    replay = {s["session"]: s for s in client.get("/api/audit/sessions").json()["sessions"]}
+    (traced,) = client.get("/api/trace/sessions").json()["sessions"]
+    assert replay["s1"]["label"] == traced["label"] == "First-principles LLC analysis"
+    assert (replay["s1"]["has_trace"], traced["has_audit"]) == (True, True)
+    # no trace: the user's words, without the slash command, as the trace tab would show them
+    assert (replay["s2"]["label"], replay["s2"]["label_source"]) == (
+        "Is a four-day week better?",
+        "prompt",
+    )
+    assert replay["s2"]["has_trace"] is False
+
+
+def test_the_page_names_sessions_and_keeps_them_in_the_address(client: TestClient) -> None:
+    js = client.get("/static/app.js").text
+    assert "sessionName(s)" in js and js.count("${sessionName(s)}") == 2  # both pickers
+    assert '#${tab}${session ? `/${encodeURIComponent(session)}` : ""}' in js
+    assert 'addEventListener("popstate", followAddress)' in js
+    assert 'go("trace", replay.session)' in js and 'go("replay", trace.data.session)' in js
+
+
 def test_trace_label_comes_from_the_finished_reports_h1_and_is_clipped(
     client: TestClient, audit_dir: Path
 ) -> None:
@@ -905,7 +936,7 @@ def test_trace_tab_script_follows_a_live_run() -> None:
     # reload only on change, and keep open <details> and the run being viewed
     assert "was.size !== now.size" in js and "loadTrace(sel.value, { keep: true })" in js
     assert "restoreDetails(root, prev.open[i])" in js
-    assert "s.label ||" in js and "STATUS_MARK[s.status]" in js
+    assert "sessionName(s)" in js and "STATUS_MARK[s.status]" in js
 
 
 def test_trace_tab_is_a_time_chart_over_a_compact_log() -> None:
