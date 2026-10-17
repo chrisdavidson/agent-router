@@ -71,9 +71,9 @@ The page has four tabs:
 | **Playground** | Test the gatekeeper on one step. You describe the step, it shows its decision. No agent runs. | Free (a fraction of a cent if Jev is asked) |
 | **Live agent** | Give a real Claude agent a task and watch every checkpoint happen, step by step. | A few cents per run |
 | **Replay** | Step back through any earlier run, one checkpoint at a time. | Free |
-| **Trace** | What an integrated agent did and decided in a run (for now, the first-principles agent): sections written, references opened, calculator use against the router's notes, the parsed conclusion, assumptions and Self-Audit Gate. Follows a run live (`make trace`). | Free |
+| **Trace** | What an integrated agent did and decided in a run (for now, the first-principles agent), on one screen: a swimlane chart of the run over time, a one-line log of every step (sections written, references opened, calculator use against the router's notes), and the parsed conclusion, assumptions and Self-Audit Gate in tabs. Follows a run live (`make trace`). | Free |
 
-![The Trace tab: a first-principles run's summary card, what the agent did, and what it decided](docs/img/demo-trace.png)
+![The Trace tab: a first-principles run's summary, its swimlane chart, the event log and the decision tabs](docs/img/demo-trace.png)
 
 ### How to read a decision
 

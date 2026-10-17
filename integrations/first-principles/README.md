@@ -288,8 +288,9 @@ The trace keeps the report itself, so it still reads after the analysis file is 
 Replaying the 28 example captures with their reports removed gives decisions for all 28:
 22 match the real report exactly, and the other 6 are marked inexact.
 
-**In the demo.** The **Trace** tab shows each run: a summary card, a timeline of what the agent
-did with the router's notes placed where they fired, and the decisions parsed from its report.
+**In the demo.** The **Trace** tab shows each run: a summary card, a swimlane chart of the run
+over time, a compact log of what the agent did with the router's notes placed where they fired, and
+the decisions parsed from its report, one tab per part.
 
 ![Trace tab: the estimate-fermi example replayed through today's trace.py](../../docs/img/demo-trace.png)
 
