@@ -466,3 +466,53 @@ button:disabled { opacity: 0.55; cursor: progress; }
 .tc-none { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-size: 11.5px; color: var(--ink-2); font-style: italic; }
 /* a long heading (a whole conclusion) shows three lines until its row is selected */
 .ev:not(.on) .headings { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* the "why": the agent's own messages heading the calls made under them, and the Why? tab */
+.chip.focus { color: var(--focus); background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--focus); }
+.ev-say {
+  display: grid; grid-template-columns: 3.6em minmax(0, 1fr); gap: 0 10px; align-items: baseline;
+  padding: 6px 12px 6px 9px; border-left: 3px solid var(--focus); border-bottom: 1px solid var(--track);
+  background: var(--panel-2); cursor: pointer; font-size: 13.5px;
+}
+.ev-say .say { min-width: 0; }
+.ev-say .q { overflow-wrap: anywhere; }
+.ev-say:not(.open) .q { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ev-say .q::before { content: "“"; } .ev-say .q::after { content: "”"; }
+.ev-say .n { display: block; font-size: 11.5px; color: var(--ink-2); margin-top: 1px; }
+.ev.child { padding-left: 20px; }
+.ev.child .ev-at { margin-left: -11px; }
+.ev-gap {
+  padding: 3px 12px 3px 4.6em; font-size: 11.5px; font-style: italic; color: var(--ink-2); border-bottom: 1px solid var(--track);
+  background: repeating-linear-gradient(135deg, transparent 0 6px, var(--panel-2) 6px 12px);
+}
+.dec-tabs button.why-tab { border-color: var(--focus); color: var(--focus); }
+.dec-tabs button.why-tab[aria-selected="true"] { background: var(--focus); border-color: var(--focus); color: var(--panel); }
+.why { display: grid; gap: 10px; font-size: 13.5px; }
+.why-head { display: grid; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--track); }
+.why-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.why-row { display: grid; grid-template-columns: 6.6em minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.why-row > b { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); }
+.why-v { min-width: 0; overflow-wrap: anywhere; display: grid; gap: 4px; }
+.why blockquote { margin: 0; padding: 5px 10px; border-left: 3px solid var(--focus); background: var(--panel-2); border-radius: 0 6px 6px 0; }
+.why blockquote.quiet { border-left-color: var(--rule); }
+.why pre { margin: 0; font: 400 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel-2); padding: 8px 10px; border-radius: var(--radius-sm); max-height: 16em; overflow: auto; }
+.why details summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); font-weight: 600; }
+.why details[open] summary { margin-bottom: 4px; }
+.why-line { display: block; }
+.why-line + .why-line { margin-top: 4px; }
+.used { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ev-link {
+  appearance: none; cursor: pointer; border: 1px solid var(--rule); background: var(--panel); color: var(--ink);
+  border-radius: 6px; padding: 2px 8px; font: 600 12.5px/1.4 var(--sans);
+}
+.ev-link:hover { border-color: var(--focus); }
+.ev-link .mono { color: var(--ink-2); font-weight: 400; }
+@media (max-width: 560px) {
+  .ev-say { grid-template-columns: 3.4em minmax(0, 1fr); }
+  .why-row { grid-template-columns: 1fr; gap: 2px; }
+}
+.why-v > .ev-link, .used .ev-link { justify-self: start; }
+.ev details summary.noted { font-family: var(--sans); font-size: 13px; color: var(--ink); }
+.why .purpose { font-style: italic; }
+.why blockquote { max-height: 10.5em; overflow: auto; }
+.stale-report { margin: 0 0 8px; font-size: 13.5px; overflow-wrap: anywhere; }

@@ -699,7 +699,7 @@ def _tool_record(payload: dict[str, Any]) -> dict[str, Any] | None:
                 body = "".join(m.group(3) + "\n" for m in HEREDOC.finditer(cmd))
                 return {
                     "kind": "section_written",
-                    "path": path.group(0) if path else None,
+                    "path": _expand(path.group(0), cmd) if path else None,
                     "headings": [_trunc(h, 160) for h in heads],
                     "revises": bool(REVISE.search(cmd)),  # e.g. sed -i on earlier text, then append
                     "restarts": bool(RESTART.search(cmd)),  # empties the report and writes it again
@@ -709,7 +709,7 @@ def _tool_record(payload: dict[str, Any]) -> dict[str, Any] | None:
             return {
                 "kind": "report_op",
                 "op": _report_op(cmd),
-                "path": path.group(0) if path else None,
+                "path": _expand(path.group(0), cmd) if path else None,
                 "command": _trunc(cmd, 160),
             }
         return {
@@ -734,6 +734,44 @@ def _tool_record(payload: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+_ASSIGN = re.compile(r"""(?:^|[\s;&(])([A-Za-z_]\w*)=("[^"]*"|'[^']*'|[^\s;&|)]+)""")
+_VAR = re.compile(r"\$\{?([A-Za-z_]\w*)\}?")
+
+
+def _expand(path: str, cmd: str) -> str:
+    """``$D/.first-principles/x.md`` with ``D=/home/me/out`` earlier in the command ->
+    ``/home/me/out/.first-principles/x.md``; ``~`` and ``$HOME`` too. Unknown variables stay."""
+    env = {"HOME": str(Path.home())}
+    for name, value in _ASSIGN.findall(cmd):
+        env[name] = _VAR.sub(lambda m: env.get(m.group(1), m.group(0)), value.strip("\"'"))
+    out = _VAR.sub(lambda m: env.get(m.group(1), m.group(0)), path)
+    return str(Path(out).expanduser()) if out.startswith("~") else out
+
+
+def _purpose(tool: str, inp: dict[str, Any]) -> str | None:
+    """The note the agent wrote on the call itself: Bash ``description``, WebFetch ``prompt``.
+    Kept in the trace so the Trace tab can say why after Claude Code deletes the transcript."""
+    note = inp.get("description") or (inp.get("prompt") if tool == "WebFetch" else None)
+    return _trunc(note, 300) if isinstance(note, str) and note.strip() else None
+
+
+def _why(payload: dict[str, Any], session: str) -> dict[str, Any] | None:
+    """The agent's messages and, per call, what it said around it (``agent_router.demo.why``),
+    read from its transcript at stop. Claude Code deletes old transcripts; the trace keeps this."""
+    try:
+        from agent_router.demo import why
+    except ImportError:
+        return None
+    try:
+        hints = [
+            str(payload[k]) for k in ("agent_transcript_path", "transcript_path") if payload.get(k)
+        ]
+        path = why.find_transcript(session, str(payload.get("agent_id") or ""), hints)
+        return why.compact(why.explain(why.read_transcript(path))) if path else None
+    except Exception:  # a record-only hook never fails the run
+        return None
+
+
 def _report_op(cmd: str) -> str:
     """What a non-append report command does: create, revise (rewrite in place) or check."""
     if REVISE.search(cmd):
@@ -743,8 +781,11 @@ def _report_op(cmd: str) -> str:
     return "check"
 
 
-def _analysis_path(records: list[dict[str, Any]], cwd: str) -> Path | None:
-    """The file the run appended to; else the newest analysis in the agent's cwd."""
+def _analysis_path(
+    records: list[dict[str, Any]], cwd: str, since: datetime | None = None
+) -> Path | None:
+    """The file the run appended to; else the newest analysis in the agent's cwd written since
+    the run started (an older one is another run's report, not this one's)."""
     for rec in reversed(records):
         if rec.get("kind") in ("section_written", "report_op") and rec.get("path"):
             p = Path(rec["path"])
@@ -752,6 +793,8 @@ def _analysis_path(records: list[dict[str, Any]], cwd: str) -> Path | None:
             if p.is_file():
                 return p
     found = sorted(Path(cwd or ".").glob(OUTPUT_GLOB), key=lambda f: f.stat().st_mtime)
+    if since is not None:
+        found = [f for f in found if f.stat().st_mtime >= since.timestamp() - 5]
     return found[-1] if found else None
 
 
@@ -777,7 +820,8 @@ def _analysis(
     returned the report in its final message instead of a file, as it does when the delegating
     prompt asks for markdown back), else ``appends`` (rebuilt from the trace's own section
     records; exact only when nothing was revised in place)."""
-    path = _analysis_path(run, cwd)
+    start = next((_when(r.get("ts")) for r in run if r.get("kind") == "run_start"), None)
+    path = _analysis_path(run, cwd, start)
     if path:
         try:
             return path, path.read_text(encoding="utf-8"), "file", True
@@ -1014,9 +1058,15 @@ def handle(
     if delegation is not None:
         rec = delegation
     elif event == "SubagentStart":
+        # where Claude Code keeps the session's transcript: the Trace tab reads the agent's own
+        # messages from <transcript dir>/<session>/subagents/agent-<agent_id>.jsonl to say why
         rec = {"kind": "run_start"}
     elif event == "PostToolUse":
         rec = _tool_record(payload)
+        inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+        note = _purpose(str(payload.get("tool_name") or ""), inp)
+        if rec is not None and note:
+            rec["purpose"] = note
     elif event == "PostToolUseFailure":
         base = _tool_record(payload) or {}
         rec = {
@@ -1073,6 +1123,9 @@ def handle(
             "launched_by": handoff.get("launched_by") if handoff else None,
             "routing": _routing(audit, run, handoff, start, end),
         }
+        kept = _why(payload, session)
+        if kept:
+            rec["why"] = kept
     else:
         return None
     if rec is None:
@@ -1085,6 +1138,10 @@ def handle(
     }
     if "tool_name" not in rec and payload.get("tool_name"):
         rec["tool_name"] = payload.get("tool_name")
+    if rec["kind"] in ("run_start", "run_end"):  # only when the hook payload carries them
+        for key in ("transcript_path", "agent_transcript_path"):
+            if isinstance(payload.get(key), str):
+                rec[key] = payload[key]
     if payload.get("tool_use_id"):  # the same id the router's audit record carries
         rec["tool_use_id"] = payload.get("tool_use_id")
     trace.parent.mkdir(parents=True, exist_ok=True)
@@ -1374,12 +1431,81 @@ def report(trace_dir: Path) -> str:
     return "\n".join(lines)
 
 
+def keep_why(trace_dir: Path) -> list[str]:
+    """Copy the "why" into traces written before the hooks kept it, while Claude Code still has
+    the transcripts: each run_end without ``why`` gets it, each tool record without ``purpose``
+    gets the agent's note. A trace is rewritten only when something was added, after a copy of
+    the original is saved next to it as ``<session>.jsonl.bak``. Returns one line per trace."""
+    try:
+        from agent_router.demo import why
+    except ImportError:
+        return ["agent_router is not importable here: run with the checkout's .venv"]
+    lines = []
+    for path in sorted(trace_dir.glob("*.jsonl")):
+        recs = _read_jsonl(path)
+        session = path.stem
+        explained: dict[str, dict[str, Any] | None] = {}
+        added = 0
+        for rec in recs:
+            aid = rec.get("agent_id")
+            if not aid:
+                continue
+            if aid not in explained:
+                hints = [
+                    str(r[k])
+                    for r in recs
+                    if r.get("agent_id") == aid
+                    for k in ("agent_transcript_path", "transcript_path")
+                    if r.get(k)
+                ]
+                found = why.find_transcript(session, str(aid), hints)
+                explained[aid] = why.explain(why.read_transcript(found)) if found else None
+            w = explained[aid]
+            if w is None:
+                continue
+            if rec.get("kind") == "run_end" and not rec.get("why"):
+                rec["why"] = why.compact(w)
+                added += 1
+            call = w["calls"].get(str(rec.get("tool_use_id")))
+            if (
+                call
+                and call.get("purpose")
+                and not rec.get("purpose")
+                and rec.get("kind") != "delegation"
+            ):
+                rec["purpose"] = call["purpose"]
+                added += 1
+        if not added:
+            missing = [a for a, w in explained.items() if w is None]
+            lines.append(
+                f"{path.name}: nothing to add"
+                + (f" (no transcript for {', '.join(missing)})" if missing else "")
+            )
+            continue
+        backup = path.with_suffix(".jsonl.bak")
+        backup.write_bytes(path.read_bytes())
+        tmp = path.with_suffix(".jsonl.tmp")
+        tmp.write_text("".join(json.dumps(r) + "\n" for r in recs), encoding="utf-8")
+        tmp.replace(path)
+        lines.append(f"{path.name}: added {added} (original kept as {backup.name})")
+    return lines
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--replay", type=Path, help="a claude -p stream-json capture")
     ap.add_argument("--state", type=Path, help="state dir for --replay (default: state_root)")
     ap.add_argument("--report", type=Path, help="a trace dir: print one row per finished run")
+    ap.add_argument(
+        "--keep-why",
+        type=Path,
+        metavar="TRACE_DIR",
+        help="copy the agent's own words into traces made before the hooks kept them",
+    )
     args = ap.parse_args()
+    if args.keep_why:
+        print("\n".join(keep_why(args.keep_why)))
+        return 0
     if args.report:
         print(report(args.report))
         return 0
