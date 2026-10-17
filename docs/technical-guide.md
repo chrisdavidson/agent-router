@@ -114,6 +114,14 @@ The demo has four tabs:
   shows both stages.
 - **Live agent** streams a real SDK run: hooks, decisions, tool calls and the answer.
 - **Replay** steps through an audit session. `audit/sample-session.jsonl` is included.
+- **One name and one address per session.** Replay and Trace call a session the same thing: what it
+  was about (the delegated task, else the user's words, else the report title) and the first 8
+  characters of its Claude Code session id, e.g. `First-principles LLC analysis · 12be92f6`. A
+  live run's id (`20261017-142301-a3f9c1`) is shown whole. The address names the tab and the
+  session (`#trace/<session id>`, `#replay/<session id>`), so refresh, back/forward and a shared
+  link open that session. Trace links to the session's checkpoints in Replay, and Replay links to
+  its trace (**Open its trace**, shown only when one exists). A link to a session in Trace pins it:
+  Follow live does not switch away from it.
 - **Trace** shows an integration's decision trace for a session: a summary (conclusion and the key
   numbers, the other run facts folded under **More about this run**), a swimlane chart of the run
   (agent, report, sources, compute and router lanes over the run's clock), a one-line-per-event log

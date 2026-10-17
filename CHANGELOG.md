@@ -8,6 +8,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ### Added
 
+- **One name and one address per session across the demo's tabs.** Replay now calls a session
+  what the Trace tab does (the delegated task, else the user's words, else the report title) plus
+  its short id, e.g. `First-principles LLC analysis · 12be92f6`, instead of the full id and the
+  first 48 characters of the prompt. `/api/audit/sessions` rows gain `label`, `label_source` and
+  `has_trace`; `/api/trace/sessions` rows gain `has_audit`. The address holds the session
+  (`#trace/<id>`, `#replay/<id>`), so refresh, back/forward and shared links open it, and a linked
+  Trace session is pinned against Follow live. Replay gains **Open its trace** when the session
+  has one, alongside Trace's existing link to the checkpoints.
 - **Whether a fetch worked, in the trace.** Each `WebFetch` source record now keeps the page's
   HTTP `status` and `status_text`, its downloaded `bytes`, and an `excerpt` of the reply the agent
   got. A status of 400 or above is `outcome: "http_error"` (a 403 used to read as
