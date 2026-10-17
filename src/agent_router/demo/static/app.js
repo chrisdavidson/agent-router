@@ -655,6 +655,7 @@ const trace = { data: null, runs: [], index: 0, sessions: null, pinned: false, t
 const BAND_TONE = { Rigorous: "suggest", Sound: "gated", "Hand-wavy": "enforce", Absent: "enforce" };
 const CONF_TONE = { HIGH: "suggest", MEDIUM: "gated", LOW: "enforce" };
 const VERDICT_TONE = { Accept: "native", Challenge: "gated", Discard: "enforce" };
+const ACTION_TONE = { suggest: "suggest", enforce: "enforce", gated: "gated", native: "native", skipped: "native" };
 const REPORT_OP = { create: "Creates the report file", revise: "Revises the report in place", check: "Checks the report" };
 
 const chip = (text, tone = "native", title) => el("span", { class: `chip ${tone}`, title, text });
@@ -669,8 +670,9 @@ function calcResult(text) {
   try {
     const v = JSON.parse(text);
     if (v && typeof v === "object") return v.result ?? v.value ?? text;
-  } catch { /* plain text */ }
-  return text;
+  } catch { /* plain text, or an envelope the trace cut short */ }
+  const cut = /^\{"(?:result|value)":"([\s\S]*)$/.exec(String(text || ""));
+  return cut ? `${cut[1].replace(/"\}?$/, "").replace(/\\n/g, "\n").replace(/\\"/g, '"')}…` : text;
 }
 /** A multi-line command as one short line: `python3 -c "` alone says nothing. */
 const oneLine = (cmd, n = 90) => {
@@ -777,7 +779,9 @@ function restoreDetails(root, saved) {
 }
 
 async function loadTrace(session, { keep = false } = {}) {
-  const data = await api(`/api/trace/${encodeURIComponent(session)}`);
+  const [data, why] = await Promise.all([api(`/api/trace/${encodeURIComponent(session)}`),
+    api(`/api/trace/${encodeURIComponent(session)}/why`).catch(() => null)]); // no transcript: the log still works
+  trace.why = why;
   const prev = keep && trace.data && trace.data.session === session
     ? { index: trace.index, last: trace.index === trace.runs.length - 1,
       open: [$("#trace-timeline"), $("#trace-decisions")].map(detailsState), scroll: logScroll() }
@@ -907,9 +911,16 @@ function decisionsCell(end) {
   return el("span", { class: "chips" }, chip(note, end.decisions_source === "block" && end.decisions_verified !== false ? "native" : "gated"));
 }
 
+/** A report on disk written before the run started belongs to another run: older traces picked
+    the newest analysis in the agent's folder when the run's own report path did not resolve. */
+function staleReport(run) {
+  const end = run.end || {};
+  return Boolean(end.analysis_mtime && run.start && end.analysis_mtime * 1000 < when(run.start.ts) - 5000);
+}
+
 function renderTraceSummary(run) {
   const box = $("#trace-summary");
-  const end = run.end || {};
+  const end = staleReport(run) ? { ...run.end, decisions: null } : run.end || {};
   const d = end.decisions || {};
   const rt = end.routing || {};
   const concl = d.conclusion || {};
@@ -918,7 +929,8 @@ function renderTraceSummary(run) {
   const lastRec = run.recs.at(-1);
   const open = !run.end && status === "running" && trace.index === trace.runs.length - 1;
   const ran = run.start && lastRec ? clock((when(lastRec.ts) - when(run.start.ts)) / 1000) : null;
-  const headline = run.end ? (concl.recommended || "Finished; no recommendation found in the report")
+  const headline = staleReport(run) ? "Finished; this run's own report was not found"
+    : run.end ? (concl.recommended || "Finished; no recommendation found in the report")
     : !run.start ? (open ? "Delegated; waiting for the agent to start" : "Delegated; the agent never started")
       : open ? `Running: ${ran} in, ${run.recs.filter((r) => r.kind === "section_written").length} sections written so far`
         : "Run not finished (no SubagentStop recorded)";
@@ -976,7 +988,9 @@ function renderTraceSummary(run) {
     el("summary", { text: `More about this run (${rest.length})` }), el("div", { class: "stats" }, ...rest.map(cell)), foot);
   if (trace.data.audit && trace.data.audit.length) head.append(el("button", { type: "button", class: "secondary replay-link",
     onclick: () => openReplay(trace.data.session), text: `Step through the router's ${trace.data.audit.length} checkpoints` }));
-  box.replaceChildren(...[question, head, grid, more].filter(Boolean));
+  const stale = staleReport(run) ? el("p", { class: "stale-report" }, chip("another run's report", "enforce"),
+    ` The trace picked up ${end.analysis}, written ${new Date(end.analysis_mtime * 1000).toLocaleString()}, before this run started. Its decisions are not shown. Traces written from now on find the run's own report.`) : null;
+  box.replaceChildren(...[question, head, stale, grid, more].filter(Boolean));
 }
 
 /** A shell call that runs an interpreter (``math`` in traces before 2026-09-30). */
@@ -1053,7 +1067,7 @@ function traceItem(rec, t0) {
       body = el("code", { text: rec.query });
       break;
     case "tool_failed":
-      label = `${rec.tool_name ? rec.tool_name.replace(/^mcp__.*__/, "") : "Call"} failed`; cls = "err";
+      label = `${rec.was === "calc" ? "Exact calculator" : rec.tool_name ? rec.tool_name.replace(/^mcp__.*__/, "") : "Call"} failed`; cls = "err";
       body = el("span", { text: rec.error || "" });
       break;
     case "run_end":
@@ -1107,6 +1121,19 @@ function runItems(run) {
   return [...items, ...marks].sort((a, b) => a.ts - b.ts || a.order - b.order);
 }
 
+/** The why-data for one run (``/api/trace/<session>/why``): the agent's messages and, per tool
+    call, what it said before and after, what its prompt offered and where the result went. */
+const runWhy = (run) => (trace.why && trace.why.runs && trace.why.runs[run.id]) || null;
+const QUIET_S = 30; // a stretch this long without a tool call shows in the log
+
+/** One of the agent's own messages, heading the calls that follow it. */
+function intentRow(say, t0) {
+  const n = el("span", { class: "n" });
+  const row = el("li", { class: "ev-say", title: "Click to show the whole message" },
+    el("span", { class: "ev-at", text: stamp(say.ts, t0) }), el("span", { class: "say" }, el("span", { class: "q", text: say.text }), n));
+  return { row, n, count: 0 };
+}
+
 function renderTraceTimeline(run) {
   const t0 = run.start ? when(run.start.ts) : null;
   const list = runItems(run).map((x) => {
@@ -1115,8 +1142,40 @@ function renderTraceTimeline(run) {
     row.dataset.key = x.key;
     return { ...x, row };
   });
-  $("#trace-timeline").replaceChildren(...list.map((x) => x.row));
-  $("#trace-count").textContent = `${list.length} event${list.length === 1 ? "" : "s"}`;
+  trace.items = list;
+  const calls = (runWhy(run) || {}).calls || {};
+  for (const x of list) { // a shell row says what the command is for, in the agent's words
+    const r = x.rec;
+    const note = r && r.kind === "shell" && !x.group?.[1] && ((calls[r.tool_use_id] || {}).purpose || r.purpose);
+    const sum = note && x.row.querySelector(".ev-body summary");
+    if (sum) { sum.title = sum.textContent; sum.textContent = note; sum.classList.add("noted"); }
+  }
+  // the agent's messages, in time order with its calls: each heads the calls made under it
+  const says = ((runWhy(run) || {}).narrations || []).map((say) => ({ say, ts: when(say.ts) }))
+    .filter((x) => Number.isFinite(x.ts));
+  const stream = [...list, ...says].sort((a, b) => a.ts - b.ts || (b.say ? 1 : 0) - (a.say ? 1 : 0));
+  const out = [];
+  const heads = [];
+  let prev = null;
+  let head = null;
+  for (const x of stream) {
+    if (prev != null && x.ts - prev >= QUIET_S * 1000) {
+      out.push(el("li", { class: "ev-gap", text: `${minutes((x.ts - prev) / 1000)} with no tool calls` }));
+    }
+    if (x.say) {
+      head = intentRow(x.say, t0);
+      heads.push(head);
+      out.push(head.row);
+    } else {
+      if (head) { x.row.classList.add("child"); head.count += 1; }
+      out.push(x.row);
+    }
+    prev = x.ts;
+  }
+  heads.forEach((h) => { h.n.textContent = h.count ? `${h.count} call${h.count === 1 ? "" : "s"} follow${h.count === 1 ? "s" : ""}` : "no calls follow"; });
+  $("#trace-timeline").replaceChildren(...out);
+  $("#trace-count").textContent = `${list.length} event${list.length === 1 ? "" : "s"}`
+    + (heads.length ? ` · ${heads.length} message${heads.length === 1 ? "" : "s"}` : "");
   renderTraceChart(run, list, t0);
   if (trace.selected) selectEvent(trace.selected);
 }
@@ -1154,9 +1213,10 @@ function renderTraceChart(run, list, t0) {
 }
 
 /** Highlight one event in the chart and the log; scroll the log to it when asked. */
-function selectEvent(key, scroll = false) {
+function selectEvent(key, scroll = false, show = false) {
   trace.selected = key;
   $$("#trace-timeline .ev, #trace-chart .mk").forEach((n) => n.classList.toggle("on", n.dataset.key === key));
+  if (show) { trace.decTab = "why"; renderDecisions(trace.runs[trace.index]); }
   if (!scroll) return;
   const pane = $("#trace-timeline");
   const row = $$(".ev", pane).find((n) => n.dataset.key === key);
@@ -1174,18 +1234,16 @@ function section(title, open, ...kids) {
 function renderDecisions(run) {
   const box = $("#trace-decisions");
   const tabs = $("#trace-dec-tabs");
-  const d = (run.end || {}).decisions;
+  const d = staleReport(run) ? null : (run.end || {}).decisions;
+  const sel = trace.selected && (trace.items || []).find((x) => x.key === trace.selected);
+  const why = ["why", sel ? `Why? ${sel.row.querySelector(".ev-at").textContent}` : "Why?", null, () => [whyPanel(run, sel)]];
   if (!d) {
-    tabs.hidden = true;
-    tabs.replaceChildren();
-    box.removeAttribute("role");
-    box.removeAttribute("aria-labelledby");
     const heads = run.recs.filter((r) => r.kind === "section_written").flatMap((r) => r.headings || []);
-    box.replaceChildren(
+    const report = ["report", "Report", heads.length || null, () => [
       el("p", { class: "muted", text: run.end ? "The report file could not be read when the agent stopped." : "Decisions are read from the report when the agent stops." }),
       ...(run.end || !heads.length ? [] : [section(`Report so far (${heads.length} headings)`, true,
-        el("ol", { class: "dlist" }, ...heads.map((h) => el("li", { text: h }))))]),
-    );
+        el("ol", { class: "dlist" }, ...heads.map((h) => el("li", { text: h }))))])]];
+    showDecisionTabs([why, report], [], trace.decTab === "why" ? "why" : "report");
     return;
   }
   const notes = [];
@@ -1224,15 +1282,172 @@ function renderDecisions(run) {
     ["sections", "Sections", (d.sections || []).length, () => [
       el("ol", { class: "dlist" }, ...(d.sections || []).map((h) => el("li", { text: h })))]],
   ];
-  const pick = panels.find((p) => p[0] === trace.decTab) || panels[0];
+  showDecisionTabs([why, ...panels], notes, trace.decTab);
+}
+
+/** The tab list over the decisions pane, and the picked tab's panel (notes go above any tab but Why?). */
+function showDecisionTabs(panels, notes, want) {
+  const box = $("#trace-decisions");
+  const tabs = $("#trace-dec-tabs");
+  const pick = panels.find((p) => p[0] === want) || panels[1] || panels[0];
   tabs.hidden = false;
   tabs.replaceChildren(...panels.map(([id, name, n]) => el("button", {
     type: "button", role: "tab", id: `dtab-${id}`, "data-tab": id, "aria-controls": "trace-decisions",
+    class: id === "why" ? "why-tab" : null,
     "aria-selected": id === pick[0] ? "true" : "false", tabindex: id === pick[0] ? "0" : "-1",
-  }, name, el("span", { class: "n", text: String(n) }))));
+  }, name, n == null ? null : el("span", { class: "n", text: String(n) }))));
   box.setAttribute("role", "tabpanel");
   box.setAttribute("aria-labelledby", `dtab-${pick[0]}`);
-  box.replaceChildren(...notes, ...pick[3]().filter(Boolean));
+  box.replaceChildren(...(pick[0] === "why" ? [] : notes), ...pick[3]().filter(Boolean));
+}
+
+const short = (tool) => String(tool || "this tool").replace(/^mcp__.*__/, "");
+
+/** On a narrow screen the Why? tab sits below the log: bring it into view after a click. */
+function revealWhy() {
+  if (!window.matchMedia("(max-width: 1000px)").matches) return;
+  const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  $("#trace-dec-tabs").scrollIntoView({ block: "start", behavior: smooth ? "smooth" : "auto" });
+}
+
+/** A ``+m:ss what`` button that selects another event in the log. */
+function eventLink(x) {
+  return el("button", { type: "button", class: "ev-link", onclick: () => selectEvent(x.key, true, true) },
+    el("span", { class: "mono", text: x.row.querySelector(".ev-at").textContent }), " ", x.row.querySelector(".ev-kind").textContent);
+}
+
+/** Why the selected event happened: what the agent said just before it, the phase it was in, the
+    router's verdict on it, what its prompt offered, the outcome and where the result went. */
+function whyPanel(run, sel) {
+  const t0 = run.start ? when(run.start.ts) : null;
+  if (!sel) {
+    return el("p", { class: "muted", text: "Select an event in the log or the chart to see why it happened: what the agent said just before it, the phase it was in, the router's verdict, what its prompt offered, and what came of it." });
+  }
+  const w = runWhy(run);
+  const recs = sel.router ? [sel.router] : sel.group || [sel.rec];
+  const first = recs[0];
+  const ids = recs.map((r) => r.tool_use_id).filter(Boolean);
+  const calls = ids.map((id) => w && w.calls && w.calls[id]).filter(Boolean);
+  const call = calls[0] || null;
+  const audit = (trace.data.audit || []).filter((a) => a.tool_use_id && ids.includes(a.tool_use_id));
+  const items = trace.items || [];
+  const at = items.indexOf(sel);
+  const rows = [];
+  const add = (k, ...v) => rows.push(el("div", { class: "why-row" }, el("b", { text: k }), el("div", { class: "why-v" }, ...v)));
+  const said = (x) => el("blockquote", {}, x.text, " ", el("span", { class: "muted small-print", text: `(${stamp(x.ts, t0)})` }));
+  const noTranscript = !w || (!w.transcript && !w.kept);
+
+  // -- the cause, in one line of chips
+  const chips = [];
+  const pushed = audit.find((a) => ["suggest", "enforce"].includes(a.action));
+  if (sel.router) chips.push(chip(sel.router.action === "enforce" ? "the router blocked a call" : "the router sent a note", sel.router.action === "enforce" ? "enforce" : "suggest"));
+  else if (pushed) chips.push(chip(`router ${pushed.action === "enforce" ? "blocked" : "pointed"} here`, pushed.action === "enforce" ? "enforce" : "suggest"));
+  else if ((call && (call.said || call.purpose)) || first.purpose) {
+    chips.push(chip(call && call.offered_by ? "the agent chose it; its prompt offered the tool" : "the agent's own choice", "focus"));
+  }
+  else if (first.kind === "run_start" || first.kind === "delegation") chips.push(chip("started by the main session", "focus"));
+  if (!sel.router && ids.length) chips.push(audit.length ? (pushed ? null : chip("router: no note", "native")) : chip("router did not check it", "outline"));
+  const sameTool = (x) => x && x.rec && x.rec.tool_name && x.rec.tool_name === first.tool_name;
+  const near = (x) => x && Math.abs(x.ts - sel.ts) <= 120000;
+  if (first.kind === "tool_failed") {
+    chips.push(chip("failed", "enforce"));
+    const retry = items.slice(at + 1).find((x) => sameTool(x) && near(x));
+    if (retry) chips.push(chip(`retried ${retry.row.querySelector(".ev-at").textContent}`, "gated"));
+  }
+
+  // -- the agent's own words
+  if (first.kind === "run_start" || first.kind === "delegation") {
+    const d = first.kind === "delegation" ? first : run.recs.find((r) => r.kind === "delegation");
+    if (d && d.description) add("Asked to", el("span", { text: d.description }));
+    if (w && w.prompt) add("Its prompt", el("details", {}, el("summary", { text: `${w.prompt.length.toLocaleString()} characters` }), el("pre", { text: w.prompt })));
+    else if (d) add("Its prompt", el("span", { class: "muted", text: `${d.prompt_chars} characters${d.prompt_names_calc ? ", names the calculator" : ""}; the text is in the transcript, which is not on this machine.` }));
+  } else if (first.kind === "run_end") {
+    add("It said", el("details", {}, el("summary", { text: "its final message" }), el("pre", { text: first.final_message || "" })));
+  } else if (sel.router) {
+    add("Router", el("span", { text: `${sel.router.reason || ""}` }));
+    if (sel.router.hint) add("Its note", el("pre", { class: "hint-text suggest", text: sel.router.hint }));
+  } else if (call && call.said) {
+    const ago = (sel.ts - when(call.said.ts)) / 1000;
+    add("Agent said", said(call.said), ago >= 120
+      ? el("span", { class: "muted small-print", text: `said ${minutes(ago)} before this call, with nothing since: it may not be about this call` }) : null);
+  } else if (noTranscript) {
+    add("Agent said", el("span", { class: "muted", text: "The agent's transcript is not on this machine, so its own words are not available. The router and phase below still are." }));
+  } else if (ids.length) {
+    add("Agent said", el("span", { class: "muted", text: "Nothing before this call; it was among its first steps." }));
+  }
+  const purpose = (call && call.purpose) || first.purpose; // the trace keeps it too
+  if (purpose) add(short(first.tool_name) === "WebFetch" ? "Looking for" : "Its note", el("span", { class: "purpose", text: purpose }),
+    el("span", { class: "muted small-print", text: "written by the agent on the call itself" }));
+  if (call && call.thinking) add("Reasoning", el("details", {}, el("summary", { text: "its reasoning in that turn" }), el("pre", { text: call.thinking })));
+
+  // -- the phase: the last reference opened, and a quiet stretch just before
+  const ref = run.recs.filter((r) => r.kind === "reference_read" && when(r.ts) <= sel.ts).at(-1);
+  const before = at > 0 ? items[at - 1] : null;
+  const quiet = before ? (sel.ts - before.ts) / 1000 : 0;
+  if (ref || quiet >= 20) {
+    add("Phase", el("span", {}, ref ? el("span", {}, "after ", el("code", { text: ref.file }), ref.meaning ? ` (${ref.meaning})` : "") : null,
+      quiet >= 20 ? `${ref ? "; " : ""}${minutes(quiet)} since the previous call (${before.row.querySelector(".ev-at").textContent})` : null));
+  }
+
+  // -- the router's checkpoint on this call
+  if (!sel.router && ids.length) {
+    // the router's checks in this run: the one on this call, else the last one before it
+    const runAudit = (trace.data.audit || []).filter((a) => a.agent_id === run.id || (a.agent_type && !a.agent_id));
+    // in plain words: "skipped" / "native" mean the router had nothing to suggest for that call
+    const plain = { skipped: "no suggestion", native: "no suggestion", suggest: "sent a note", enforce: "blocked it", gated: "below its threshold" };
+    const cpLine = (a) => el("span", { class: "why-line", title: a.reason || "" }, chip(plain[a.action] || a.action, ACTION_TONE[a.action] || "native"),
+      a.entry_id && ["suggest", "enforce"].includes(a.action) ? ` ${optionMeta(a.entry_id).name}` : "",
+      ["skipped", "native"].includes(a.action) ? el("span", { class: "muted small-print", text: " none of its approved tools fit that call" }) : ` ${a.reason || ""}`);
+    const lastCp = runAudit.filter((a) => when(a.ts) <= sel.ts && a.point === "tool").at(-1);
+    const lastAt = lastCp ? items.find((x) => (x.group || [x.rec]).some((r) => r && r.tool_use_id === lastCp.tool_use_id)) : null;
+    const notes = runAudit.filter((a) => ["suggest", "enforce"].includes(a.action)).length;
+    add("Router", ...(audit.length ? audit.slice(0, 2).map(cpLine) : [
+      el("span", { text: `Not checked: the router's hooks did not fire on ${short(first.tool_name)}, so it had no say in this call.` }),
+      lastCp ? el("span", { class: "why-line muted" }, "Its last check was on an earlier, different call: ", lastAt ? eventLink(lastAt) : `${stamp(lastCp.ts, t0)} ${lastCp.tool_name || ""}`, " ", cpLine(lastCp)) : null]),
+    el("span", { class: "muted small-print", text: notes ? `${notes} router note${notes === 1 ? "" : "s"} or block${notes === 1 ? "" : "s"} in this run, shown as Router lines in the log.` : "The router sent no notes and blocked nothing in this whole run." }));
+  }
+
+  // -- what the prompt offered
+  if (call && call.offered_by) add("Prompt offered", el("blockquote", { class: "quiet" }, call.offered_by), el("span", { class: "muted small-print", text: "a line of the prompt that started this agent" }));
+
+  // -- what the call was given (the result row shows it for a successful calculator call)
+  const input = first.kind === "tool_failed" ? first.expression || first.command : first.kind === "shell" ? first.command : null;
+  if (input) add("Input", el("pre", { text: input }), String(input).length >= 290
+    ? el("span", { class: "muted small-print", text: "cut short in the trace" }) : null);
+
+  // -- the outcome
+  if (first.kind === "tool_failed") add("Outcome", el("span", { text: first.error || "failed" }));
+  else if (first.kind === "calc") add("Result", el("pre", { text: recs.map((r) => `${r.expression}\n→ ${calcResult(r.result)}`).join("\n\n") }));
+  if (first.kind !== "tool_failed" && sameTool(sel)) {
+    const failed = items.slice(0, at).reverse().find((x) => x.rec && x.rec.kind === "tool_failed" && sameTool(x) && near(x));
+    if (failed) add("Retry of", eventLink(failed));
+  } else if (first.kind === "tool_failed") {
+    const retry = items.slice(at + 1).find((x) => sameTool(x) && near(x));
+    if (retry) add("Retried", eventLink(retry));
+  }
+  if (call && call.said_after && (!call.said || call.said_after.ts !== call.said.ts)) add("Next it said", said(call.said_after));
+
+  // -- where a calculator result went
+  const used = new Map();
+  calls.forEach((c) => (c.used_in || []).forEach((u) => {
+    const prior = used.get(u.tool_use_id) || [];
+    used.set(u.tool_use_id, [...new Set([...prior, ...u.numbers])]);
+  }));
+  if (used.size) { // one line per log row, in time order (a folded row can hold several calls)
+    const byRow = new Map();
+    for (const [id, nums] of used) {
+      const x = items.find((y) => (y.group || [y.rec || y.router]).some((r) => r && r.tool_use_id === id));
+      if (x) byRow.set(x, [...new Set([...(byRow.get(x) || []), ...nums])]);
+    }
+    add("Used in", el("ul", { class: "used" }, ...[...byRow.entries()].sort((a, b) => a[0].ts - b[0].ts).map(([x, nums]) =>
+      el("li", {}, eventLink(x), " ", el("span", { class: "chips" }, ...nums.slice(0, 5).map((n) => chip(n, "outline")))))),
+    el("p", { class: "muted small-print", text: "Later calls whose input repeats a number from this result. A match, not proof." }));
+  }
+
+  return el("div", { class: "why" },
+    el("div", { class: "why-head" }, el("h3", {}, el("span", { class: "mono", text: sel.row.querySelector(".ev-at").textContent }), " ", sel.row.querySelector(".ev-kind").textContent),
+      el("div", { class: "chips" }, ...chips.filter(Boolean))),
+    ...rows);
 }
 
 function initTrace() {
@@ -1242,11 +1457,22 @@ function initTrace() {
   // a mark in the chart selects its line in the log; a line in the log lights its marks
   $("#trace-chart").addEventListener("click", (e) => {
     const mk = e.target.closest(".mk");
-    if (mk) selectEvent(mk.dataset.key, true);
+    if (mk) { selectEvent(mk.dataset.key, true, true); revealWhy(); }
   });
   $("#trace-timeline").addEventListener("click", (e) => {
+    const say = e.target.closest(".ev-say");
+    if (say) { say.classList.toggle("open"); return; }
     const row = e.target.closest(".ev");
-    if (row && !e.target.closest("summary, pre")) selectEvent(row.dataset.key);
+    if (row && !e.target.closest("summary, pre")) { selectEvent(row.dataset.key, false, true); revealWhy(); }
+  });
+  $("#trace-timeline").addEventListener("keydown", (e) => { // with the log focused, arrows move the selection
+    if (!["ArrowDown", "ArrowUp"].includes(e.key)) return;
+    const rows = $$("#trace-timeline .ev");
+    if (!rows.length) return;
+    e.preventDefault();
+    const i = rows.findIndex((r) => r.dataset.key === trace.selected);
+    const j = i < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
+    selectEvent(rows[j].dataset.key, true, true);
   });
   $("#trace-timeline").addEventListener("mouseover", (e) => {
     const key = (e.target.closest(".ev") || {}).dataset?.key;

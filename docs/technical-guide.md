@@ -120,7 +120,20 @@ The demo has four tabs:
   with the router's notes placed where they fired (consecutive calculator calls, shell commands and
   checks of one source fold into one line), and the decisions parsed from its report, one tab per
   part. A mark in the chart selects its line in the log; the log and the decisions scroll in their
-  own panes, so the page itself stays about a screen tall. It reads `--trace-dir`
+  own panes, so the page itself stays about a screen tall.
+- **Why each step happened.** When the agent's Claude Code transcript is on this machine
+  (`<project>/<session>/subagents/agent-<agent_id>.jsonl`; the trace hooks record where), the log
+  puts each of the agent's own messages above the calls it led to, marks stretches of 30 s or more
+  with no tool calls, and labels each shell row with the agent's own note on the command. Selecting
+  an event opens the **Why?** tab: what the agent said just before it (flagged when that was minutes
+  earlier), its note on the call, its reasoning when the transcript kept any, the phase (last
+  reference opened), the router's checkpoint on the call or its last one before it, the line of the
+  delegating prompt that offered the tool, the outcome and any retry, what the agent said next, and,
+  for a calculator result, the later calls that repeat its numbers. The data comes from
+  `GET /api/trace/<session>/why` (`demo/why.py`), joined to the trace by `tool_use_id`; nothing
+  leaves the machine. Claude Code deletes old transcripts, so the trace hooks keep a copy: each call's
+  own note (`purpose`) and, in `run_end`, the agent's messages and per-call links (`why`). Without
+  either, the tab still shows the router, phase and outcome. It reads `--trace-dir`
   (default: `trace/` next to `--audit-dir`); `--state-dir <root>` sets both to `<root>/audit` and
   `<root>/trace`. While open, the tab re-reads the trace every 3 seconds, so it follows a run as it
   happens (**Follow live**). Each session is labelled by the hand-off's description, else the

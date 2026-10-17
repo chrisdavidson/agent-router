@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -909,7 +910,7 @@ def test_trace_tab_script_follows_a_live_run() -> None:
 
 def test_trace_tab_is_a_time_chart_over_a_compact_log() -> None:
     """Same reason: pin the swimlane chart, the one-line log it selects into, the folding of
-    repeated source checks, and the decisions as tabs, so the long-scroll layout cannot creep back."""
+    repeated source checks, and the decisions as tabs, so the long-scroll layout cannot return."""
     js = (server.STATIC_DIR / "app.js").read_text(encoding="utf-8")
     html = (server.STATIC_DIR / "index.html").read_text(encoding="utf-8")
     css = (server.STATIC_DIR / "app.css").read_text(encoding="utf-8")
@@ -921,3 +922,52 @@ def test_trace_tab_is_a_time_chart_over_a_compact_log() -> None:
     assert "trace.decTab" in js and 'role: "tab"' in js
     assert "restoreLogScroll(prev.scroll)" in js
     assert ".trace-pane {" in css and "overflow: auto" in css
+
+
+def test_trace_tab_says_why_each_step_happened() -> None:
+    """Same reason: pin the why-data fetch, the agent's messages heading its calls (with quiet
+    stretches marked), and the Why? tab with the router, prompt, retry and use of a result."""
+    js = (server.STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert "/why`).catch(() => null)" in js and "trace.why = why" in js
+    assert "function intentRow(" in js and "ev-gap" in js and "QUIET_S" in js
+    assert (
+        "function whyPanel(" in js
+        and '["why",' in js
+        and "selectEvent(row.dataset.key, false, true)" in js
+    )
+    for label in (
+        '"Agent said"',
+        '"Its note"',
+        '"Prompt offered"',
+        '"Input"',
+        '"Retried"',
+        '"Retry of"',
+        '"Next it said"',
+        '"Used in"',
+    ):
+        assert label in js
+    assert (
+        "router's hooks did not fire on" in js
+        and "Its last check was on an earlier, different call" in js
+    )
+
+
+def test_trace_tab_does_not_show_another_runs_report() -> None:
+    """Older traces could pick up an analysis written before the run: the tab says so and hides
+    those decisions (the server adds ``analysis_mtime`` to compare against the run's start)."""
+    js = (server.STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert "function staleReport(" in js and "end.analysis_mtime * 1000 < when(run.start.ts)" in js
+    assert 'chip("another run\'s report", "enforce")' in js
+
+
+def test_session_summary_ignores_a_report_written_before_its_run(tmp_path: Path) -> None:
+    old = tmp_path / "analysis-old.md"
+    old.write_text("x")
+    os.utime(old, (1_700_000_000, 1_700_000_000))  # 2023: long before the run
+    recs = [
+        _trace("run_start", ts="2026-10-16T10:00:00+00:00"),
+        _trace("run_end", analysis=str(old), decisions={"conclusion": {"confidence": "MEDIUM"}}),
+    ]
+    assert server.summarise_trace(recs, None)["confidence"] is None
+    os.utime(old, None)  # written now, after the run started: the run's own report
+    assert server.summarise_trace(recs, None)["confidence"] == "MEDIUM"

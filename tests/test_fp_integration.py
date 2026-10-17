@@ -1068,3 +1068,139 @@ def test_run_examples_counts_a_report_returned_inline_as_complete():
 )
 def test_parse_analysis_reads_the_re_entry_disclosure(line, fired):
     assert _trace().parse_analysis(line + "\n")["re_entry"]["fired"] is fired
+
+
+def test_trace_records_where_the_transcript_is(tmp_path):
+    """The Trace tab's Why? tab reads the agent's own words from Claude Code's transcript; the
+    hooks receive its path, so run_start and run_end keep it."""
+    tr = _trace()
+    base = {"session_id": "s", "agent_type": FP, "agent_id": "a1", "cwd": str(tmp_path)}
+    main = "/home/me/.claude/projects/p/s.jsonl"
+    start = tr.handle(
+        {**base, "hook_event_name": "SubagentStart", "transcript_path": main}, tmp_path
+    )
+    assert start["transcript_path"] == main
+    sub = "/home/me/.claude/projects/p/s/subagents/agent-a1.jsonl"
+    end = tr.handle(
+        {
+            **base,
+            "hook_event_name": "SubagentStop",
+            "transcript_path": main,
+            "agent_transcript_path": sub,
+        },
+        tmp_path,
+    )
+    assert end["transcript_path"] == main and end["agent_transcript_path"] == sub
+
+
+def test_trace_resolves_a_report_path_written_through_a_shell_variable(tmp_path):
+    """A report written as ``D=/out; cat >> "$D/.first-principles/analysis-x.md"`` is found;
+    an older analysis in the agent's folder is never taken as this run's report."""
+    import time
+
+    tr = _trace()
+    assert tr._expand("$D/.first-principles/a.md", 'D="/out/pa"; mkdir -p "$D"') == (
+        "/out/pa/.first-principles/a.md"
+    )
+    assert tr._expand("${D}/a.md", "D=/x; E=$D/y") == "/x/a.md"
+    assert tr._expand("$NOPE/a.md", "D=/x") == "$NOPE/a.md"
+    cwd = tmp_path / "proj"
+    (cwd / ".first-principles").mkdir(parents=True)
+    old = cwd / ".first-principles" / "analysis-20261015T200222Z.md"
+    old.write_text("## Answer\nanother question\n")
+    past = time.time() - 3 * 86400
+    os.utime(old, (past, past))
+    run = [{"kind": "run_start", "ts": "2026-10-17T02:00:00+00:00"}]
+    assert tr._analysis_path(run, str(cwd), tr._when(run[0]["ts"])) is None
+    assert tr._analysis_path(run, str(cwd)) == old  # no start known: the old fallback
+
+
+def test_trace_keeps_the_why_so_it_outlives_the_transcript(tmp_path, monkeypatch):
+    """Each call keeps the agent's own note on it, and run_end keeps the agent's messages and
+    per-call links, read from the transcript while Claude Code still has it."""
+    tr = _trace()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    sub = tmp_path / "cc" / "projects" / "p" / "s" / "subagents"
+    sub.mkdir(parents=True)
+    lines = [
+        {"type": "user", "timestamp": "2026-10-16T10:00:00Z", "message": {"content": "Go."}},
+        {
+            "type": "assistant",
+            "timestamp": "2026-10-16T10:00:05Z",
+            "message": {"content": [{"type": "text", "text": "Now I'll check the fees."}]},
+        },
+        {
+            "type": "assistant",
+            "timestamp": "2026-10-16T10:00:06Z",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "t1",
+                        "name": "Bash",
+                        "input": {"command": "ls", "description": "Check the fee folder"},
+                    }
+                ]
+            },
+        },
+    ]
+    (sub / "agent-a1.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    base = {"session_id": "s", "agent_type": FP, "agent_id": "a1", "cwd": str(tmp_path)}
+    tr.handle({**base, "hook_event_name": "SubagentStart"}, tmp_path)
+    call = tr.handle(
+        {
+            **base,
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": "t1",
+            "tool_input": {"command": "ls", "description": "Check the fee folder"},
+            "tool_response": "ok",
+        },
+        tmp_path,
+    )
+    assert call["purpose"] == "Check the fee folder"
+    end = tr.handle({**base, "hook_event_name": "SubagentStop"}, tmp_path)
+    assert end["why"]["narrations"][0]["text"] == "Now I'll check the fees."
+    assert end["why"]["calls"]["t1"]["said_i"] == 0
+
+
+def test_keep_why_backfills_old_traces_from_their_transcripts(tmp_path, monkeypatch):
+    tr = _trace()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    sub = tmp_path / "cc" / "projects" / "p" / "s" / "subagents"
+    sub.mkdir(parents=True)
+    lines = [
+        {"type": "user", "timestamp": "2026-10-16T10:00:00Z", "message": {"content": "Go."}},
+        {
+            "type": "assistant",
+            "timestamp": "2026-10-16T10:00:05Z",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "Now I'll check the fees."},
+                    {
+                        "type": "tool_use",
+                        "id": "t1",
+                        "name": "Bash",
+                        "input": {"command": "ls", "description": "Check the fee folder"},
+                    },
+                ]
+            },
+        },
+    ]
+    (sub / "agent-a1.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    traces = tmp_path / "trace"
+    traces.mkdir()
+    old = [
+        {"ts": "2026-10-16T10:00:00+00:00", "agent_id": "a1", "kind": "run_start"},
+        {"ts": "2026-10-16T10:00:06+00:00", "agent_id": "a1", "kind": "shell", "tool_use_id": "t1"},
+        {"ts": "2026-10-16T10:01:00+00:00", "agent_id": "a1", "kind": "run_end"},
+    ]
+    (traces / "s.jsonl").write_text("\n".join(json.dumps(r) for r in old) + "\n")
+    (traces / "gone.jsonl").write_text(json.dumps({"agent_id": "zz", "kind": "run_end"}) + "\n")
+    out = tr.keep_why(traces)
+    assert out[0].startswith("gone.jsonl: nothing to add") and "added 2" in out[1]
+    recs = [json.loads(x) for x in (traces / "s.jsonl").read_text().splitlines()]
+    assert recs[1]["purpose"] == "Check the fee folder"
+    assert recs[2]["why"]["narrations"][0]["text"] == "Now I'll check the fees."
+    assert (traces / "s.jsonl.bak").read_text().count("\n") == 3  # the original, untouched
+    assert tr.keep_why(traces)[1] == "s.jsonl: nothing to add"  # running it again changes nothing

@@ -34,6 +34,7 @@ was started with ``allow_shell=True``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -248,6 +249,26 @@ def _report_title(records: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _borrowed_report(records: list[dict[str, Any]], end: dict[str, Any]) -> bool:
+    """True when a run_end's report on disk predates its run: older traces took the newest
+    analysis in the agent's folder when the run's own report path did not resolve."""
+    start = next(
+        (
+            r.get("ts")
+            for r in records
+            if r.get("kind") == "run_start" and r.get("agent_id") == end.get("agent_id")
+        ),
+        None,
+    )
+    if not start or not isinstance(end.get("analysis"), str):
+        return False
+    try:
+        written = Path(end["analysis"]).stat().st_mtime
+        return written < datetime.fromisoformat(str(start).replace("Z", "+00:00")).timestamp() - 5
+    except (OSError, ValueError):
+        return False
+
+
 def summarise_trace(records: list[dict[str, Any]], audit: Path | None) -> dict[str, Any]:
     """What the Trace tab's session picker shows: a label a person can recognise, where it
     came from, and whether a run is still open. Time-independent, so it can be cached."""
@@ -273,7 +294,11 @@ def summarise_trace(records: list[dict[str, Any]], audit: Path | None) -> dict[s
     ended = {r.get("agent_id") for r in records if r.get("kind") == "run_end"}
     delegated = sum(r.get("kind") == "delegation" and not r.get("agent_id") for r in records)
     last_end = next((r for r in reversed(records) if r.get("kind") == "run_end"), {})
-    conclusion = (last_end.get("decisions") or {}).get("conclusion") or {}
+    conclusion = (
+        {}
+        if _borrowed_report(records, last_end)
+        else (last_end.get("decisions") or {}).get("conclusion") or {}
+    )
     return {
         "label": _clip(label) if label else None,
         "label_source": source,
@@ -640,6 +665,10 @@ def create_app(
     def get_trace(session: str) -> dict[str, Any]:
         path = trace_path(session)
         records = _read_jsonl(path)
+        for r in records:  # when the report on disk was written, to catch another run's report
+            if r.get("kind") == "run_end" and isinstance(r.get("analysis"), str):
+                with contextlib.suppress(OSError):
+                    r["analysis_mtime"] = Path(r["analysis"]).stat().st_mtime
         audit = audit_for(session)
         return {
             **session_row(path),
@@ -647,6 +676,53 @@ def create_app(
             # the router's own decisions in the same session, to interleave with the trace
             "audit": [restore_hint(r) for r in _read_jsonl(audit)] if audit else [],
         }
+
+    # explanations keyed by transcript path -> ((mtime, size), explain() result)
+    explained: dict[Path, tuple[tuple[float, int], dict[str, Any]]] = {}
+
+    @app.get("/api/trace/{session}/why")
+    def get_trace_why(session: str) -> dict[str, Any]:
+        """Per run of the session: the agent's messages and, per tool call, why it happened
+        (see ``why.py``), read from the agent's own Claude Code transcript when it is on disk."""
+        from agent_router.demo import why
+
+        records = _read_jsonl(trace_path(session))
+        kept = {  # what the trace hook kept at stop, for when the transcript is gone
+            r["agent_id"]: r["why"]
+            for r in records
+            if r.get("kind") == "run_end" and r.get("agent_id") and isinstance(r.get("why"), dict)
+        }
+        hints: dict[str, list[str]] = {}
+        for r in records:
+            aid = r.get("agent_id")
+            if not aid:
+                continue
+            hints.setdefault(aid, [])
+            for key in ("agent_transcript_path", "transcript_path"):
+                if isinstance(r.get(key), str):
+                    hints[aid].append(r[key])
+        runs: dict[str, Any] = {}
+        for aid, paths in hints.items():
+            path = why.find_transcript(session, aid, paths)
+            if path is None:
+                runs[aid] = (
+                    {"transcript": None, "kept": True, **why.expand(kept[aid])}
+                    if aid in kept
+                    else {"transcript": None}
+                )
+                continue
+            try:
+                st = path.stat()
+                sig = (st.st_mtime, st.st_size)
+                cached = explained.get(path)
+                if not cached or cached[0] != sig:
+                    cached = (sig, why.explain(why.read_transcript(path)))
+                    explained[path] = cached
+            except OSError:
+                runs[aid] = {"transcript": None}
+                continue
+            runs[aid] = {"transcript": str(path), **cached[1]}
+        return {"session": session, "runs": runs}
 
     @app.get("/")
     def index() -> FileResponse:
