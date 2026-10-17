@@ -13,7 +13,8 @@ A pattern that is not housekeeping and recurs (``--min-calls`` calls in ``--min-
 sessions) is a CANDIDATE: a tool worth considering for the catalog. Candidates are what the
 next step stores and trials in shadow; this script only measures.
 
-Counts, hosts and construct names only; no prompt or command text. ``--write`` writes
+Counts and construct names only: no prompt or command text, no URLs and no host names (each
+pattern keeps how many distinct hosts it touched, not which). ``--write`` writes
 ``TOOL-GAPS.md``; ``--json PATH`` writes the same figures for the candidate store.
 Standard library only.
 """
@@ -212,7 +213,7 @@ def scan(states: list[Path], min_calls: int = 5, min_sessions: int = 2) -> dict[
     calls: dict[str, Counter[str]] = defaultdict(Counter)
     runs: dict[str, set[str]] = defaultdict(set)
     sessions: dict[str, set[str]] = defaultdict(set)
-    hosts: dict[str, Counter[str]] = defaultdict(Counter)
+    hosts: dict[str, set[str]] = defaultdict(set)  # counted, never written out
     totals: Counter[str] = Counter()
     seen: set[tuple[Any, ...]] = set()
     all_runs: set[str] = set()
@@ -247,7 +248,7 @@ def scan(states: list[Path], min_calls: int = 5, min_sessions: int = 2) -> dict[
                     sessions[pat].add(str(rec["session"]))
                 host = rec.get("host") or _host_in(rec.get("command"))
                 if host:
-                    hosts[pat][str(host)] += 1
+                    hosts[pat].add(str(host).lower())
 
     patterns = []
     for pid, meta in PATTERNS.items():
@@ -265,7 +266,7 @@ def scan(states: list[Path], min_calls: int = 5, min_sessions: int = 2) -> dict[
                 "runs": len(runs[pid]),
                 "sessions": n_sessions,
                 "router": {k: c["router: " + k] for k in ROUTER_SEEN if c["router: " + k]},
-                "hosts": dict(hosts[pid].most_common(8)),
+                "hosts": len(hosts[pid]),  # distinct hosts: a count, not a list
                 "candidate": not meta["noise"]
                 and c["calls"] >= min_calls
                 and n_sessions >= min_sessions,
@@ -295,8 +296,9 @@ def render(result: dict[str, Any]) -> str:
     lines = [
         "# Tool gaps (offline measurement)",
         "",
-        "Counts, hosts and construct names only; no prompt or command text. Regenerate with",
-        "`python3 integrations/first-principles/tool_gaps.py --write` (or `make tool-gaps`).",
+        "Counts and construct names only; no prompt or command text, no URLs or host names.",
+        "Regenerate with `python3 integrations/first-principles/tool_gaps.py --write`",
+        "(or `make tool-gaps`).",
         f"Measured {result['generated']} over {result['trace_files']} trace files: "
         f"{result['runs']} agent runs in {result['sessions']} sessions, from the hooks' state and",
         "the saved runs (`runs/*/state`, untracked; a snapshot of this checkout's recordings, not",
@@ -351,9 +353,7 @@ def render(result: dict[str, Any]) -> str:
             f"{p['sessions']} sessions; router: {_router_cell(p['router'])}.",
         ]
         if p["hosts"]:
-            lines.append(
-                "- **Hosts:** " + ", ".join(f"{h} ({n})" for h, n in p["hosts"].items()) + "."
-            )
+            lines.append(f"- **Distinct hosts:** {p['hosts']}.")
         lines.append("")
     lines += [
         "## Reading it",

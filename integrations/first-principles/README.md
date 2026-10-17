@@ -337,7 +337,7 @@ reference (second-order thinking, Phase 2 inversion).
 | `plugin/` | the Claude Code plugin: hooks, `.mcp.json`, `bin/hook`, `bin/mcp`, `bin/trace`, `bin/handoff-hook`, `bin/conduct`. Listed in the repo's `.claude-plugin/marketplace.json` |
 | `handoff/` | the structured-summary hand-off to first-principles and its 9.16 report (the contract the trace reads) |
 | `measure_calc_fit.py`, `CALC-SCRIPT-COVERAGE.md` | offline: how many recorded interpreter calls `calc_expression` / `calc_script` accept, and whether the calculator's figures agree with the real output |
-| `tool_gaps.py`, `TOOL-GAPS.md` | offline (`make tool-gaps`): what the agent kept doing with no catalog tool for it, joined to what the router made of each call (did not fit, skip pattern, classified none, acted on, not checked), and the recurring needs that are candidates for new tools. Counts, hosts and construct names only; `--json` for the candidate store |
+| `tool_gaps.py`, `TOOL-GAPS.md` | offline (`make tool-gaps`): what the agent kept doing with no catalog tool for it, joined to what the router made of each call (did not fit, skip pattern, classified none, acted on, not checked), and the recurring needs that are candidates for new tools. Counts and construct names only (no prompt or command text, no URLs or host names); `--json` for the candidate store |
 | `conduct.py`, `plugin/skills/analyze/` | the conductor: helper sub-commands and the `/agent-router-fp:analyze` skill |
 | `trace.py` | the decision trace: hook handler, analysis parser, `--replay`, `--report` |
 | `battery.py` | live A/B: first-principles' routing catalog with and without this plugin |
