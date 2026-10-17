@@ -14,7 +14,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   a source without the content, git, file inspection, housekeeping), joins it by `tool_use_id` to
   what the router made of it, and writes `TOOL-GAPS.md`: the router's checkpoint outcomes, one
   row per pattern, and the recurring needs (`--min-calls`, `--min-sessions`) as candidates for
-  new tools. Counts, hosts and construct names only, never prompt or command text; `--json`
+  new tools. Counts and construct names only: never prompt or command text, URLs or host names
+  (a pattern keeps how many distinct hosts it touched, not which); `--json`
   writes the same figures for the candidate store that comes next. On this checkout's 71 runs:
   multi-step compute scripts (197 calls), sources without the content (67), PDFs (42), curl
   fetches (30) and git (22) are candidates; the router had no entry for any of them.

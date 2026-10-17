@@ -104,9 +104,9 @@ def test_each_call_lands_in_one_pattern_joined_to_what_the_router_made_of_it(sta
         2,
         {"did not fit": 2},
     )
-    assert by["document_to_text"]["hosts"] == {"www.osti.gov": 2}
+    assert by["document_to_text"]["hosts"] == 1  # www.osti.gov, counted not named
     assert by["web_via_shell"]["router"] == {"not checked": 2}
-    assert by["source_without_content"]["hosts"] == {"law.justia.com": 2}
+    assert by["source_without_content"]["hosts"] == 1
     assert by["inspect_files"]["router"] == {"skip pattern": 2}
     # an answered source and the catalog's calculator are not gaps
     assert sum(p["calls"] for p in result["patterns"]) == 10
@@ -132,6 +132,7 @@ def test_the_report_keeps_no_command_text(state: Path, tmp_path: Path, capsys):
     saved = out.read_text()
     for kept in (text, saved):
         assert "secret_rate" not in kept and "private-workdir" not in kept and "f.pdf" not in kept
+        assert "osti.gov" not in kept and "justia.com" not in kept and "nrel.gov" not in kept
     assert "### Multi-step compute scripts" in text
     assert json.loads(saved)["patterns"][0]["candidate"] is True
 

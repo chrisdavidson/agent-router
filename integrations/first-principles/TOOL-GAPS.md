@@ -1,7 +1,8 @@
 # Tool gaps (offline measurement)
 
-Counts, hosts and construct names only; no prompt or command text. Regenerate with
-`python3 integrations/first-principles/tool_gaps.py --write` (or `make tool-gaps`).
+Counts and construct names only; no prompt or command text, no URLs or host names.
+Regenerate with `python3 integrations/first-principles/tool_gaps.py --write`
+(or `make tool-gaps`).
 Measured 2026-10-17 over 70 trace files: 71 agent runs in 70 sessions, from the hooks' state and
 the saved runs (`runs/*/state`, untracked; a snapshot of this checkout's recordings, not
 reproducible from a fresh clone).
@@ -12,8 +13,8 @@ Every checkpoint in the audit logs, by where it fired and what the router made o
 
 | Checkpoint / outcome | Count |
 |---|---|
-| prompt / acted on | 14 |
-| prompt / classified none | 59 |
+| prompt / acted on | 15 |
+| prompt / classified none | 66 |
 | prompt / skip pattern | 36 |
 | tool / acted on | 16 |
 | tool / classified none | 135 |
@@ -52,28 +53,28 @@ in at least 2 sessions.
 - **Need:** exact results from a short script (imports, loops, several printed values).
 - **Proposal:** extend calc_script, or a sandboxed script runner.
 - **Evidence:** 197 calls (2 failed) in 56 runs and 55 sessions; router: 132 did not fit, 65 not checked.
-- **Hosts:** www.fincen.gov (1), www.legis.state.pa.us (1).
+- **Distinct hosts:** 2.
 
 ### Sources that came back without the content
 
 - **Need:** the fact at its source when the page is blocked, gone or lacks it.
 - **Proposal:** a source fallback: an archived copy or an alternate source.
 - **Evidence:** 67 calls (19 failed) in 25 runs and 24 sessions; router: 67 not checked.
-- **Hosts:** www.osti.gov (8), atb.nrel.gov (7), en.wikipedia.org (5), www.oregon.gov (5), developer.nrel.gov (5), www.ftb.ca.gov (4), www.sos.nm.gov (2), www.multco.us (2).
+- **Distinct hosts:** 30.
 
 ### Reading documents (PDF) as text
 
 - **Need:** the text of a PDF or other document, to search or quote.
 - **Proposal:** a document-to-text tool: fetch a PDF or file and return its text.
 - **Evidence:** 42 calls (4 failed) in 18 runs and 17 sessions; router: 15 did not fit, 27 not checked.
-- **Hosts:** www.ftb.ca.gov (5), sos.wyo.gov (3), www.oregon.gov (2), www.projectlibre.com (1), wyoleg.gov (1), www.pa.gov (1), www.osti.gov (1), sam.nrel.gov (1).
+- **Distinct hosts:** 18.
 
 ### Fetching pages with curl / wget
 
 - **Need:** a page's own text (WebFetch returns a small model's summary instead).
 - **Proposal:** a raw fetch tool: the page's text, not a summary of it.
 - **Evidence:** 30 calls (4 failed) in 13 runs and 13 sessions; router: 20 did not fit, 10 not checked.
-- **Hosts:** developer.nrel.gov (7), www.irs.gov (5), raw.githubusercontent.com (3), pages.stern.nyu.edu (3), www.deertrailinnovationgroup.com (2), taxfoundation.org (2), www.palegis.us (1), www.pa.gov (1).
+- **Distinct hosts:** 12.
 
 ### Repository history and search (git, gh)
 
