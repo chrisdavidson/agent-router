@@ -273,7 +273,9 @@ It flags one contradiction.
 .venv/bin/python integrations/first-principles/trace.py --replay <capture>/run.jsonl --state DIR
 ```
 
-`--report` prints one row per finished run. `--replay` rebuilds the hook payloads from a
+`--keep-why <trace dir>` copies the agent's own words (its messages and its note on each call)
+into traces written before the hooks kept them, while Claude Code still has the transcripts; it
+saves each changed trace's original as `<session>.jsonl.bak`. `--report` prints one row per finished run. `--replay` rebuilds the hook payloads from a
 `claude -p` stream-json capture, to trace a past run offline.
 
 The trace keeps the report itself, so it still reads after the analysis file is gone.
@@ -290,7 +292,9 @@ Replaying the 28 example captures with their reports removed gives decisions for
 
 **In the demo.** The **Trace** tab shows each run: a summary card, a swimlane chart of the run
 over time, a compact log of what the agent did with the router's notes placed where they fired, and
-the decisions parsed from its report, one tab per part.
+the decisions parsed from its report, one tab per part. With the agent's transcript on the machine,
+the log groups calls under what the agent said, and a **Why?** tab explains any selected step: its
+stated intent, the router's verdict, what the prompt offered, the outcome and where a result went.
 
 ![Trace tab: the estimate-fermi example replayed through today's trace.py](../../docs/img/demo-trace.png)
 

@@ -6,6 +6,38 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+### Added
+
+- **Why each step happened, in the Trace tab.** The demo server reads the agent's own Claude Code
+  transcript (`GET /api/trace/<session>/why`, `demo/why.py`) and joins it to the trace by
+  `tool_use_id`. The event log puts each of the agent's messages above the calls it led to, marks
+  quiet stretches of 30 s or more, and labels shell rows with the agent's own note on the command
+  (Bash `description`). Selecting an event opens a **Why?** tab: what the agent said before it
+  (flagged when minutes old), its note on the call, its reasoning if kept, the phase, the router's
+  checkpoint on the call (or that its hooks never saw it, with its last check before), the
+  delegating prompt's line that offered the tool, outcome and retry, what it said next, and the
+  later calls that repeat a calculator result's numbers (a match, not proof). On a narrow screen a
+  click scrolls the tab into view; with the log focused, arrow keys step through events. The trace
+  hooks now record `transcript_path` (and `agent_transcript_path` at stop) when Claude Code passes
+  them; older traces fall back to `~/.claude/projects/*/<session>/subagents/` (or
+  `$CLAUDE_CONFIG_DIR`).
+- **The why outlives the transcript.** Claude Code deletes old transcripts, so the trace keeps
+  its own copy: each tool record carries the agent's note on the call (`purpose`), and `run_end`
+  carries `why` (the agent's messages and per-call links, compacted). The Why? tab uses the
+  transcript while it exists, then the kept copy. For traces written before this,
+  `trace.py --keep-why <trace dir>` copies the same data in while the transcripts still exist
+  (additive; each changed trace's original is saved as `<session>.jsonl.bak`).
+
+### Fixed
+
+- **A run could show another run's report.** When the agent wrote its report through a shell
+  variable (`D=/out; cat >> "$D/.first-principles/analysis-….md"`), the trace recorded the path
+  unexpanded, missed it, and fell back to the newest analysis in the agent's folder, which could
+  be days old and about a different question. `trace.py` now expands `VAR=` assignments from the
+  command and never falls back to an analysis written before the run started. Traces already
+  written that way are flagged in the Trace tab ("another run's report") with their decisions
+  and confidence hidden.
+
 ### Changed
 
 - **Trace tab layout.** The tab is now about one screen instead of several: a swimlane chart of
