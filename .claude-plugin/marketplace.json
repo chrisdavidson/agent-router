@@ -8,7 +8,7 @@
     {
       "name": "agent-router-fp",
       "source": "./integrations/first-principles/plugin",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "description": "agent-router checkpoints for use next to the first-principles plugin: the /agent-router-fp:analyze conductor, advisory routing nudges, an exact calculator, and a record-only decision trace. An installed copy needs AGENT_ROUTER_FP_INTEGRATION set to this checkout's integrations/first-principles directory.",
       "category": "reasoning"
     }

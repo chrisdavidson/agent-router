@@ -1,6 +1,6 @@
 [project]
 name = "agent-router"
-version = "0.2.0"
+version = "0.3.0"
 description = "MIT-licensed router that asks a Jev-spec classifier whether an MIT open-source alternative from a fixed catalog fits, at each hook point of a Claude Agent SDK agent."
 readme = "README.md"
 license = "MIT"

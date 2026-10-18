@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-18
+
+The first-principles integration grows: a live, swimlane Trace tab that says why each step happened,
+a tool-gap report over past runs, a fuller `calc_script` and a new `document_text` tool for PDFs.
+
 ### Added
 
 - **`document_text`: a PDF's own text.** A new MCP tool (`tools/document_text.py`, on
@@ -94,29 +99,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   `trace.py --keep-why <trace dir>` copies the same data in while the transcripts still exist
   (additive; each changed trace's original is saved as `<session>.jsonl.bak`).
 
-### Fixed
-
-- **A run could show another run's report.** When the agent wrote its report through a shell
-  variable (`D=/out; cat >> "$D/.first-principles/analysis-….md"`), the trace recorded the path
-  unexpanded, missed it, and fell back to the newest analysis in the agent's folder, which could
-  be days old and about a different question. `trace.py` now expands `VAR=` assignments from the
-  command and never falls back to an analysis written before the run started. Traces already
-  written that way are flagged in the Trace tab ("another run's report") with their decisions
-  and confidence hidden.
-
-### Changed
-
-- **Trace tab layout.** The tab is now about one screen instead of several: a swimlane chart of
-  the run (agent, report, sources, compute, router) over the run's clock, a one-line-per-event log
-  beside the decisions, each scrolling in its own pane, and the decisions as tabs (assumptions,
-  chains, Self-Audit Gate, ground truths, dead ends, techniques not applied, sections). Clicking a
-  mark selects its line in the log. Repeated checks of one source fold into one line, the summary
-  shows the key numbers and folds the rest under **More about this run**, and a live refresh keeps
-  the chosen tab, the selection and the log's scroll position (following the newest event when the
-  log was at its end). On a saved 57-event run the page went from about 6,500 px to about
-  1,650 px tall in a 1280×1000 window.
-
-### Added
 
 - **Route parity.** A first-principles run started from a plain prompt now ends like one started
   with `/agent-router-fp:analyze`: the same delegating prompt and the same report. New hand-off
@@ -145,6 +127,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ### Changed
 
+- **Trace tab layout.** The tab is now about one screen instead of several: a swimlane chart of
+  the run (agent, report, sources, compute, router) over the run's clock, a one-line-per-event log
+  beside the decisions, each scrolling in its own pane, and the decisions as tabs (assumptions,
+  chains, Self-Audit Gate, ground truths, dead ends, techniques not applied, sections). Clicking a
+  mark selects its line in the log. Repeated checks of one source fold into one line, the summary
+  shows the key numbers and folds the rest under **More about this run**, and a live refresh keeps
+  the chosen tab, the selection and the log's scroll position (following the newest event when the
+  log was at its end). On a saved 57-event run the page went from about 6,500 px to about
+  1,650 px tall in a 1280×1000 window.
+
+
 - **Neither way of starting a run stops it** (chosen 2026-10-16). `compose` runs the `doctor`
   checks and the router's preflight, time-bounded, and keeps them in the hand-off record;
   `conduct report --handoff <sha256>` shows whatever is not clean ("Install health", "Router
@@ -152,6 +145,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   stops on a `doctor` FAIL or a declined preflight, so it and a plain-prompt run behave alike.
 
 ### Fixed
+
+- **A run could show another run's report.** When the agent wrote its report through a shell
+  variable (`D=/out; cat >> "$D/.first-principles/analysis-….md"`), the trace recorded the path
+  unexpanded, missed it, and fell back to the newest analysis in the agent's folder, which could
+  be days old and about a different question. `trace.py` now expands `VAR=` assignments from the
+  command and never falls back to an analysis written before the run started. Traces already
+  written that way are flagged in the Trace tab ("another run's report") with their decisions
+  and confidence hidden.
+
 
 - The MCP `verify_summary` result now carries the paths of the analysis, its reader report and
   the trace (only the CLI had them), plus `report_markdown`.
