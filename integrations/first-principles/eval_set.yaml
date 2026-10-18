@@ -4,7 +4,7 @@
 # split test: the holdout. fp-P* / fp-N* are the 13 DELEGATE and 20 NO-DELEGATE prompts of
 #             first-principles-skill tests/routing-catalog.md (MIT, copied verbatim), the
 #             battery that plugin's own description-based routing is measured on.
-version: "fp-2026-10-15.1"
+version: "fp-2026-10-17.1"
 
 cases:
   # ------------------------------------------------------------ cal: prompt, delegate
@@ -158,8 +158,38 @@ cases:
      agent_type: "first-principles:first-principles", tool_input: {command: "cat > /tmp/notes.txt <<'EOF'\nTotal cost estimate\nline two\nEOF"}}
   - {id: s-n3, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
      agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nimport numpy as np\narr = np.arange(10)\nprint(arr.mean())\nEOF"}}
-  - {id: s-n4, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+  - {id: s-n4, split: cal, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
      agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\ntotal = 0\nfor i in range(10):\n    total += i * 2\nprint(total)\nEOF"}}
+  - {id: s-c8, split: cal, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nfrom math import log\ndef tlm(th, tc):\n    return (th - tc) / log(th / tc)\nfor tc in (290, 310, 330):\n    print(tc, round(tlm(838.15, tc + 273.15), 2))\nEOF"}}
+  - {id: s-c9, split: cal, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "cat > /tmp/fp_calc.py <<'EOF'\nw = [5, 4, 3]\nopts = {'A': [3, 5, 1], 'B': [4, 2, 4]}\ntot = {k: sum(a * b for a, b in zip(w, v)) for k, v in opts.items()}\nprint(tot, max(tot, key=tot.get))\nEOF\npython3 /tmp/fp_calc.py"}}
+  - {id: s-c10, split: cal, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "awk 'BEGIN{r=0.07; crf=r*(1+r)^25/((1+r)^25-1); printf \"crf=%.5f annual=%.0f\\n\", crf, 450000*crf}'"}}
+  - {id: s-c11, split: cal, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "cd /tmp && python3 -c \"\nP = 240000; r = 0.0625 / 12\nM = P * r / (1 - (1 + r) ** -360)\nfor y in (5, 10):\n    print(f'{y}y balance {P * (1 + r) ** (12 * y) - M * ((1 + r) ** (12 * y) - 1) / r:,.0f}')\n\""}}
+  - {id: s-n5, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nimport csv\nrows = list(csv.reader(open('costs.csv')))\nfor r in rows[1:]:\n    print(r[0], float(r[2]) * 1.2)\nEOF"}}
+  - {id: s-n6, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "cd /tmp && uv run --quiet --with CoolProp python3 -c \"\nfrom CoolProp.CoolProp import PropsSI\nfor T in (300, 350):\n    print(T, PropsSI('H', 'T', T, 'P', 101325, 'Water'))\n\""}}
+
+  # ------------------------------------------------------------ cal: reading a PDF inside the first-principles agent
+  - {id: d-c1, split: cal, point: tool, expected: document-text, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "cd /tmp && curl -sL -o fees.pdf https://sos.example.gov/docs/FeeSchedule.pdf && pdftotext -layout fees.pdf - | grep -n -i 'annual report'"}}
+  - {id: d-c2, split: cal, point: tool, expected: document-text, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "pdftotext -f 40 -l 45 /tmp/atb-2024.pdf - | head -120"}}
+  - {id: d-c3, split: cal, point: tool, expected: document-text, text: "", tool_name: WebFetch,
+     agent_type: "first-principles:first-principles", tool_input: {url: "https://www.example.gov/docs/fy22osti/80580.pdf", prompt: "Quote verbatim the levelized cost of storage and the round-trip efficiency assumed for the 4-hour case"}}
+  - {id: d-c4, split: cal, point: tool, expected: document-text, text: "", tool_name: WebFetch,
+     agent_type: "first-principles:first-principles", tool_input: {url: "https://www.example-state.gov/tax/forms/2025-rate-schedules.pdf", prompt: "Give the married filing jointly brackets and marginal rates"}}
+  - {id: d-c5, split: cal, point: tool, expected: document-text, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "wget -q -O /tmp/std.pdf https://standards.example.org/pub/B31.1-excerpt.pdf; pdfinfo /tmp/std.pdf; pdftotext -l 5 /tmp/std.pdf -"}}
+  - {id: d-n1, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "ls -la /tmp/*.pdf"}}
+  - {id: d-n2, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: WebFetch,
+     agent_type: "first-principles:first-principles", tool_input: {url: "https://www.example.gov/newsroom/press-release-2025.html", prompt: "Quote the fee announced in this press release"}}
+  - {id: d-n3, split: cal, point: tool, expected: none, text: "", tool_name: WebFetch,
+     agent_type: "first-principles:first-principles", tool_input: {url: "https://en.wikipedia.org/wiki/Molten_salt", prompt: "What is the melting point of solar salt?"}}
 
   # ------------------------------------------------------------ test: first-principles P rows
   - {id: fp-P1, split: test, point: prompt, expected: first-principles-agent,
@@ -259,6 +289,15 @@ cases:
      agent_type: "first-principles:first-principles", tool_input: {command: "cat >> \".first-principles/analysis-20260928T120000Z.md\" <<'FP_EOF'\n## Derivation Chains\nC1: GT-1 (12 units) x GT-2 ($1,500) = $18,000\nFP_EOF"}}
   - {id: x-t9, split: test, point: tool, expected: none, text: "", tool_name: Bash,
      agent_type: "first-principles:first-principles", tool_input: {command: "grep -c '^#' \".first-principles/analysis-20260928T120000Z.md\""}}
+  # ------------------------------------------------------------ test: reading a PDF inside the first-principles agent
+  - {id: d-t1, split: test, point: tool, expected: document-text, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "cd /tmp && curl -sL https://www.example.edu/papers/hertz-contact.pdf -o hc.pdf && pdftotext hc.pdf - | grep -n -i 'maximum shear'"}}
+  - {id: d-t2, split: test, point: tool, expected: document-text, text: "", tool_name: WebFetch,
+     agent_type: "first-principles:first-principles", tool_input: {url: "https://docs.example.gov/docs/fy14osti/62641.pdf", prompt: "What is the default total system loss percentage and its components?"}}
+  - {id: d-t3, split: test, point: tool, expected: document-text, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "pdftotext -layout /tmp/redbook-NM.pdf - | sed -n 1,80p"}}
+  - {id: d-t4, split: test, point: tool, expected: none, decoy: true, text: "", tool_name: WebFetch,
+     agent_type: "first-principles:first-principles", tool_input: {url: "https://www.example.com/blog/bearing-failures", prompt: "Quote the L10 life sentences"}}
   # ------------------------------------------------------------ test: python scripts inside the first-principles agent
   - {id: s-t1, split: test, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
      agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nimport math\ngrowth = 0.12\nprint(math.log(10) / math.log(1 + growth))\nEOF"}}
@@ -270,5 +309,11 @@ cases:
      agent_type: "first-principles:first-principles", tool_input: {command: "cat > scratch.py <<'EOF'\ntotal = 1\nprint(total)\nEOF"}}
   - {id: s-t5, split: test, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
      agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nimport pandas as pd\ndf = pd.read_csv('costs.csv')\nprint(df.sum())\nEOF"}}
-  - {id: s-t6, split: test, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+  - {id: s-t6, split: test, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
      agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nfor n in range(5):\n    print(n ** 2)\nEOF"}}
+  - {id: s-t7, split: test, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nbrackets = [(0, 0.10), (11925, 0.12), (48475, 0.22)]\ndef tax(x):\n    t = 0\n    for i, (lo, r) in enumerate(brackets):\n        hi = brackets[i + 1][0] if i + 1 < len(brackets) else float('inf')\n        if x > lo:\n            t += (min(x, hi) - lo) * r\n    return t\nprint(tax(60000), f'{tax(60000) / 60000:.1%}')\nEOF"}}
+  - {id: s-t8, split: test, point: tool, expected: exact-calc-script, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "awk 'BEGIN{h=838.15; c=316.26; for(r=543.15;r<=583.15;r+=20){t=(h-r)/log(h/r); printf \"%.2f %.4f\\n\", r, 1-c/t}}'"}}
+  - {id: s-t9, split: test, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 - <<'EOF'\nimport re\nt = open('/tmp/page.html').read()\nfor m in re.finditer(r'\\d+\\.\\d+%', t):\n    print(m.group(0))\nEOF"}}

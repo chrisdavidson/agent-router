@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # agent-router stdio MCP server for the first-principles integration: the exact calculator (and
-# its script form) plus the conductor's structured tools (route, verify_summary, doctor).
+# its script form), a PDF's text (document_text), plus the conductor's structured tools (route,
+# verify_summary, doctor).
 # Surfaces as mcp__plugin_agent-router-fp_agent_router__<tool>.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_resolve.sh
@@ -14,4 +15,4 @@ ar_resolve_bin || { echo "agent-router mcp: $AR_ERR" >&2; exit 1; }
 export AGENT_ROUTER_INTEGRATION="$integ"
 export AGENT_ROUTER_MODE=advisory
 export HF_HUB_DISABLE_PROGRESS_BARS=1
-exec "$AR_BIN" mcp --tools calc,calc_script,route,verify_summary,doctor
+exec "$AR_BIN" mcp --tools calc,calc_script,document_text,route,verify_summary,doctor

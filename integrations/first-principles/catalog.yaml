@@ -13,7 +13,7 @@
 #
 # Examples and native_examples are written independently of first-principles' routing
 # catalogs, which are used as the holdout in eval_set.yaml.
-version: "fp-2026-10-15.1"
+version: "fp-2026-10-17.1"
 
 entries:
   - id: first-principles-agent
@@ -89,13 +89,15 @@ entries:
     threshold: 0.8  # calibrate.py, first-principles-agent cal cases
     fits: calc_script  # only a python script the calculator's script form can run (core/fit.py)
     what: >
-      A short straight-line python script (assignments, print, math.log) computed with exact
-      fractions and no floating point error; no loops, functions or imports other than math.
+      A short arithmetic script (python, or an awk BEGIN program): variables, loops, lists,
+      dicts, small functions, f-strings and math.log, computed with exact fractions and no
+      floating point error; no files, input or imports other than math.
     not_for:
       - writing, appending to or reading a file
       - counting words or lines in a file
       - running a program or a test suite
-      - a script with loops, functions, numpy, pandas or scipy
+      - parsing a downloaded page, spreadsheet, CSV or JSON
+      - a script that imports numpy, pandas, scipy, CoolProp or another library
     examples:
       - |-
         python3 - <<'EOF'
@@ -140,6 +142,56 @@ entries:
         mass = demand * 3.6 / per_unit
         print(mass, mass / 1000, mass * 0.85)
         EOF
+      - |-
+        python3 - <<'EOF'
+        P = 300000
+        r = 0.055 / 12
+        pay = P * r / (1 - (1 + r) ** -360)
+        bal = P
+        for month in range(60):
+            bal = bal * (1 + r) - pay
+        print(f'payment {pay:,.2f} balance after 5y {bal:,.0f}')
+        EOF
+      - |-
+        cat > /tmp/score.py <<'EOF'
+        weights = {'cost': 5, 'speed': 3, 'risk': 4}
+        options = {'A': {'cost': 3, 'speed': 5, 'risk': 2}, 'B': {'cost': 4, 'speed': 2, 'risk': 4}}
+        def total(o):
+            return sum(weights[k] * options[o][k] for k in weights)
+        for o in options:
+            print(o, total(o))
+        EOF
+        python3 /tmp/score.py
+      - |-
+        awk 'BEGIN{for(t=290;t<=500;t+=70){tr=t+273.15; tm=(838.15-tr)/log(838.15/tr); printf "%d %.2f %.4f\n", t, tm, 1-316.26/tm}}'
+
+  - id: document-text
+    kind: tool
+    name: PDF to text
+    project: agent-router (own code, on pdfminer.six)
+    license: MIT
+    url: https://github.com/usathyan/agent-router
+    target: ${self.document_tool}
+    points: [tool]
+    replaces: [Bash, WebFetch]
+    agents: ["${fp.agent_type}"]
+    threshold: 0.8  # calibrate.py, first-principles-agent cal cases
+    fits: reads_pdf  # only a call that reads a PDF (core/fit.py)
+    what: >
+      Read a PDF (a report, standard, fee schedule, filing or paper, by link or file) as its
+      own text, page by page, or only the passages that mention given terms.
+    not_for:
+      - an HTML web page or a search
+      - writing, converting or merging PDF files
+      - a scanned image that needs OCR
+    examples:
+      - curl -sL https://www.example.gov/reports/annual-report-2024.pdf -o /tmp/r.pdf && pdftotext -layout /tmp/r.pdf - | head -200
+      - pdftotext -f 12 -l 14 /tmp/standard.pdf - | grep -n -i "design pressure"
+      - wget -q -O /tmp/fees.pdf https://sos.example.gov/Business/Docs/Fees.pdf; pdftotext /tmp/fees.pdf -
+      - pdfinfo /tmp/paper.pdf; pdftotext -l 3 /tmp/paper.pdf - | head -80
+      - pandoc /tmp/whitepaper.pdf -t plain | grep -i "capacity factor"
+      - '{"url":"https://www.nrel.gov/docs/fy24osti/12345.pdf","prompt":"What capacity factor does the report give for the 2030 case?"}'
+      - '{"url":"https://www.irs.gov/pub/irs-pdf/p15t.pdf","prompt":"Quote the 2025 percentage-method withholding table for married filing jointly"}'
 
 # Steps where the main session's own tools are enough (compete as the `none` option).
 native_examples:

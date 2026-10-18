@@ -187,14 +187,15 @@ def run_checks(question: str) -> dict[str, Any]:
 
 
 def calc_tools(integ: integ_mod.Integration, resolved: integ_mod.Resolved) -> list[str]:
-    """Names of the calculator tools the plugin serves, or [] when they are not reachable.
+    """Names of the calculator (and document-text) tools the plugin serves, or [] when they are
+    not reachable.
 
-    Read from the plugin's own files, no live MCP call: the manifest must list
-    ``exact-arithmetic`` among ``capabilities_used``, ``.mcp.json`` must declare the server and
-    its launcher must exist, and the launcher's ``--tools`` list must include the tool.
+    Read from the plugin's own files, no live MCP call: ``.mcp.json`` must declare the server and
+    its launcher must exist, and the launcher's ``--tools`` list must include the tool. The
+    calculator tools also need the manifest to list ``exact-arithmetic`` among
+    ``capabilities_used``; ``document_text`` needs the descriptor to name its catalog entry.
     """
-    if "exact-arithmetic" not in resolved.manifest.capabilities_used:
-        return []
+    arithmetic = "exact-arithmetic" in resolved.manifest.capabilities_used
     plugin = _plugin_dir(integ)
     try:
         servers = json.loads((plugin / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
@@ -205,10 +206,12 @@ def calc_tools(integ: integ_mod.Integration, resolved: integ_mod.Resolved) -> li
         return []
     served = set(match.group(1).split(",")) if match else set()
     out = []
-    if "calc" in served:
+    if "calc" in served and arithmetic:
         out.append(integ.calc_tool)
-    if "calc_script" in served:
+    if "calc_script" in served and arithmetic:
         out.append(integ.calc_script_tool)
+    if "document_text" in served and integ.document_entry:
+        out.append(integ.document_tool)
     return out
 
 
@@ -219,8 +222,19 @@ def capability_line(integ: integ_mod.Integration, tools: Sequence[str]) -> str |
     if integ.calc_tool in tools:
         parts.append(f"{integ.calc_tool} for a single expression")
     if integ.calc_script_tool in tools:
-        parts.append(f"{integ.calc_script_tool} for a straight-line script")
-    return "Exact arithmetic is available: " + " and ".join(parts) + "; load them with ToolSearch."
+        parts.append(f"{integ.calc_script_tool} for a script (loops, lists, small functions)")
+    line = (
+        "Exact arithmetic is available: " + " and ".join(parts) + "; load them with ToolSearch."
+        if parts
+        else ""
+    )
+    if integ.document_tool in tools:
+        line += (" " if line else "") + (
+            f"To read a PDF (a link or a workspace file) as its own text, page by page or only "
+            f"the passages naming given terms, use {integ.document_tool} (load it with "
+            "ToolSearch); WebFetch summarises a PDF instead of returning it."
+        )
+    return line or None
 
 
 def build_prompt(

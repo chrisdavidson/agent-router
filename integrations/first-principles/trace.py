@@ -14,6 +14,8 @@ router's ``audit/<session>.jsonl``:
                    rewrites part of its report in place) or check
   calc             a call to the exact calculator: expression and result (``script: true``
                    for its script form, ``calc_script``)
+  document         a call to ``document_text``: the PDF's host or file name, the pages and
+                   find terms asked for, how many characters came back and how many pages
   shell            any other Bash call (``math`` when it computes a figure)
   tool_failed      PostToolUseFailure
   run_end          SubagentStop: duration, final message, the analysis file parsed into its
@@ -83,6 +85,7 @@ MAX_TEXT = 300
 AGENT: str  # the agent's subagent type
 CALC_TOOL: str  # the exact calculator's tool name
 CALC_SCRIPT_TOOL: str  # its script form's tool name
+DOCUMENT_TOOL: str  # the document-text tool's name
 SUMMARY_HEADING: str
 OUTPUT_GLOB: str  # where the agent writes its analysis, relative to its cwd
 DELEGATE_ENTRY: str  # catalog entry ids, from the integration's descriptor
@@ -115,7 +118,7 @@ def configure() -> None:
     patterns. Runs once at import (the manifest, else the pinned fallback); tests call it again
     after changing the environment. ``INTEGRATION`` is how the manifest was found."""
     global AGENT, CALC_TOOL, SUMMARY_HEADING, OUTPUT_GLOB, DELEGATE_ENTRY, CALC_ENTRY
-    global CALC_SCRIPT_TOOL, CALC_SCRIPT_ENTRY
+    global CALC_SCRIPT_TOOL, CALC_SCRIPT_ENTRY, DOCUMENT_TOOL
     global REPORT_DIR, REPORT_PATH, APPEND, INTEGRATION, MANIFEST
     global ACCEPTED_SCHEMA_VERSIONS, PINNED_SCHEMA
     from agent_router.contracts import integration as integ_mod
@@ -126,6 +129,7 @@ def configure() -> None:
     INTEGRATION = resolved.record()
     AGENT = man.agent_type
     CALC_TOOL, CALC_SCRIPT_TOOL = integ.calc_tool, integ.calc_script_tool
+    DOCUMENT_TOOL = integ.document_tool
     DELEGATE_ENTRY, CALC_ENTRY = integ.delegate_entry, integ.calc_entry
     CALC_SCRIPT_ENTRY = integ.calc_script_entry
     ACCEPTED_SCHEMA_VERSIONS, PINNED_SCHEMA = (
@@ -680,6 +684,19 @@ def _tool_record(payload: dict[str, Any]) -> dict[str, Any] | None:
             "script": True,
             "expression": _trunc(inp.get("script")),
             "result": _trunc(_text_of(payload.get("tool_response")), 200),
+        }
+    if tool == DOCUMENT_TOOL:  # a PDF read as text: where from and how much came back
+        url = str(inp.get("url") or "")
+        text = _text_of(payload.get("tool_response"))
+        pages = re.match(r".*?: (\d+) page\(s\)", text)
+        return {
+            "kind": "document",
+            "host": (urlparse(url).hostname or "") if url else None,
+            "target": _trunc(url or Path(str(inp.get("path") or "")).name, 200),
+            "pages": _trunc(inp.get("pages"), 40),
+            "find": _trunc(inp.get("find"), 120),
+            "chars": len(text),
+            "total_pages": int(pages.group(1)) if pages else None,
         }
     if tool == "Read":
         path = str(inp.get("file_path") or "")

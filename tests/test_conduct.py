@@ -141,9 +141,14 @@ def test_preflight_with_the_real_local_decider(capsys):
 # --- compose -------------------------------------------------------------------------------------
 
 CALC = "mcp__plugin_agent-router-fp_agent_router__calc"
+DOCUMENT = (
+    "To read a PDF (a link or a workspace file) as its own text, page by page or only the "
+    "passages naming given terms, use mcp__plugin_agent-router-fp_agent_router__document_text "
+    "(load it with ToolSearch); WebFetch summarises a PDF instead of returning it."
+)
 CAPABILITY = (
     f"Exact arithmetic is available: {CALC} for a single expression and {CALC}_script for a "
-    "straight-line script; load them with ToolSearch."
+    f"script (loops, lists, small functions); load them with ToolSearch. {DOCUMENT}"
 )
 
 
@@ -171,7 +176,8 @@ def test_compose_golden_without_the_calculator(capsys, tmp_path, monkeypatch):
     )
     monkeypatch.setenv("FP_PLUGIN_ROOT", str(root))
     code, out = _run(capsys, "compose", QUESTION)
-    assert code == 0 and out["prompt"] == f"Problem statement: {QUESTION}"
+    # no exact arithmetic in the manifest: only the document tool is named
+    assert code == 0 and out["prompt"] == f"Problem statement: {QUESTION}\n{DOCUMENT}"
 
 
 def test_compose_without_the_served_tools_names_none(tmp_path, monkeypatch):
@@ -192,11 +198,12 @@ def test_compose_without_the_served_tools_names_none(tmp_path, monkeypatch):
     assert conduct.calc_tools(integ, resolved) == []
 
 
-def test_the_real_plugin_serves_both_calculator_tools():
+def test_the_real_plugin_serves_both_calculator_tools_and_document_text():
     integ = _integ()
     assert conduct.calc_tools(integ, conduct._resolved(integ)) == [
         integ.calc_tool,
         integ.calc_script_tool,
+        integ.document_tool,
     ]
 
 

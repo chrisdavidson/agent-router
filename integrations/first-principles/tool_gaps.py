@@ -235,6 +235,8 @@ def scan(states: list[Path], min_calls: int = 5, min_sessions: int = 2) -> dict[
                     all_sessions.add(str(rec["session"]))
                 if rec.get("kind") == "calc":
                     totals["calculator calls"] += 1
+                if rec.get("kind") == "document":
+                    totals["document_text calls"] += 1
                 pat = pattern_of(rec)
                 if pat is None:
                     continue
@@ -280,6 +282,7 @@ def scan(states: list[Path], min_calls: int = 5, min_sessions: int = 2) -> dict[
         "runs": len(all_runs),
         "sessions": len(all_sessions),
         "calculator_calls": totals["calculator calls"],
+        "document_text_calls": totals["document_text calls"],
         "checkpoints": {f"{p} / {o}": n for (p, o), n in sorted(checkpoints.items())},
         "thresholds": {"min_calls": min_calls, "min_sessions": min_sessions},
         "patterns": patterns,
@@ -314,8 +317,9 @@ def render(result: dict[str, Any]) -> str:
     lines += [f"| {k} | {n} |" for k, n in result["checkpoints"].items()]
     lines += [
         "",
-        f"The agents also used the catalog's calculator {result['calculator_calls']} times; that",
-        "is covered, so it is not counted below.",
+        f"The agents also used the catalog's calculator {result['calculator_calls']} times and its",
+        f"document_text tool {result.get('document_text_calls', 0)} times; that is covered, so it",
+        "is not counted below.",
         "",
         "## What the agent kept doing",
         "",
