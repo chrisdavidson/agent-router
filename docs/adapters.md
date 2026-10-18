@@ -76,6 +76,7 @@ ToolSearch. Worked example: `integrations/first-principles/`.
 ```python
 #!/usr/bin/env python3
 """agent-router command hook: reads host JSON on stdin, writes host JSON on stdout."""
+
 import json, sys, zlib
 from agent_router.core.catalog import load_catalog
 from agent_router.core.router import Router
@@ -83,23 +84,39 @@ from agent_router.core.types import Action, HookPoint, RouterEvent
 from agent_router.deciders.registry import make_decider
 
 HOST = sys.argv[1]  # "codex" | "gemini"
-POINTS = {"UserPromptSubmit": HookPoint.PROMPT, "BeforeAgent": HookPoint.PROMPT,
-          "PreToolUse": HookPoint.TOOL, "BeforeTool": HookPoint.TOOL}
+POINTS = {
+    "UserPromptSubmit": HookPoint.PROMPT,
+    "BeforeAgent": HookPoint.PROMPT,
+    "PreToolUse": HookPoint.TOOL,
+    "BeforeTool": HookPoint.TOOL,
+}
 inp = json.load(sys.stdin)
 event_name = inp["hook_event_name"]
 point = POINTS[event_name]
 turn = str(inp.get("turn_id", "0"))  # Codex sends one; Gemini: keep a per-session counter
-ev = RouterEvent(point=point, session_id=inp.get("session_id", ""),
-                 turn_id=int(turn) if turn.isdigit() else zlib.crc32(turn.encode()),
-                 text=inp.get("prompt", ""), tool_name=inp.get("tool_name"),
-                 tool_input=inp.get("tool_input"))
+ev = RouterEvent(
+    point=point,
+    session_id=inp.get("session_id", ""),
+    turn_id=int(turn) if turn.isdigit() else zlib.crc32(turn.encode()),
+    text=inp.get("prompt", ""),
+    tool_name=inp.get("tool_name"),
+    tool_input=inp.get("tool_input"),
+)
 catalog = load_catalog()
 d = Router(catalog, make_decider("local", catalog)).route(ev)
 out = {}
 if d.action is Action.ENFORCE and point is HookPoint.TOOL:
-    out = ({"decision": "deny", "reason": d.hint} if HOST == "gemini" else
-           {"hookSpecificOutput": {"hookEventName": event_name, "permissionDecision": "deny",
-                                   "permissionDecisionReason": d.hint}})
+    out = (
+        {"decision": "deny", "reason": d.hint}
+        if HOST == "gemini"
+        else {
+            "hookSpecificOutput": {
+                "hookEventName": event_name,
+                "permissionDecision": "deny",
+                "permissionDecisionReason": d.hint,
+            }
+        }
+    )
 elif d.action is Action.SUGGEST and d.hint and not (HOST == "gemini" and point is HookPoint.TOOL):
     out = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": d.hint}}
 print(json.dumps(out))  # exit 0; any router failure should also print {} and exit 0 (fail open)
