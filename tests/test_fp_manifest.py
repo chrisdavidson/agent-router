@@ -295,6 +295,7 @@ def test_renaming_the_agent_type_retargets_the_catalog(tmp_path):
     assert [e.id for e in cat.eligible(HookPoint.TOOL, "Bash", "acme:solver")] == [
         "exact-calc",
         "exact-calc-script",
+        "document-text",
     ]
     assert cat.eligible(HookPoint.TOOL, "Bash", AGENT) == []
 

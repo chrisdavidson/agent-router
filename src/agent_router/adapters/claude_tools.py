@@ -64,12 +64,14 @@ def build_tools(root: Path) -> list[SdkMcpTool[Any]]:
 
     calc_script_tool = tool(
         "calc_script",
-        "Exact calculator for a short python-style script (agent-router, MIT). Statements "
-        "separated by newlines or ';': `import math`, `name = expression`, `name += expression`, "
-        "`print(...)` and bare expressions; each print or bare expression returns one line "
-        "'<expression> = <value>'. Exact fractions and big integers, plus math.log, ln, log10, "
-        "log2, exp, sqrt, pi and e (shown as '≈ decimal'). No loops, functions, f-strings, lists, "
-        "files or other imports: those return an error naming the line.",
+        "Exact calculator for a short python arithmetic script (agent-router, MIT): the script "
+        "you would pipe to python3, run with exact fractions and big integers. Variables, "
+        "for/while loops, if, lists, tuples, dicts, indexing, comprehensions, small functions "
+        "(def, lambda; no recursion), f-strings, `import math`, and sum, min, max, round, range, "
+        "zip, enumerate, sorted, len, abs. Each print returns a line; a number is shown as "
+        "'<expression> = <value>' (an integer, 'a/b (≈ decimal)', or '≈ decimal' for math.log, "
+        "sqrt, exp, pi). No files, input, network or other imports: those return an error "
+        "naming the line.",
         _schema(["script"], script="The script, e.g. 'x = 3\\nprint(x * 2, math.log(x))'."),
     )(_safe(lambda a: calc.evaluate_script(_req(a, "script"))))
 

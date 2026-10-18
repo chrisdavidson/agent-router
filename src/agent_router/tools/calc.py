@@ -6,8 +6,8 @@ the functions in ``FUNCTIONS``. Irrational results (``sqrt(2)``, fractional powe
 approximate functions ``log``, ``ln``, ``log10``, ``log2``, ``exp`` and the constants ``pi`` and
 ``e``, 50 digits) are reported as ``≈ decimal``. A ``math.`` prefix is accepted. A top-level
 list or tuple (``[2*3, 7/2]``) evaluates each item and returns ``[6, 7/2 (≈ 3.5)]``.
-``evaluate_script`` runs a short straight-line script (assignments, ``print``); see its
-docstring. All failures raise ``ValueError``.
+``evaluate_script`` runs a short python-style script (loops, lists, small functions, f-strings);
+see :mod:`agent_router.tools.calc_script`. All failures raise ``ValueError``.
 """
 
 import ast
@@ -427,181 +427,14 @@ def _one(tree: ast.Expression) -> str:
 
 # --- scripts ----------------------------------------------------------------------------------
 
-_BUILTIN_NAMES = frozenset({*FUNCTIONS, *_STATEFUL, *_CONSTANTS, "math", "print"})
-_CONSTRUCTS = {
-    "For": "for loop",
-    "AsyncFor": "for loop",
-    "While": "while loop",
-    "If": "if statement",
-    "FunctionDef": "function definition",
-    "AsyncFunctionDef": "function definition",
-    "ClassDef": "class definition",
-    "With": "with statement",
-    "Try": "try statement",
-    "Return": "return statement",
-    "Delete": "del statement",
-    "Global": "global statement",
-    "Assert": "assert statement",
-    "Raise": "raise statement",
-    "AnnAssign": "annotated assignment",
-    "Match": "match statement",
-}
-_EXPR_CONSTRUCTS = {
-    "ListComp": "comprehension",
-    "SetComp": "comprehension",
-    "DictComp": "comprehension",
-    "GeneratorExp": "comprehension",
-    "Subscript": "subscript",
-    "Lambda": "lambda",
-    "List": "list",
-    "Tuple": "tuple",
-    "Dict": "dict",
-    "Set": "set",
-    "JoinedStr": "f-string",
-    "Compare": "comparison",
-    "BoolOp": "boolean operator",
-    "IfExp": "conditional expression",
-    "NamedExpr": "walrus assignment",
-}
-
-
-def _where(node: ast.AST, msg: str) -> ValueError:
-    return ValueError(f"line {getattr(node, 'lineno', '?')}: {msg}")
-
-
-def _first_construct(node: ast.AST) -> ast.AST | None:
-    """The first expression node in ``node`` that is a named unsupported construct."""
-    for sub in ast.walk(node):
-        if type(sub).__name__ in _EXPR_CONSTRUCTS:
-            return sub
-    return None
-
-
-def _source(script: str, node: ast.AST) -> str:
-    return (ast.get_source_segment(script, node) or ast.unparse(node)).strip()
-
-
-def _value(node: ast.expr, env: _Env) -> tuple[Fraction, bool]:
-    if isinstance(node, ast.JoinedStr):
-        raise _where(node, 'f-strings are not supported (use print("label", expr))')
-    state = _Inexact()
-    try:
-        return _eval(node, state, 0, env), state.flag
-    except ValueError as exc:
-        if str(exc).startswith("unsupported syntax"):
-            bad = _first_construct(node)
-            if bad is not None:
-                raise _where(
-                    bad, f"{_EXPR_CONSTRUCTS[type(bad).__name__]} is not supported"
-                ) from exc
-        raise _where(node, str(exc)) from exc
-    except (ArithmeticError, RecursionError, MemoryError) as exc:
-        raise _where(node, f"cannot evaluate: {type(exc).__name__}") from exc
-
-
-def _show(script: str, node: ast.expr, env: _Env) -> str:
-    value, inexact = _value(node, env)
-    try:
-        return f"{_source(script, node)} = {format_result(value, inexact)}"
-    except ValueError as exc:
-        raise _where(node, str(exc)) from exc
-
-
-def _print_line(script: str, call: ast.Call, env: _Env) -> str | None:
-    if call.keywords:
-        raise _where(call, "print() keyword arguments (sep, end, file) are not supported")
-    parts: list[str] = []
-    for arg in call.args:
-        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-            parts.append(arg.value)  # a label, emitted verbatim
-        else:
-            parts.append(_show(script, arg, env))
-    return ", ".join(parts) if parts else None
-
-
-def _check_import(stmt: ast.Import | ast.ImportFrom) -> None:
-    if isinstance(stmt, ast.Import):
-        if any(a.name != "math" or a.asname for a in stmt.names):
-            raise _where(stmt, "only 'import math' is supported")
-        return
-    if stmt.module != "math" or stmt.level:
-        raise _where(stmt, "only 'from math import ...' is supported")
-    for a in stmt.names:
-        if a.asname or a.name not in _BUILTIN_NAMES - {"math", "print"}:
-            raise _where(stmt, f"math.{a.name} is not supported")
-
-
-def _assign(script: str, stmt: ast.stmt, env: _Env) -> None:
-    if isinstance(stmt, ast.Assign):
-        if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
-            raise _where(stmt, "only 'name = expression' assignments are supported")
-        target, aug = stmt.targets[0], None
-    else:
-        assert isinstance(stmt, ast.AugAssign)
-        if not isinstance(stmt.target, ast.Name):
-            raise _where(stmt, "only 'name += expression' updates are supported")
-        target, aug = stmt.target, stmt.op
-    name = target.id
-    if name in _BUILTIN_NAMES:
-        raise _where(stmt, f"cannot assign to {name!r}: it is a function or constant")
-    if name not in env and len(env) >= MAX_NAMES:
-        raise _where(stmt, f"too many names (limit {MAX_NAMES})")
-    value, inexact = _value(stmt.value, env)
-    if aug is not None:
-        if name not in env:
-            raise _where(stmt, f"name {name!r} is not defined")
-        old, old_inexact = env[name]
-        state = _Inexact()
-        try:
-            value = _binop(aug, old, value, state)
-        except ValueError as exc:
-            raise _where(stmt, str(exc)) from exc
-        inexact = inexact or old_inexact or state.flag
-    env[name] = (_checked(value), inexact)
-
 
 def evaluate_script(script: str) -> str:
-    """Run a straight-line script exactly; return one output line per ``print`` / bare expression.
+    """Run a short python-style script exactly; one output line per ``print`` / bare expression.
 
-    Statements (newline- or ``;``-separated): ``import math`` and ``from math import ...``
-    (ignored), ``name = expr``, ``name += expr`` (and the other arithmetic operators),
-    ``print(a, "label", b)`` and a bare expression. An expression is shown as
-    ``<source text> = <value>``; a string-literal ``print`` argument is emitted verbatim; the
-    arguments of one ``print`` are joined with ``", "``. Names keep their inexact (``≈``) flag.
-    No loops, functions, f-strings, subscripts, comprehensions, attribute access other than
-    ``math.<name>`` or I/O: those raise ``ValueError`` naming the construct and its line. The
-    script is parsed, never executed. All failures raise ``ValueError``.
+    Loops, ``if``, lists, tuples, dicts, comprehensions, ``def``/``lambda`` and f-strings are
+    allowed; imports other than math, files, attributes and recursion are not. See
+    :mod:`agent_router.tools.calc_script`. All failures raise ``ValueError``.
     """
-    if not script or not script.strip():
-        raise ValueError("empty script")
-    if len(script) > MAX_SCRIPT_CHARS:
-        raise ValueError(f"script too long (limit {MAX_SCRIPT_CHARS} chars)")
-    try:
-        tree = ast.parse(script, mode="exec")
-    except SyntaxError as exc:
-        raise ValueError(f"invalid script: line {exc.lineno}: {exc.msg}") from exc
-    except (RecursionError, MemoryError, ValueError) as exc:  # ValueError: null bytes
-        raise ValueError("invalid script") from exc
-    if len(tree.body) > MAX_STATEMENTS:
-        raise ValueError(f"too many statements (limit {MAX_STATEMENTS})")
-    env: _Env = {}
-    out: list[str] = []
-    for stmt in tree.body:
-        kind = type(stmt).__name__
-        if isinstance(stmt, ast.Import | ast.ImportFrom):
-            _check_import(stmt)
-        elif isinstance(stmt, ast.Assign | ast.AugAssign):
-            _assign(script, stmt, env)
-        elif isinstance(stmt, ast.Expr):
-            call = stmt.value
-            if isinstance(call, ast.Call) and getattr(call.func, "id", None) == "print":
-                line = _print_line(script, call, env)
-                if line is not None:
-                    out.append(line)
-                continue
-            out.append(_show(script, stmt.value, env))
-        else:
-            raise _where(stmt, f"{_CONSTRUCTS.get(kind, kind)} is not supported")
-    if not out:
-        raise ValueError("the script prints nothing (end it with print(...))")
-    return "\n".join(out)
+    from agent_router.tools import calc_script  # it builds on this module
+
+    return calc_script.evaluate_script(script)

@@ -17,10 +17,10 @@
     ],
     "PostToolUse": [
       {"matcher": "Agent", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/handoff-hook", "timeout": 15}]},
-      {"matcher": "Bash|Read|ToolSearch|WebFetch|WebSearch|mcp__plugin_agent-router-fp_agent_router__calc|mcp__plugin_agent-router-fp_agent_router__calc_script", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
+      {"matcher": "Bash|Read|ToolSearch|WebFetch|WebSearch|mcp__plugin_agent-router-fp_agent_router__calc|mcp__plugin_agent-router-fp_agent_router__calc_script|mcp__plugin_agent-router-fp_agent_router__document_text", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
     ],
     "PostToolUseFailure": [
-      {"matcher": "Bash|Read|WebFetch|WebSearch|mcp__plugin_agent-router-fp_agent_router__calc|mcp__plugin_agent-router-fp_agent_router__calc_script", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
+      {"matcher": "Bash|Read|WebFetch|WebSearch|mcp__plugin_agent-router-fp_agent_router__calc|mcp__plugin_agent-router-fp_agent_router__calc_script|mcp__plugin_agent-router-fp_agent_router__document_text", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/trace", "timeout": 10}]}
     ]
   }
 }

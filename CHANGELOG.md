@@ -8,6 +8,44 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ### Added
 
+- **`document_text`: a PDF's own text.** A new MCP tool (`tools/document_text.py`, on
+  pdfminer.six, MIT; not poppler's `pdftotext`, GPL, nor PyMuPDF, AGPL) returns the text of a PDF
+  from a workspace file or an http(s) link, with a `[page N]` marker per page, `pages` to limit
+  it (`"1-3,7"`) and `find` to return only the passages naming given terms. A link is fetched
+  with httpx as `agent-router-document-text`, never posing as a browser; a scanned PDF (no text
+  layer) is an error. The first-principles plugin serves it (`bin/mcp --tools`), traces it (a
+  `document` record; the gap report counts it as covered) and names it in the conductor's
+  composed prompt. Catalog `fp-2026-10-17.1` adds the `document-text` entry (`replaces: [Bash,
+  WebFetch]`, `fits: reads_pdf`, threshold 0.8 calibrated: 8 of 8 cal cases, 3 of 3 holdout);
+  the hooks still route only `Agent|Bash`. Re-run over the recorded PDF reads
+  (`measure_document_text.py --fetch`): of 29 WebFetch calls on a PDF link, WebFetch's summary
+  was useful once and said the fact was missing 22 times; `document_text` returned the
+  document's text for 22 (the other 7: six hosts the agent guessed that do not resolve, one
+  404) and the terms the agent asked for in 20. Where `pdftotext` output was recorded and the
+  PDF is still on disk (2), `document_text` returns 98.8% of its words.
+
+- **`calc_script` takes loops, lists and small functions.** The calculator's script form is now
+  its own interpreter (`tools/calc_script.py`), still a walk over the syntax tree with exact
+  fractions and nothing executed: `for`/`while`, `if`, comparisons, lists, tuples, dicts,
+  indexing and slicing, comprehensions, tuple unpacking, non-recursive `def` and `lambda` (with
+  defaults, `*args`, `**kw`), f-strings with format specs, `print(sep=, end=)`, `import math as
+  m`, `from fractions import Fraction`, `float('inf')`, and the builtins the agents used (`sum`,
+  `min`, `max` with `key=`, `round`, `range`, `zip`, `enumerate`, `sorted`, `len`, `dict`,
+  `isinstance`, ...). Still no files, input, network, imports other than math, attributes other
+  than a few container methods, or recursion; a step budget (200,000) and a time budget (10 s)
+  stop a runaway loop, and an approximate value in a loop is kept to 60 digits instead of
+  growing. An awk `BEGIN{...}` program is translated to the same language
+  (`tools/awk_begin.py`). The router's `calc_script` fit check now also takes a script written
+  with `cat > x.py <<'EOF'` and run with `python3 x.py`, a leading `cd DIR &&`, a trailing
+  `2>&1` and the awk form, and gives the script 0.25 s inside the hook. Measured on this
+  checkout's recordings (`measure_calc_fit.py`, which now also reads the tool-gap report's 197
+  compute-script calls through their transcripts): the fit check accepts 80 of 156 captured
+  interpreter calls (was 12) and 50 of the 53 plain-arithmetic calls in the trace (was 7 of
+  197 compute calls); on the accepted calls, 3,041 of 3,043 numbers the calculator prints are
+  in the real output (the two differ at an exact half-way `round`, where exact and binary
+  floating point round apart). One script sits at the 0.25 s budget, so a run can count 79. Catalog `fp-2026-10-17.1`: the entry's `what`, `not_for` and
+  examples say so; eval cases for loops, functions, write-then-run and awk.
+
 - **Tool-gap report over past runs.** `make tool-gaps` (`integrations/first-principles/
   tool_gaps.py`) reads the trace hooks' records and the router's audit log from the hooks' state
   and every saved run, puts each thing the agent did in one pattern (compute script, PDF, curl,

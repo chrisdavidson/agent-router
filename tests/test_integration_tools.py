@@ -202,7 +202,11 @@ def test_route_tool_step_offers_only_the_entry_whose_fit_check_passes():
     for tool_input, offered in (
         (SCRIPT, ["exact-calc-script", "none"]),
         ({"command": 'python3 -c "print(0.17 * 2340)"'}, ["exact-calc", "none"]),
-        ({"command": "python3 - <<'EOF'\nfor i in range(3): print(i)\nEOF"}, []),
+        (
+            {"command": "python3 - <<'EOF'\nfor i in range(3): print(i)\nEOF"},
+            ["exact-calc-script", "none"],
+        ),
+        ({"command": "python3 - <<'EOF'\nprint(open('f').read())\nEOF"}, []),
     ):
         for given in (tool_input, json.dumps(tool_input)):  # parsed or JSON text
             out = it.route("", "tool", "Bash", given, FP)

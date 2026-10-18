@@ -247,7 +247,7 @@ def test_mcp_execs_the_resolved_binary_with_its_arguments(lay):
     proc = _run(lay.bin / "mcp", "", lay.env())
     assert (proc.returncode, proc.stdout.strip()) == (
         0,
-        "ran mcp --tools calc,calc_script,route,verify_summary,doctor",
+        "ran mcp --tools calc,calc_script,document_text,route,verify_summary,doctor",
     )
 
 

@@ -15,6 +15,7 @@ from agent_router.core.fit import FITS, calc_expression, calc_script
 from agent_router.core.router import Router
 from agent_router.core.types import ChoiceResult, HookPoint, RouterEvent
 from agent_router.tools import calc
+from agent_router.tools import calc_script as calc_script_form
 
 INTEG = Path(__file__).resolve().parents[1] / "integrations" / "first-principles"
 FP = "first-principles:first-principles"
@@ -123,51 +124,163 @@ def test_script_agrees_with_python_on_the_agents_kind_of_figures():
 @pytest.mark.parametrize(
     ("script", "message"),
     [
-        ("for i in range(3):\n    print(i)", r"line 1: for loop"),
-        ("while True:\n    pass", "while loop"),
-        ("def f():\n    return 1", "function definition"),
-        ("print(1)\nopen('x')", "line 2: unknown function 'open'"),
-        ("open('x').read()", "only plain calls"),
-        ("__import__('os').system('id')", "only plain calls"),
+        ("print(1)\nopen('x')", "line 2: name 'open' is not defined"),
+        ("open('x').read()", r"method \.read\(\) is not supported"),
+        ("__import__('os').system('id')", r"method \.system\(\) is not supported"),
+        ("__import__('os')", "not defined"),
         ("().__class__", "attribute access"),
         ("x = 1\nx.real", "attribute access"),
+        ("x = [1]\nx.sort()", r"method \.sort\(\) is not supported"),
         ("import os", "only 'import math'"),
         ("from os import path", "only 'from math import"),
         ("from math import *", "not supported"),
+        ("from fractions import gcd", "only 'from fractions import Fraction'"),
         ("print(2 ** 100000)", "exponent too large"),
         ("x = 10 ** 5000\nprint(x * x * x * x * x * x * x * x)", "too large|digits"),
-        ("print(f'{1}')", "f-strings are not supported"),
-        ("print([1, 2])", "list is not supported"),
-        ("x = [1][0]", "list is not supported|subscript"),
-        ("print([i for i in y])", "comprehension"),
-        ("a, b = 1, 2", "assignments are supported"),
-        ("a = b = 1", "assignments are supported"),
-        ("e = 2", "cannot assign to 'e'"),
-        ("log = 2", "cannot assign to 'log'"),
-        ("math = 2", "cannot assign to 'math'"),
         ("x += 1", "not defined"),
         ("print(y)", "not defined"),
-        ("print(1, sep='')", "keyword arguments"),
         ("x = 1", "prints nothing"),
+        ("def f():\n    return 1", "prints nothing"),
         ("", "empty script"),
         ("print(1 +", "invalid script"),
         ("print(1)\n" * 201, "too many statements"),
         ("x = 1\n" + "\n".join(f"v{i} = 1" for i in range(101)) + "\nprint(x)", "too many names"),
         ("# " + "x" * 10_001 + "\nprint(1)", "too long"),
         ("print(1/0)", "division by zero"),
-        ("print(1 if 2 else 3)", "conditional expression"),
-        ("print(1 < 2)", "comparison"),
-        ("global x", "Global|global"),
+        ("global x", "global statement"),
         ("with open('f') as f:\n    pass", "with statement"),
         ("try:\n    pass\nexcept Exception:\n    pass", "try statement"),
         ("assert 1", "assert"),
-        ("lambda: 1", "lambda"),
-        ("print(**{})", "only plain calls|keyword"),
+        ("class A:\n    pass", "class definition"),
+        ("print({1, 2})", "set"),
+        ("while True:\n    pass", "step budget|time budget"),
+        ("def f(n):\n    return f(n - 1)\nprint(f(3))", "recursion is not supported"),
+        ("x = list(range(10 ** 6))", "too many items"),
+        ("x = [0] * 10 ** 6", "too many items"),
+        ("print('x' * 10 ** 6)", "too many items"),
+        ("a, b = 1, 2, 3", "cannot unpack 3 values into 2"),
+        ("print([1, 2][5])", "index out of range"),
+        ("print({'a': 1}['b'])", "not in the dict"),
+        ("print(1 < 'a')", "cannot compare"),
+        ("print(f'{2.5:d}')", "needs a whole number"),
+        ("break", "outside a loop"),
+        ("return 1", "outside a function"),
     ],
 )
 def test_script_rejects(script, message):
     with pytest.raises(ValueError, match=message):
         calc.evaluate_script(script)
+
+
+# what the first-principles agents' arithmetic scripts used, measured over their recorded runs
+AGENT_SCRIPTS = [
+    # amortisation loop with an f-string
+    "r = 0.0625/12; n = 324; P = 240000\n"
+    "M = P*r/(1-(1+r)**-n)\n"
+    "bal = P\n"
+    "for m in range(120):\n"
+    "    bal = bal*(1+r) - M\n"
+    "print(f'M {M:.2f} balance {bal:,.2f}')",
+    # small functions over a table of cases
+    "from math import log\n"
+    "K = 273.15\n"
+    "def tlm(th, tr): return (th-tr)/log(th/tr)\n"
+    "def lor(th, tr, tc): return 1 - tc/tlm(th, tr)\n"
+    "cases = {'a': (565+K, 290+K, 43+K), 'b': (574+K, 290+K, 58+K)}\n"
+    "for n, (h, r, c) in cases.items():\n"
+    "    print(n, round(tlm(h, r), 4), round(lor(h, r, c), 6))",
+    # weighted scoring with comprehensions, max(key=) and a flip test
+    "w = [5, 4, 3, 3, 2, 2]\n"
+    "S = {'O2': [1,2,2,2,4,3], 'O4': [5,1,5,5,2,4], 'O5': [5,4,4,4,5,3]}\n"
+    "def tot(w): return {k: sum(a*b for a, b in zip(w, s)) for k, s in S.items()}\n"
+    "t = tot(w); print(t, max(t, key=t.get))\n"
+    "for i in range(6):\n"
+    "    for nw in range(1, 6):\n"
+    "        ww = w.copy(); ww[i] = nw\n"
+    "        t = tot(ww)\n"
+    "        if max(t, key=t.get) != 'O5': print('flip', i, nw, t['O5'] - t['O4'])",
+    # progressive tax brackets with float('inf')
+    "def prog(x, br):\n"
+    "    t = 0\n"
+    "    for i, (lo, r) in enumerate(br):\n"
+    "        hi = br[i+1][0] if i+1 < len(br) else float('inf')\n"
+    "        if x > lo: t += (min(x, hi) - lo) * r\n"
+    "    return t\n"
+    "fed = [(0, .10), (11925, .12), (48475, .22), (103350, .24)]\n"
+    "print('tax', prog(200000, fed), f'{prog(90000, fed)/90000:.2%}')",
+    # list building, slicing, sorted, while
+    "xs = []\n"
+    "i = 1\n"
+    "while i < 50:\n"
+    "    xs.append(i * 1.5)\n"
+    "    i *= 2\n"
+    "print(xs, sorted(xs, reverse=True)[:2], sum(xs) / len(xs), xs[-1])",
+]
+
+
+@pytest.mark.parametrize("script", AGENT_SCRIPTS)
+def test_scripts_agree_with_python(script, capsys):
+    """Every number the calculator shows is one python prints for the same script."""
+    out = calc_script_form.run(script)
+    exec(compile(script, "<agent-script>", "exec"), {})  # trusted test input
+    printed = capsys.readouterr().out
+    number = re.compile(r"(?<![\d.])[-+]?\d[\d,]*\.?\d*(?:[eE][-+]?\d+)?")
+    real = [float(t.replace(",", "")) for t in number.findall(printed)]
+    assert out.values, out.text
+    for v in out.values:
+        assert any(r == pytest.approx(v, rel=1e-9, abs=1e-9) for r in real), (v, out.text)
+
+
+def test_script_output_formats():
+    out = calc.evaluate_script(
+        "x = [1, 7/2]\n"
+        "x\n"
+        "print(f'{2/3:.4f} {0.125:.1%} {1234567:,} {2/3}')\n"
+        "print('a', 'b', sep='')\n"
+        "print('no newline', end='')\n"
+        "print(' joined')\n"
+        "def f(): print('inside')\n"
+        "f()\n"
+        "p = print\n"
+        "p('via a name', 1/4)"
+    )
+    assert out.splitlines() == [
+        "x = [1, 7/2 (≈ 3.5)]",
+        "0.6667 12.5% 1,234,567 0.6666666667",
+        "ab",
+        "no newline joined",
+        "inside",
+        "via a name, 1/4 (≈ 0.25)",
+    ]
+
+
+def test_script_long_exact_fraction_is_shown_as_its_decimal():
+    out = calc.evaluate_script("r = 1/192\nprint((1 + r) ** -324)")
+    assert out.startswith("(1 + r) ** -324 = ≈ 0.1857") and "/" not in out
+
+
+def test_script_loop_with_approximate_values_stays_bounded():
+    # math.log is approximate: a long loop over it is rounded to 60 digits, never "too large"
+    out = calc.evaluate_script(
+        "import math\nx = math.log(3)\nfor i in range(500):\n    x = x * 1.01 + 1/7\nprint(x)"
+    )
+    assert out.startswith("x = ≈ ")
+
+
+def test_script_aliases_and_bound_methods():
+    out = calc.evaluate_script(
+        "import math as m\n"
+        "from math import log as ln\n"
+        "from fractions import Fraction as F\n"
+        "t = {'a': 3, 'b': 5}\n"
+        "print(m.sqrt(16), ln(1), F(3, 9), max(t, key=t.get), F(9) // 2)"
+    )
+    assert out == "m.sqrt(16) = 4, ln(1) = 0, F(3, 9) = 1/3 (≈ 0.3333333333), b, F(9) // 2 = 4"
+
+
+def test_script_time_budget():
+    with pytest.raises(ValueError, match="time budget"):
+        calc_script_form.run("x = 0\nfor i in range(90000):\n    x += i * i\nprint(x)", 0.01)
 
 
 def test_script_never_executes_anything(tmp_path):
@@ -209,6 +322,18 @@ HEREDOC = "python3 - <<'EOF'\nimport math\nx = 3\ny = x * 4\nprint(math.log(y))\
         'python3 -c "\nimport math\nx = 3\nprint(math.log(x))\n"',
         "python3 -c 'x = 3; y = x * 2; print(y)'",
         "python3 -c \"import math\nx=3\nprint('ln', math.log(x))\"",
+        "python3 - <<'EOF'\nfor i in range(3):\n    print(i)\nEOF",  # loops
+        "cd /tmp && python3 - <<'EOF'\nprint(1)\nEOF",  # a cd prefix
+        "python3 - <<'EOF' 2>&1\nprint(1)\nEOF",  # stderr folded in
+        "python3 -c 'print(sum([1, 2]) / 3); print(2)' 2>&1",
+        # written to a file, then run
+        "cat > /tmp/fp_calc.py <<'EOF'\nx = [1, 2]\nprint(sum(x))\nEOF\npython3 /tmp/fp_calc.py",
+        "mkdir -p /tmp/fp && cat > /tmp/fp/m.py <<'EOF'\nprint(2)\nEOF\npython3 /tmp/fp/m.py",
+        "cat <<'EOF' > m.py\nprint(2)\nEOF\n && python3 m.py",
+        # awk BEGIN programs
+        'awk \'BEGIN{h=838.15;c=316.262;split("543.15 563.15",R," ");'
+        'for(i=1;i<=2;i++){r=R[i];t=(h-r)/log(h/r);printf "Tr=%.2f eta=%.4f\\n",r,1-c/t}}\'',
+        "awk 'BEGIN{cp=1443+0.172*427.5; q=cp*275/3600000; printf \"cp %.2f q %.6f\\n\",cp,q}'",
     ],
 )
 def test_a_script_the_calculator_runs_fits(command):
@@ -219,7 +344,6 @@ def test_a_script_the_calculator_runs_fits(command):
 @pytest.mark.parametrize(
     "command",
     [
-        "python3 - <<'EOF'\nfor i in range(3):\n    print(i)\nEOF",  # loop
         "python3 - <<'EOF'\nimport numpy as np\nprint(np.pi)\nEOF",  # not math
         "python3 - <<'EOF'\nprint(open('f').read())\nEOF",  # I/O
         "python3 - <<'EOF'\nx = 1\nEOF",  # prints nothing
@@ -227,7 +351,12 @@ def test_a_script_the_calculator_runs_fits(command):
         'python3 -c "x = 3\nprint($HOME)"',
         "python3 - <<'EOF'\nprint(1)\nEOF\nrm -rf /tmp/x",  # something after the heredoc
         "cat > f.py <<'EOF'\nx = 1\nprint(x)\nEOF",  # writes a file, runs nothing
-        "cd /tmp && python3 - <<'EOF'\nprint(1)\nEOF",
+        "cat > f.py <<'EOF'\nprint(1)\nEOF\npython3 g.py",  # runs another file
+        "cat >> f.py <<'EOF'\nprint(1)\nEOF\npython3 f.py",  # appends to an earlier file
+        "cat X; python3 - <<'EOF'\nprint(1)\nEOF",  # does something else too
+        "python3 - <<'EOF'\nwhile True:\n    pass\nEOF",  # runs past the fit check's budget
+        "awk '{s+=$1} END{print s}' data.txt",  # reads input
+        'awk \'BEGIN{x="a" "b"; print x}\'',  # string concatenation
         'python3 -c "print(1)" extra',
         'python3 -c "import math; print(math.log(2))"',  # one expression: exact-calc's
         "ls -la",
@@ -270,6 +399,7 @@ def test_the_script_entry_is_scoped_like_the_calculator():
     assert [e.id for e in cat.eligible(HookPoint.TOOL, "Bash", FP)] == [
         "exact-calc",
         "exact-calc-script",
+        "document-text",
     ]
     assert cat.eligible(HookPoint.TOOL, "Bash", "main") == []
     # every example is a script the calculator really runs
@@ -297,7 +427,8 @@ class _Spy:
     [
         (HEREDOC, ["exact-calc-script"]),
         ('python3 -c "print(0.17 * 2340)"', ["exact-calc"]),
-        ("python3 - <<'EOF'\nfor i in range(2):\n    print(i)\nEOF", []),
+        ("python3 - <<'EOF'\nfor i in range(2):\n    print(i)\nEOF", ["exact-calc-script"]),
+        ("python3 - <<'EOF'\nprint(open('f').read())\nEOF", []),
         ("git log --oneline", []),
     ],
 )
@@ -397,7 +528,7 @@ def test_mcp_serves_calc_script_and_the_default_has_no_integration_tools(tmp_pat
     assert "math.log(1) = 0" in json.dumps(res, default=str)
     with pytest.raises(Exception) as err:
         asyncio.run(server.call_tool("calc_script", {"script": "for i in x: pass"}))
-    assert "for loop" in str(err.value) and type(err.value).__name__ == "ToolError"
+    assert "'x' is not defined" in str(err.value) and type(err.value).__name__ == "ToolError"
 
 
 def test_integration_tools_need_an_integration(tmp_path, monkeypatch):
@@ -425,8 +556,8 @@ def test_sdk_parity_serves_calc_script(tmp_path):
     assert tools["calc_script"].input_schema["required"] == ["script"]
     res = asyncio.run(tools["calc_script"].handler({"script": "x = 2\nprint(x ** 10)"}))
     assert res["content"][0]["text"] == "x ** 10 = 1024"
-    res = asyncio.run(tools["calc_script"].handler({"script": "while 1: pass"}))
-    assert res["is_error"] is True and "while loop" in res["content"][0]["text"]
+    res = asyncio.run(tools["calc_script"].handler({"script": "import os"}))
+    assert res["is_error"] is True and "only 'import math'" in res["content"][0]["text"]
 
 
 def test_mcp_route_accepts_question_as_another_name_for_text(tmp_path, monkeypatch):

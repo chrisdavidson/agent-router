@@ -20,10 +20,10 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from agent_router.tools import calc, html_to_markdown, json_query, repo_stats
+from agent_router.tools import calc, document_text, html_to_markdown, json_query, repo_stats
 
 SERVER_NAME = "agent_router"
-TOOLS = ("calc", "calc_script", "json_query", "html_to_markdown", "repo_stats")
+TOOLS = ("calc", "calc_script", "document_text", "json_query", "html_to_markdown", "repo_stats")
 INTEGRATION_TOOLS = ("route", "verify_summary", "doctor")
 
 
@@ -122,13 +122,34 @@ def build_server(root: Path, tools: Iterable[str] = TOOLS) -> Any:
         @server.tool(name="calc_script")
         @_expected
         def calc_script_tool(script: str) -> str:
-            """Exact calculator for a short python-style script (agent-router, MIT). Statements
-            separated by newlines or ';': `import math`, `name = expression`, `name += expression`,
-            `print(...)` and bare expressions; each print or bare expression returns one line
-            '<expression> = <value>'. Exact fractions and big integers, plus math.log, ln, log10,
-            log2, exp, sqrt, pi and e (shown as '≈ decimal'). No loops, functions, f-strings,
-            lists, subscripts, files or other imports: those return an error naming the line."""
+            """Exact calculator for a short python arithmetic script (agent-router, MIT): the
+            script you would pipe to python3, run with exact fractions and big integers.
+            Variables, for/while loops, if, lists, tuples, dicts, indexing, comprehensions,
+            small functions (def, lambda; no recursion), f-strings with format specs, `import
+            math` and `from fractions import Fraction`, and sum, min, max, round, range, zip,
+            enumerate, sorted, len, abs. Each print returns a line; a number is shown as
+            '<expression> = <value>' (an integer, 'a/b (≈ decimal)', or '≈ decimal' for
+            math.log, sqrt, exp, pi), an f-string as Python formats it. No files, input, network
+            or other imports: those return an error naming the line."""
             return calc.evaluate_script(script)
+
+    if "document_text" in wanted:
+
+        @server.tool(name="document_text")
+        @_expected
+        def document_text_tool(
+            path: str | None = None,
+            url: str | None = None,
+            pages: str | None = None,
+            find: str | None = None,
+        ) -> str:
+            """The text of a PDF (pdfminer.six, MIT): the document's own words, page by page,
+            not a summary of it. Give exactly one of `url` (an http(s) link to a PDF) or `path`
+            (a PDF in the workspace). `pages` limits it, e.g. '1-3,7'. `find` returns only the
+            passages containing a term (comma-separated, case-insensitive), each with its page:
+            use it on long reports. Each page starts with '[page N]'. A scanned PDF with no text
+            layer returns an error (no OCR)."""
+            return document_text.extract(path=path, url=url, pages=pages, find=find, root=root)
 
     if "json_query" in wanted:
 

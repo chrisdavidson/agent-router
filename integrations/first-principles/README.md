@@ -12,16 +12,28 @@ it untouched. It adds two checkpoints that plugin does not have:
    figure"), it gets a note pointing at an exact calculator this plugin serves
    (`mcp__plugin_agent-router-fp_agent_router__calc`: exact fractions and big integers, and a
    list of expressions in one call). The note is offered only when the call is one expression the calculator can run (`fits:
-   calc_expression`). A short straight-line python script (variables, `print`, `math.log`,
-   `pi`) gets a second entry, `exact-calc-script`, pointing at `calc_script` (`fits:
-   calc_script`: a `python3 - <<'EOF'` / `cat <<EOF | python3` heredoc or a multi-statement
-   `python3 -c` whose body the calculator's script evaluator runs; no loops, functions, lists
-   or imports other than `math`). Anything else is skipped as `does not fit` without reaching
-   the classifier. In the 28 example runs, all 16 notes had fired on scripts the calculator
+   calc_expression`). A short arithmetic script gets a second entry, `exact-calc-script`,
+   pointing at `calc_script` (`fits: calc_script`): a `python3 - <<'EOF'` / `cat <<EOF |
+   python3` heredoc, a `python3 -c` script, a script written with `cat > x.py <<'EOF'` and then
+   run with `python3 x.py`, or an `awk 'BEGIN{...}'` program, optionally after `cd DIR &&` and
+   with `2>&1`, that the calculator's script form runs within 0.25 s: variables, loops, lists,
+   dicts, comprehensions, small functions, f-strings and `math`, but no files, input or other
+   imports (`tools/calc_script.py`, `tools/awk_begin.py`). Anything else is skipped as `does not
+   fit` without reaching the classifier. In the 28 example runs, all 16 notes had fired on scripts the calculator
    could not run or on text commands; [`CALC-SCRIPT-COVERAGE.md`](CALC-SCRIPT-COVERAGE.md)
    measures how many of the agent's interpreter calls the two entries could take.
+3. **PDF to text.** When the agent reads a PDF (`pdftotext`, `curl ... .pdf`, `pdfinfo`, or a
+   `WebFetch` of a `.pdf` link), it gets a note pointing at `document_text`
+   (`mcp__plugin_agent-router-fp_agent_router__document_text`, built on pdfminer.six, MIT): the
+   document's own text page by page, or with `find` only the passages naming given terms
+   (`fits: reads_pdf`). WebFetch hands a PDF to a small model that summarises it; in the
+   recorded runs that summary said the fact was missing for 22 of 29 PDF reads, and
+   `document_text` on the same links returned the text for 22 and the asked-for terms for 20
+   ([`DOCUMENT-TEXT-COVERAGE.md`](DOCUMENT-TEXT-COVERAGE.md)). The conductor's prompt names
+   the tool too. The router sees only the Bash half of these calls: the hooks match
+   `Agent|Bash`, not `WebFetch` (routing it would add the hook's start-up to every WebFetch).
 
-Both are advisory: the model may ignore a note, and nothing is ever blocked.
+All three are advisory: the model may ignore a note, and nothing is ever blocked.
 
 It also keeps a **decision trace** of each first-principles run: which sections the agent
 wrote, which technique references it opened, how it typed and judged each assumption, which
@@ -331,12 +343,13 @@ reference (second-order thinking, Phase 2 inversion).
 | File | What |
 |---|---|
 | `MANIFEST.md`, `manifest.fallback.json`, `descriptor.json` | the integration manifest format, the pinned copy used when the plugin publishes none, and this integration's descriptor |
-| `catalog.yaml` | the two entries agent-router may point at (each scoped to one agent context, with its own threshold), plus the `none` exemplars. Targets are `${...}` variables filled from the manifest |
+| `catalog.yaml` | the entries agent-router may point at (delegation, the two calculator forms, `document-text`) (each scoped to one agent context, with its own threshold), plus the `none` exemplars. Targets are `${...}` variables filled from the manifest |
 | `eval_set.yaml` | `cal` cases written for this integration; `test` holdout = first-principles' own routing catalog (13 P, 20 N) plus Bash calls inside the agent |
 | `calibration.json`, `calibrate.py` | classifier parameters, then one threshold per entry, all fit on the `cal` split only |
 | `plugin/` | the Claude Code plugin: hooks, `.mcp.json`, `bin/hook`, `bin/mcp`, `bin/trace`, `bin/handoff-hook`, `bin/conduct`. Listed in the repo's `.claude-plugin/marketplace.json` |
 | `handoff/` | the structured-summary hand-off to first-principles and its 9.16 report (the contract the trace reads) |
 | `measure_calc_fit.py`, `CALC-SCRIPT-COVERAGE.md` | offline: how many recorded interpreter calls `calc_expression` / `calc_script` accept, and whether the calculator's figures agree with the real output |
+| `measure_document_text.py`, `DOCUMENT-TEXT-COVERAGE.md` | the agents' PDF reads re-run through `document_text` (`--fetch` fetches each link again): whether it returns the text and the terms the agent asked WebFetch for, and how it compares with the recorded `pdftotext` output. Counts only |
 | `tool_gaps.py`, `TOOL-GAPS.md` | offline (`make tool-gaps`): what the agent kept doing with no catalog tool for it, joined to what the router made of each call (did not fit, skip pattern, classified none, acted on, not checked), and the recurring needs that are candidates for new tools. Counts and construct names only (no prompt or command text, no URLs or host names); `--json` for the candidate store |
 | `conduct.py`, `plugin/skills/analyze/` | the conductor: helper sub-commands and the `/agent-router-fp:analyze` skill |
 | `trace.py` | the decision trace: hook handler, analysis parser, `--replay`, `--report` |
