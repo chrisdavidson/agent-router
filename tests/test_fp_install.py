@@ -392,6 +392,21 @@ def test_a_plugin_cache_manifest_warns_about_staleness(fast, tmp_path, baseline)
     assert "--plugin-dir" in got["manifest"].detail
 
 
+def test_the_installed_copy_is_a_pass_even_beside_a_stale_cache(fast, tmp_path, baseline):
+    integ, env = make_tree(tmp_path, manifest=True)
+    env.pop("FP_PLUGIN_ROOT")
+    cache = tmp_path / "plugins" / "cache"
+    installed = cache / "market" / NAME / "9.21.0"
+    shutil.copytree(tmp_path / "fp-root", installed)
+    (cache / "market" / NAME / "9.20.0" / ".claude-plugin").mkdir(parents=True)  # a stub
+    record = {"version": 2, "plugins": {f"{NAME}@market": [{"installPath": str(installed)}]}}
+    (cache.parent / "installed_plugins.json").write_text(json.dumps(record))
+    env["AGENT_ROUTER_PLUGIN_CACHE"] = str(cache)
+    got = expect(baseline, doctor.run_checks(integ, env=env), manifest=doctor.PASS)
+    assert str(installed) in got["plugin root"].detail
+    assert "(from installed)" in got["manifest"].detail
+
+
 def test_no_plugin_at_all_falls_back_with_warnings(fast, tmp_path, baseline):
     integ, env = make_tree(tmp_path)
     env.pop("FP_PLUGIN_ROOT")

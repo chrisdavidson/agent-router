@@ -296,7 +296,7 @@ def _check_manifest(ctx: _Ctx) -> Check:
     from agent_router.contracts.manifest import CACHE_STALE_WARNING
 
     notes = [w for w in res.warnings if w != CACHE_STALE_WARNING]
-    if res.source in ("env", "recorded"):
+    if res.source in ("env", "recorded", "installed"):
         return Check("manifest", PASS, f"{base} (from {res.source})")
     if res.source == "cache":
         return Check(

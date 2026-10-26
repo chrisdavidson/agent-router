@@ -136,17 +136,97 @@ def test_resolution_recorded_root_file(tmp_path):
     )
 
 
-def test_resolution_cache_takes_the_newest_manifest(tmp_path):
+def test_resolution_cache_takes_the_highest_version_not_the_newest_file(tmp_path):
     cache = tmp_path / "cache"
     old = make_root(cache / "market" / NAME / "1.0.0", variant(agent_type="acme:old"))
     new = make_root(cache / "market" / NAME / "2.0.0", variant(agent_type="acme:new"))
-    os.utime(old / "references" / "integration.json", (1_000_000, 1_000_000))
+    os.utime(old / "references" / "integration.json", (3_000_000, 3_000_000))
     os.utime(new / "references" / "integration.json", (2_000_000, 2_000_000))
     res = resolve(tmp_path, cache=cache)
     assert (res.source, res.plugin_root, res.manifest.agent_type) == ("cache", new, "acme:new")
     assert mf.CACHE_STALE_WARNING in res.warnings  # the cache can be stale; the record says so
-    os.utime(old / "references" / "integration.json", (3_000_000, 3_000_000))
-    assert resolve(tmp_path, cache=cache).manifest.agent_type == "acme:old"
+    make_root(cache / "market" / NAME / "10.0.0", variant(agent_type="acme:ten"))
+    assert resolve(tmp_path, cache=cache).manifest.agent_type == "acme:ten"  # 10 > 2, not "1" < "2"
+
+
+def test_a_touched_stub_of_an_old_version_does_not_outrank_the_real_copy(tmp_path):
+    """The 9.20.0/9.21.0 case: removing an old version's files leaves a stub (plugin.json only)
+    whose directory is touched after the new version's manifest was written."""
+    cache = tmp_path / "cache"
+    real = make_root(cache / "market" / NAME / "9.21.0", variant(agent_type="acme:real"))
+    stub = cache / "market" / NAME / "9.20.0"
+    (stub / ".claude-plugin").mkdir(parents=True)
+    (stub / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": NAME}))
+    os.utime(real / "references" / "integration.json", (2_000_000, 2_000_000))
+    os.utime(stub, (2_000_001, 2_000_001))
+    res = resolve(tmp_path, cache=cache)
+    assert (res.source, res.plugin_root, res.manifest.agent_type) == ("cache", real, "acme:real")
+
+
+def write_installed(cache: Path, *entries: dict, key: str = f"{NAME}@market") -> None:
+    cache.mkdir(parents=True, exist_ok=True)
+    record = {"version": 2, "plugins": {key: list(entries)}}
+    (cache.parent / mf.INSTALLED_RECORD).write_text(json.dumps(record))
+
+
+def test_resolution_prefers_the_installed_copy_over_the_cache(tmp_path):
+    cache = tmp_path / "plugins" / "cache"
+    installed = make_root(cache / "market" / NAME / "9.21.0", variant(agent_type="acme:inst"))
+    higher = make_root(cache / "market" / NAME / "9.99.0", variant(agent_type="acme:higher"))
+    os.utime(higher / "references" / "integration.json", (9_000_000, 9_000_000))
+    write_installed(cache, {"scope": "user", "installPath": str(installed), "version": "9.21.0"})
+    res = resolve(tmp_path, cache=cache)
+    assert (res.source, res.plugin_root, res.manifest.agent_type) == (
+        "installed",
+        installed,
+        "acme:inst",
+    )
+    assert res.warnings == ()  # the copy the Agent tool runs: nothing to warn about
+
+
+def test_a_project_scoped_install_counts_only_inside_its_project(tmp_path):
+    cache = tmp_path / "plugins" / "cache"
+    user = make_root(tmp_path / "user-copy", variant(agent_type="acme:user"))
+    proj = make_root(tmp_path / "proj-copy", variant(agent_type="acme:proj"))
+    project = tmp_path / "work" / "project"
+    (project / "sub").mkdir(parents=True)
+    write_installed(
+        cache,
+        {"scope": "user", "installPath": str(user), "lastUpdated": "2026-01-01T00:00:00Z"},
+        {
+            "scope": "project",
+            "projectPath": str(project),
+            "installPath": str(proj),
+            "lastUpdated": "2026-06-01T00:00:00Z",
+        },
+    )
+
+    def agent(cwd):
+        return mf.resolve_manifest(
+            NAME, fallback=FALLBACK_FILE, env={}, cache_dirs=[cache], cwd=cwd
+        ).manifest.agent_type
+
+    assert agent(project / "sub") == "acme:proj"
+    assert agent(tmp_path / "elsewhere") == "acme:user"
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        "{",
+        "[]",
+        json.dumps({"plugins": []}),
+        json.dumps({"plugins": {f"{NAME}@market": [{"installPath": "/nowhere/at/all"}]}}),
+        json.dumps({"plugins": {f"other-{NAME}@market": [{"installPath": "PLACEHOLDER"}]}}),
+    ],
+)
+def test_an_unusable_install_record_falls_through_to_the_cache(tmp_path, record):
+    cache = tmp_path / "plugins" / "cache"
+    cached = make_root(cache / "market" / NAME / "1.0.0", variant(agent_type="acme:cache"))
+    elsewhere = make_root(tmp_path / "other", variant(agent_type="acme:other"))
+    (cache.parent / mf.INSTALLED_RECORD).write_text(record.replace("PLACEHOLDER", str(elsewhere)))
+    res = resolve(tmp_path, cache=cache)
+    assert (res.source, res.plugin_root) == ("cache", cached)
 
 
 def test_resolution_falls_back_when_no_plugin_is_found(tmp_path):
@@ -168,17 +248,20 @@ def test_resolution_keeps_the_root_when_the_plugin_publishes_no_manifest(tmp_pat
     assert mf.CACHE_STALE_WARNING in res.warnings
 
 
-def test_resolution_order_env_then_recorded_then_cache(tmp_path):
+def test_resolution_order_env_then_recorded_then_installed_then_cache(tmp_path):
     env_root = make_root(tmp_path / "e", variant(agent_type="acme:env"))
     rec_root = make_root(tmp_path / "r", variant(agent_type="acme:rec"))
-    cache = tmp_path / "cache"
+    inst_root = make_root(tmp_path / "i", variant(agent_type="acme:inst"))
+    cache = tmp_path / "plugins" / "cache"
     make_root(cache / "m" / NAME / "1", variant(agent_type="acme:cache"))
     rec = tmp_path / "root"
     rec.write_text(str(rec_root))
     env = {"FP_PLUGIN_ROOT": str(env_root)}
+    assert resolve(tmp_path, cache=cache).manifest.agent_type == "acme:cache"
+    write_installed(cache, {"scope": "user", "installPath": str(inst_root)})
     assert resolve(tmp_path, env=env, recorded=rec, cache=cache).manifest.agent_type == "acme:env"
     assert resolve(tmp_path, recorded=rec, cache=cache).manifest.agent_type == "acme:rec"
-    assert resolve(tmp_path, cache=cache).manifest.agent_type == "acme:cache"
+    assert resolve(tmp_path, cache=cache).manifest.agent_type == "acme:inst"
 
 
 def test_a_root_that_is_not_a_directory_is_skipped_with_a_warning(tmp_path):

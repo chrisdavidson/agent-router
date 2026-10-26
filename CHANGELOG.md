@@ -6,6 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+### Fixed
+
+- The plugin root is now found from Claude Code's install record (`installed_plugins.json`),
+  the copy the Agent tool actually runs, before the plugin cache is searched; it carries no
+  stale-cache warning. In the cache, roots rank by manifest, then version, then file date,
+  never by a directory's date: a leftover stub of 9.20.0, touched when 9.21.0 was installed,
+  had been reported as the plugin root with a pinned-fallback warning.
+
 ## [0.3.0] — 2026-10-18
 
 The first-principles integration grows: a live, swimlane Trace tab that says why each step happened,
