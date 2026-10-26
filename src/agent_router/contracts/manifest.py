@@ -14,8 +14,9 @@ Every plugin root is looked up in this order (:func:`resolve_manifest`):
 
 1. ``root_env`` (an environment variable naming the plugin root),
 2. a *recorded* root file (the root a launcher wrote down for this session),
-3. the Claude plugin cache, ``<cache>/*/<plugin>/*/``, newest manifest first,
-4. the pinned fallback manifest.
+3. the copy Claude Code has installed, from ``installed_plugins.json`` beside the cache,
+4. the Claude plugin cache, ``<cache>/*/<plugin>/*/``, highest version first,
+5. the pinned fallback manifest.
 
 A manifest that is unknown, malformed or points at a schema file that is not there never
 raises: the fallback manifest is used, with the root kept when it is known, and the reason is
@@ -33,7 +34,8 @@ from typing import Any
 
 MANIFEST_RELPATH = Path("references") / "integration.json"
 SUPPORTED_VERSIONS = frozenset({1})
-SOURCES = ("env", "recorded", "cache", "fallback+root", "fallback")
+SOURCES = ("env", "recorded", "installed", "cache", "fallback+root", "fallback")
+INSTALLED_RECORD = "installed_plugins.json"  # Claude Code's record, beside its plugin cache
 CACHE_STALE_WARNING = (
     "plugin root found in the Claude plugin cache: the cache can hold a stale copy, and a "
     "session started with --plugin-dir uses another root"
@@ -161,8 +163,54 @@ def _mtime(path: Path) -> float:
         return 0.0
 
 
+def _version_key(root: Path) -> tuple[int, ...]:
+    """A root's version as numbers, from its ``plugin.json`` else its directory name; ``()``
+    when neither parses, which ranks below every real version."""
+    try:
+        data = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        raw = data.get("version") if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        raw = None
+    for text in (raw, root.name):
+        if isinstance(text, str):
+            parts = text.strip().lstrip("v").split("-")[0].split(".")
+            if parts and all(p.isdigit() for p in parts):
+                return tuple(int(p) for p in parts)
+    return ()
+
+
+def _installed_root(cache_dirs: Sequence[Path], plugin: str, cwd: Path) -> Path | None:
+    """The root Claude Code's install record names for ``plugin`` (``<plugin>@<marketplace>``),
+    or None. A project-scoped install counts only inside its project; among the rest the most
+    recently updated wins. A missing or unreadable record is not an error: the cache is next."""
+    found: list[tuple[str, Path]] = []
+    for cache in cache_dirs:
+        try:
+            data = json.loads((cache.parent / INSTALLED_RECORD).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        plugins = data.get("plugins") if isinstance(data, dict) else None
+        if not isinstance(plugins, dict):
+            continue
+        for key, entries in plugins.items():
+            if not (isinstance(key, str) and key.split("@")[0] == plugin):
+                continue
+            for entry in entries if isinstance(entries, list) else []:
+                if not isinstance(entry, dict) or not isinstance(entry.get("installPath"), str):
+                    continue
+                project = entry.get("projectPath")
+                if isinstance(project, str) and not cwd.is_relative_to(Path(project)):
+                    continue
+                path = Path(entry["installPath"])
+                if path.is_dir():
+                    found.append((str(entry.get("lastUpdated") or ""), path))
+    return max(found, key=lambda f: f[0])[1] if found else None
+
+
 def _cache_candidates(cache_dirs: Sequence[Path], plugin: str) -> list[Path]:
-    """Plugin roots in the cache (``<cache>/<marketplace>/<plugin>/<version>/``), newest first."""
+    """Plugin roots in the cache (``<cache>/<marketplace>/<plugin>/<version>/``), best first:
+    a root that publishes a manifest before one that does not (a leftover stub of an old
+    version keeps only ``plugin.json``), then the highest version, then the newest file."""
     found: list[Path] = []
     for cache in cache_dirs:
         try:
@@ -174,8 +222,15 @@ def _cache_candidates(cache_dirs: Sequence[Path], plugin: str) -> list[Path]:
             ]
         except OSError:
             continue
-    # a manifest's own mtime ranks its root; a root without one ranks by the directory
-    found.sort(key=lambda p: _mtime(p / MANIFEST_RELPATH) or _mtime(p), reverse=True)
+    # never rank by a directory's mtime alone: removing an old version's files touches it
+    found.sort(
+        key=lambda p: (
+            (p / MANIFEST_RELPATH).is_file(),
+            _version_key(p),
+            _mtime(p / MANIFEST_RELPATH) or _mtime(p / ".claude-plugin" / "plugin.json"),
+        ),
+        reverse=True,
+    )
     return found
 
 
@@ -218,6 +273,7 @@ def resolve_manifest(
     root_env: str = "",
     recorded_root_file: Path | None = None,
     cache_dirs: Sequence[Path] | None = None,
+    cwd: Path | None = None,
 ) -> Resolved:
     """Find the plugin root and its manifest; never raises for a bad or missing manifest.
 
@@ -239,6 +295,9 @@ def resolve_manifest(
             return _with_root(recorded, base, "recorded", expected_plugin, warnings)
         warnings.append(f"recorded plugin root {recorded} is not a directory: ignored")
     dirs = list(default_cache_dirs() if cache_dirs is None else cache_dirs)
+    installed = _installed_root(dirs, expected_plugin, Path.cwd() if cwd is None else cwd)
+    if installed is not None:
+        return _with_root(installed, base, "installed", expected_plugin, warnings)
     candidates = _cache_candidates(dirs, expected_plugin)
     if candidates:
         warnings.append(CACHE_STALE_WARNING)

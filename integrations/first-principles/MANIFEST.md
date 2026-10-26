@@ -54,8 +54,9 @@ one means, bumps `manifest_version`; a reader that does not know the version ref
 |---|---|---|
 | 1 | the environment variable named by the descriptor (`FP_PLUGIN_ROOT`) | `env` |
 | 2 | the root file the conductor records, `<state dir>/integration/<plugin>.root` | `recorded` |
-| 3 | the Claude plugin cache, `~/.claude/plugins/cache/*/<plugin>/*/`, newest manifest (else newest directory) first. The cache can hold a stale copy and a session started with `--plugin-dir` uses another root, so this source carries a warning. `AGENT_ROUTER_PLUGIN_CACHE` replaces the cache directories (`os.pathsep`-separated; used by the tests) | `cache` |
-| 4 | the pinned fallback manifest, no root | `fallback` |
+| 3 | the copy Claude Code has installed: `installPath` for `<plugin>@<marketplace>` in `installed_plugins.json` beside each cache directory (a project-scoped install only inside its project; else the most recently updated). This is the copy the Agent tool runs, so it carries no warning | `installed` |
+| 4 | the Claude plugin cache, `~/.claude/plugins/cache/*/<plugin>/*/`, used only when nothing is installed: a root with a manifest first, then the highest version, then the newest file. A directory's own mtime is never used, because removing an old version's files touches it. The cache can hold a stale copy and a session started with `--plugin-dir` uses another root, so this source carries a warning. `AGENT_ROUTER_PLUGIN_CACHE` replaces the cache directories (`os.pathsep`-separated; used by the tests) | `cache` |
+| 5 | the pinned fallback manifest, no root | `fallback` |
 
 A root that has no usable manifest (today's state: the plugin is installed and publishes none)
 gives the fallback manifest **with** that root: `fallback+root`. The root still locates the
