@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-10-25
+
+The first-principles integration reports the plugin copy Claude Code actually runs.
+
 ### Fixed
 
 - The plugin root is now found from Claude Code's install record (`installed_plugins.json`),

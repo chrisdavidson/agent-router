@@ -14,7 +14,7 @@ from claude_agent_sdk import McpSdkServerConfig, SdkMcpTool, create_sdk_mcp_serv
 from agent_router.tools import calc, html_to_markdown, json_query, repo_stats
 
 SERVER_NAME = "agent_router"
-SERVER_VERSION = "0.3.0"
+SERVER_VERSION = "0.3.1"
 _TOOLS = ("calc", "json_query", "html_to_markdown", "repo_stats")
 TOOL_NAMES = [f"mcp__{SERVER_NAME}__{n}" for n in _TOOLS]
 # Served too, but not a catalog target of the packaged catalog (an integration's catalog routes
